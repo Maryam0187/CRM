@@ -1,36 +1,121 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Sales CRM - Customer Relationship Management System
+
+A modern, responsive CRM application built with Next.js and Tailwind CSS to help manage sales processes, customers, leads, and deals efficiently.
+
+## Features
+
+- **Responsive Design**: Fully responsive layout that works on desktop, tablet, and mobile devices
+- **Modern UI**: Clean and intuitive interface with smooth animations and transitions
+- **Dashboard**: Comprehensive sales dashboard with key metrics and analytics
+- **Customer Management**: Track and manage customer information
+- **Lead Tracking**: Monitor and follow up on sales leads
+- **Sales Management**: Track and manage sales records
+- **Reports**: Generate insights and reports on sales performance
+
+## Components
+
+### Navbar
+- Responsive navigation with mobile hamburger menu
+- Logo and branding
+- Main navigation links (Dashboard, Customers, Leads, Reports)
+- User profile dropdown
+
+### Home Dashboard
+- Sales statistics and KPIs
+- Quick action buttons
+- Recent activity feed
+- Top deals overview
+- Tabbed interface for different views
+
+### Footer
+- Company information and branding
+- Quick links to main sections
+- Support and legal links
+- Social media links
+
+## Technology Stack
+
+- **Framework**: Next.js 15.5.2
+- **Styling**: Tailwind CSS 4
+- **Fonts**: Geist Sans and Geist Mono
+- **Icons**: Heroicons (SVG)
+- **Responsive**: Mobile-first design approach
 
 ## Getting Started
 
-First, run the development server:
+1. **Install Dependencies**
+   ```bash
+   npm install
+   ```
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+2. **Run Development Server**
+   ```bash
+   npm run dev
+   ```
+
+3. **Open in Browser**
+   Navigate to [http://localhost:3000](http://localhost:3000) to view the application.
+
+## Project Structure
+
+```
+crm/
+├── app/
+│   ├── globals.css          # Global styles and responsive utilities
+│   ├── layout.js            # Root layout with Navbar and Footer
+│   └── page.js              # Home page
+├── components/
+│   ├── Navbar.js            # Responsive navigation component
+│   ├── Footer.js            # Footer component
+│   └── Home.js              # Dashboard home component
+├── public/                  # Static assets
+└── package.json
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Responsive Design
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+The application is built with a mobile-first approach and includes:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Breakpoints**: 
+  - Mobile: < 768px
+  - Tablet: 768px - 1024px
+  - Desktop: > 1024px
 
-## Learn More
+- **Features**:
+  - Collapsible mobile navigation
+  - Responsive grid layouts
+  - Touch-friendly buttons and interactions
+  - Optimized typography for different screen sizes
 
-To learn more about Next.js, take a look at the following resources:
+## Customization
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Colors
+The application uses a blue color scheme that can be customized by modifying the Tailwind classes in the components.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Content
+Update the sample data in the Home component to reflect your actual CRM data.
 
-## Deploy on Vercel
+### Navigation
+Modify the navigation links in the Navbar component to match your application structure.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Future Enhancements
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [ ] User authentication and authorization
+- [ ] Database integration
+- [ ] Real-time notifications
+- [ ] Advanced reporting and analytics
+- [ ] Email integration
+- [ ] Calendar integration
+- [ ] Mobile app
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+## License
+
+This project is open source and available under the [MIT License](LICENSE).

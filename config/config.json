@@ -1,0 +1,34 @@
+{
+  "development": {
+    "username": "root",
+    "password": "password",
+    "database": "crm_db",
+    "host": "db",
+    "port": 3306,
+    "dialect": "mysql",
+    "logging": false,
+    "define": {
+      "timestamps": true,
+      "underscored": false,
+      "freezeTableName": true
+    }
+  },
+  "test": {
+    "username": "root",
+    "password": "password",
+    "database": "crm_test",
+    "host": "db",
+    "port": 3306,
+    "dialect": "mysql",
+    "logging": false
+  },
+  "production": {
+    "username": "root",
+    "password": "password",
+    "database": "crm_production",
+    "host": "db",
+    "port": 3306,
+    "dialect": "mysql",
+    "logging": false
+  }
+}
