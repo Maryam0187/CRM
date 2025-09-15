@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '../contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+import { isAdmin } from '../lib/auth';
 
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -66,6 +67,14 @@ export default function Navbar() {
               >
                 My Performance
               </Link>
+              {isAuthenticated && isAdmin(user) && (
+                <Link
+                  href="/admin/users"
+                  className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                >
+                  User Management
+                </Link>
+              )}
             </div>
           </div>
 
@@ -191,6 +200,15 @@ export default function Navbar() {
             >
               My Performance
             </Link>
+            {isAuthenticated && isAdmin(user) && (
+              <Link
+                href="/admin/users"
+                className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                User Management
+              </Link>
+            )}
             <div className="border-t border-gray-200 pt-4 pb-3">
               {!isAuthenticated ? (
                 <div className="px-3 mb-3">

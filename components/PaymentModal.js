@@ -24,7 +24,7 @@ export default function PaymentModal({ isVisible, mode = MODE_ENUM.create, saleI
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black" style={{ background: 'rgba(0,0,0,0.5)' }}>
       <div className="w-full max-w-screen-xl bg-white rounded-lg shadow-lg">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">

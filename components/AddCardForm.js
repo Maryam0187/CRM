@@ -1,6 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { 
+  validateCardForm, 
+  formatCardNumber, 
+  formatExpiryDate 
+} from '../lib/validation.js';
 
 export default function AddCardForm({ mode, saleId, onSuccess }) {
   const [formData, setFormData] = useState({
@@ -14,13 +19,32 @@ export default function AddCardForm({ mode, saleId, onSuccess }) {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [validationErrors, setValidationErrors] = useState({});
+
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    
+    // Format input based on field type
+    let formattedValue = value;
+    if (name === 'cardNumber') {
+      formattedValue = formatCardNumber(value);
+    } else if (name === 'expiryDate') {
+      formattedValue = formatExpiryDate(value);
+    }
+    
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: formattedValue
     }));
+
+    // Clear validation error for this field when user starts typing
+    if (validationErrors[name]) {
+      setValidationErrors(prev => ({
+        ...prev,
+        [name]: null
+      }));
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -29,15 +53,22 @@ export default function AddCardForm({ mode, saleId, onSuccess }) {
     setError(null);
 
     try {
-      // Validate required fields
-      if (!formData.cardType || !formData.provider || !formData.customerName || 
-          !formData.cardNumber || !formData.cvv || !formData.expiryDate) {
-        throw new Error('Please fill in all required fields');
-      }
+      // Validate all fields using shared validation
+      const errors = validateCardForm(formData);
 
       if (!saleId) {
         throw new Error('Sale ID is required');
       }
+
+      // If there are validation errors, show them and stop submission
+      if (Object.keys(errors).length > 0) {
+        setValidationErrors(errors);
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Clear any previous validation errors
+      setValidationErrors({});
 
       // Prepare data for API
       const cardData = {
@@ -61,6 +92,11 @@ export default function AddCardForm({ mode, saleId, onSuccess }) {
       const result = await response.json();
 
       if (!result.success) {
+        // Handle validation errors from backend
+        if (result.errors) {
+          setValidationErrors(result.errors);
+          throw new Error('Please fix the validation errors below');
+        }
         throw new Error(result.message || 'Failed to save card details');
       }
 
@@ -135,10 +171,15 @@ export default function AddCardForm({ mode, saleId, onSuccess }) {
             name="customerName"
             value={formData.customerName}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.customerName ? 'border-red-500' : 'border-gray-300'
+            }`}
             placeholder="Type customer name"
             required
           />
+          {validationErrors.customerName && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.customerName}</p>
+          )}
         </div>
 
         {/* Card Number */}
@@ -152,10 +193,16 @@ export default function AddCardForm({ mode, saleId, onSuccess }) {
             name="cardNumber"
             value={formData.cardNumber}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
-            placeholder="Card Number"
+            maxLength="19"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.cardNumber ? 'border-red-500' : 'border-gray-300'
+            }`}
+            placeholder="1234 5678 9012 3456"
             required
           />
+          {validationErrors.cardNumber && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.cardNumber}</p>
+          )}
         </div>
 
         {/* CVV */}
@@ -164,15 +211,21 @@ export default function AddCardForm({ mode, saleId, onSuccess }) {
             CVV
           </label>
           <input
-            type="number"
+            type="text"
             id="cvv"
             name="cvv"
             value={formData.cvv}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
-            placeholder="XXX"
+            maxLength="4"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.cvv ? 'border-red-500' : 'border-gray-300'
+            }`}
+            placeholder="123"
             required
           />
+          {validationErrors.cvv && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.cvv}</p>
+          )}
         </div>
 
         {/* Expiry Date */}
@@ -186,10 +239,16 @@ export default function AddCardForm({ mode, saleId, onSuccess }) {
             name="expiryDate"
             value={formData.expiryDate}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
+            maxLength="5"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.expiryDate ? 'border-red-500' : 'border-gray-300'
+            }`}
             placeholder="MM/YY"
             required
           />
+          {validationErrors.expiryDate && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.expiryDate}</p>
+          )}
         </div>
 
         {/* Notes */}

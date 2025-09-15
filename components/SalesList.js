@@ -3,9 +3,20 @@
 import { useState, useEffect } from 'react';
 import Table from './Table';
 import DateFilter from './DateFilter';
+import { useFilterStorage } from '../lib/useFilterStorage';
 
 export default function SalesList({ onClose }) {
-  const [status, setStatus] = useState('');
+  // Save filter state to localStorage
+  const { filters, updateFilter } = useFilterStorage('salesListFilters', {
+    status: '',
+    dateFilter: 'today'
+  });
+  
+  // Extract filter values
+  const status = filters.status;
+  const dateFilter = filters.dateFilter;
+  
+  // Other state
   const [currentDate, setCurrentDate] = useState(new Date());
   const [salesData, setSalesData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -124,18 +135,18 @@ export default function SalesList({ onClose }) {
   };
 
   const handleStatusChange = (e) => {
-    setStatus(e.target.value);
+    updateFilter('status', e.target.value);
     setCurrentPage(1); // Reset to first page when filtering
   };
 
   const clearStatus = () => {
-    setStatus('');
+    updateFilter('status', '');
     setCurrentPage(1);
   };
 
   const handleFilterChange = (filterValue) => {
     console.log('Date filter changed:', filterValue);
-    // You can implement date filtering logic here
+    updateFilter('dateFilter', filterValue);
     setCurrentPage(1);
   };
 
