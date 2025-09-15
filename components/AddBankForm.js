@@ -1,6 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { 
+  validateBankForm, 
+  formatNumericOnly, 
+  formatRoutingNumber 
+} from '../lib/validation.js';
 
 export default function AddBankForm({ mode, saleId, onSuccess }) {
   const [formData, setFormData] = useState({
@@ -16,13 +21,32 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [validationErrors, setValidationErrors] = useState({});
+
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    
+    // Format input based on field type
+    let formattedValue = value;
+    if (name === 'accountNumber' || name === 'checkNumber') {
+      formattedValue = formatNumericOnly(value);
+    } else if (name === 'routingNumber') {
+      formattedValue = formatRoutingNumber(value);
+    }
+    
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: formattedValue
     }));
+
+    // Clear validation error for this field when user starts typing
+    if (validationErrors[name]) {
+      setValidationErrors(prev => ({
+        ...prev,
+        [name]: null
+      }));
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -31,16 +55,22 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
     setError(null);
 
     try {
-      // Validate required fields
-      if (!formData.bankName || !formData.accountHolder || !formData.accountNumber || 
-          !formData.routingNumber || !formData.checkNumber || !formData.driverLicense || 
-          !formData.nameOnLicense || !formData.stateId) {
-        throw new Error('Please fill in all required fields');
-      }
+      // Validate all fields using shared validation
+      const errors = validateBankForm(formData);
 
       if (!saleId) {
         throw new Error('Sale ID is required');
       }
+
+      // If there are validation errors, show them and stop submission
+      if (Object.keys(errors).length > 0) {
+        setValidationErrors(errors);
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Clear any previous validation errors
+      setValidationErrors({});
 
       // Prepare data for API
       const bankData = {
@@ -66,6 +96,11 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
       const result = await response.json();
 
       if (!result.success) {
+        // Handle validation errors from backend
+        if (result.errors) {
+          setValidationErrors(result.errors);
+          throw new Error('Please fix the validation errors below');
+        }
         throw new Error(result.message || 'Failed to save bank details');
       }
 
@@ -98,10 +133,15 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
             name="bankName"
             value={formData.bankName}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.bankName ? 'border-red-500' : 'border-gray-300'
+            }`}
             placeholder="Bank Name"
             required
           />
+          {validationErrors.bankName && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.bankName}</p>
+          )}
         </div>
 
         {/* Account Holder */}
@@ -115,10 +155,15 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
             name="accountHolder"
             value={formData.accountHolder}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.accountHolder ? 'border-red-500' : 'border-gray-300'
+            }`}
             placeholder="Account Holder"
             required
           />
+          {validationErrors.accountHolder && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.accountHolder}</p>
+          )}
         </div>
 
         {/* Account Number */}
@@ -132,10 +177,15 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
             name="accountNumber"
             value={formData.accountNumber}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
-            placeholder="Account Number"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.accountNumber ? 'border-red-500' : 'border-gray-300'
+            }`}
+            placeholder="Account Number (8-17 digits)"
             required
           />
+          {validationErrors.accountNumber && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.accountNumber}</p>
+          )}
         </div>
 
         {/* Routing Number */}
@@ -144,15 +194,21 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
             Routing #
           </label>
           <input
-            type="number"
+            type="text"
             id="routingNumber"
             name="routingNumber"
             value={formData.routingNumber}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
-            placeholder="Routing Number"
+            maxLength="9"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.routingNumber ? 'border-red-500' : 'border-gray-300'
+            }`}
+            placeholder="Routing Number (9 digits)"
             required
           />
+          {validationErrors.routingNumber && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.routingNumber}</p>
+          )}
         </div>
 
         {/* Check Number */}
@@ -166,10 +222,15 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
             name="checkNumber"
             value={formData.checkNumber}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
-            placeholder="Check Number"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.checkNumber ? 'border-red-500' : 'border-gray-300'
+            }`}
+            placeholder="Check Number (3-10 digits)"
             required
           />
+          {validationErrors.checkNumber && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.checkNumber}</p>
+          )}
         </div>
 
         {/* Driver License */}
@@ -183,10 +244,15 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
             name="driverLicense"
             value={formData.driverLicense}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
-            placeholder="Driver License"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.driverLicense ? 'border-red-500' : 'border-gray-300'
+            }`}
+            placeholder="Driver License (5-20 characters)"
             required
           />
+          {validationErrors.driverLicense && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.driverLicense}</p>
+          )}
         </div>
 
         {/* Name on License */}
@@ -200,10 +266,15 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
             name="nameOnLicense"
             value={formData.nameOnLicense}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.nameOnLicense ? 'border-red-500' : 'border-gray-300'
+            }`}
             placeholder="Name on License"
             required
           />
+          {validationErrors.nameOnLicense && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.nameOnLicense}</p>
+          )}
         </div>
 
         {/* State ID */}
@@ -217,10 +288,15 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
             name="stateId"
             value={formData.stateId}
             onChange={handleInputChange}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5"
+            className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-600 focus:border-blue-600 block w-full p-2.5 ${
+              validationErrors.stateId ? 'border-red-500' : 'border-gray-300'
+            }`}
             placeholder="State ID"
             required
           />
+          {validationErrors.stateId && (
+            <p className="mt-1 text-sm text-red-600">{validationErrors.stateId}</p>
+          )}
         </div>
 
         {/* Notes */}

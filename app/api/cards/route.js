@@ -1,4 +1,8 @@
 import { Card } from '../../../models/index.js';
+import { 
+  validateCardForm, 
+  cleanCardData 
+} from '../../../lib/validation.js';
 
 export async function POST(request) {
   try {
@@ -13,7 +17,21 @@ export async function POST(request) {
       );
     }
 
-    const card = await Card.create(cardData);
+    // Validate all fields using shared validation
+    const errors = validateCardForm(cardData);
+
+    // If there are validation errors, return them
+    if (Object.keys(errors).length > 0) {
+      return Response.json(
+        { success: false, message: 'Validation failed', errors },
+        { status: 400 }
+      );
+    }
+
+    // Clean card data using shared function
+    const cleanedCardData = cleanCardData(cardData);
+
+    const card = await Card.create(cleanedCardData);
     
     return Response.json({
       success: true,

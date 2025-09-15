@@ -1,4 +1,8 @@
 import { Bank } from '../../../models/index.js';
+import { 
+  validateBankForm, 
+  cleanBankData 
+} from '../../../lib/validation.js';
 
 export async function POST(request) {
   try {
@@ -14,7 +18,21 @@ export async function POST(request) {
       );
     }
 
-    const bank = await Bank.create(bankData);
+    // Validate all fields using shared validation
+    const errors = validateBankForm(bankData);
+
+    // If there are validation errors, return them
+    if (Object.keys(errors).length > 0) {
+      return Response.json(
+        { success: false, message: 'Validation failed', errors },
+        { status: 400 }
+      );
+    }
+
+    // Clean bank data using shared function
+    const cleanedBankData = cleanBankData(bankData);
+
+    const bank = await Bank.create(cleanedBankData);
     
     return Response.json({
       success: true,
