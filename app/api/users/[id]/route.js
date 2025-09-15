@@ -18,7 +18,21 @@ export async function GET(request, { params }) {
     const userId = params.id;
 
     const user = await User.findByPk(userId, {
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'created_at', 'updated_at']
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'created_at', 'updated_at'],
+      include: [
+        {
+          model: require('../../../../models').SupervisorAgent,
+          as: 'supervisorRelationships',
+          include: [
+            {
+              model: User,
+              as: 'supervisor',
+              attributes: ['id', 'firstName', 'lastName']
+            }
+          ],
+          required: false
+        }
+      ]
     });
 
     if (!user) {
@@ -29,6 +43,10 @@ export async function GET(request, { params }) {
     }
 
     // Format user data
+    const supervisorRelationship = user.supervisorRelationships && user.supervisorRelationships.length > 0 
+      ? user.supervisorRelationships[0] 
+      : null;
+    
     const formattedUser = {
       id: user.id,
       email: user.email,
@@ -37,6 +55,11 @@ export async function GET(request, { params }) {
       role: user.role,
       role_display: getRoleDisplayName(user.role),
       is_active: user.isActive,
+      cnic: user.cnic,
+      phone: user.phone,
+      address: user.address,
+      superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
+      supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
       created_at: user.created_at,
       updated_at: user.updated_at
     };
@@ -73,7 +96,11 @@ export async function PUT(request, { params }) {
       last_name,
       email,
       role,
-      is_active
+      is_active,
+      phone,
+      cnic,
+      address,
+      superiorId
     } = await request.json();
 
     // Find user
@@ -129,8 +156,29 @@ export async function PUT(request, { params }) {
     if (email) updateData.email = email.toLowerCase();
     if (role) updateData.role = role;
     if (typeof is_active === 'boolean') updateData.isActive = is_active;
+    if (phone !== undefined) updateData.phone = phone;
+    if (cnic !== undefined) updateData.cnic = cnic;
+    if (address !== undefined) updateData.address = address;
 
     await user.update(updateData);
+
+    // Handle supervisor relationship for agents
+    if (role === 'agent' && superiorId !== undefined) {
+      const { SupervisorAgent } = require('../../../../models');
+      
+      // Remove existing supervisor relationships
+      await SupervisorAgent.destroy({
+        where: { agentId: userId }
+      });
+      
+      // Add new supervisor relationship if superiorId is provided
+      if (superiorId) {
+        await SupervisorAgent.create({
+          supervisorId: superiorId,
+          agentId: userId
+        });
+      }
+    }
 
     // Return updated user data
     const userData = {
@@ -141,6 +189,9 @@ export async function PUT(request, { params }) {
       role: user.role,
       role_display: getRoleDisplayName(user.role),
       is_active: user.isActive,
+      cnic: user.cnic,
+      phone: user.phone,
+      address: user.address,
       created_at: user.created_at,
       updated_at: user.updated_at
     };

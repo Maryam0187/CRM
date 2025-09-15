@@ -5,6 +5,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import ProtectedRoute from '../../../components/ProtectedRoute';
 import AdminRoute from '../../../components/AdminRoute';
 import UserForm from '../../../components/UserForm';
+import PasswordModal from '../../../components/PasswordModal';
 
 export default function AdminUsersPage() {
   const { user } = useAuth();
@@ -13,6 +14,9 @@ export default function AdminUsersPage() {
   const [error, setError] = useState('');
   const [showUserForm, setShowUserForm] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordModalUser, setPasswordModalUser] = useState(null);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -129,6 +133,56 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleResetPassword = (userId, firstName, lastName) => {
+    setPasswordModalUser({
+      id: userId,
+      name: `${firstName} ${lastName}`
+    });
+    setShowPasswordModal(true);
+  };
+
+  const handlePasswordModalClose = () => {
+    setShowPasswordModal(false);
+    setPasswordModalUser(null);
+    setIsResettingPassword(false);
+  };
+
+  const handlePasswordConfirm = async (newPassword) => {
+    if (!user || !passwordModalUser) {
+      setError('User not authenticated');
+      return;
+    }
+
+    setIsResettingPassword(true);
+    setError('');
+
+    try {
+      const response = await fetch(`/api/users/${passwordModalUser.id}/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.id.toString(),
+          'x-user-role': user.role
+        },
+        body: JSON.stringify({ password: newPassword })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        alert('Password reset successfully!');
+        handlePasswordModalClose();
+      } else {
+        setError(data.error || 'Failed to reset password');
+      }
+    } catch (err) {
+      setError('Failed to reset password');
+      console.error('Error resetting password:', err);
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -144,7 +198,7 @@ export default function AdminUsersPage() {
     <ProtectedRoute>
       <AdminRoute>
       <div className="min-h-screen bg-gray-50 py-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-[100rem] mx-auto px-4 sm:px-6 lg:px-8">
           {/* Header */}
           <div className="mb-8">
             <div className="flex justify-between items-center">
@@ -184,6 +238,9 @@ export default function AdminUsersPage() {
                       Role
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Supervisor
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -197,7 +254,7 @@ export default function AdminUsersPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {users.length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="px-6 py-4 text-center text-gray-500">
+                      <td colSpan="7" className="px-6 py-4 text-center text-gray-500">
                         No users found
                       </td>
                     </tr>
@@ -234,6 +291,9 @@ export default function AdminUsersPage() {
                             {userItem.role_display}
                           </span>
                         </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {userItem.supervisor_name || '-'}
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                             userItem.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
@@ -251,6 +311,12 @@ export default function AdminUsersPage() {
                               className="text-blue-600 hover:text-blue-900"
                             >
                               Edit
+                            </button>
+                            <button
+                              onClick={() => handleResetPassword(userItem.id, userItem.first_name, userItem.last_name)}
+                              className="text-orange-600 hover:text-orange-900"
+                            >
+                              Reset Password
                             </button>
                             <button
                               onClick={() => handleToggleUserStatus(userItem.id, userItem.is_active)}
@@ -282,9 +348,21 @@ export default function AdminUsersPage() {
         {/* User Form Modal */}
         {showUserForm && (
           <UserForm
+            key={editingUser ? `edit-${editingUser.id}` : 'create-new'}
             user={editingUser}
             onClose={handleUserFormClose}
             onSuccess={handleUserFormClose}
+          />
+        )}
+
+        {/* Password Reset Modal */}
+        {showPasswordModal && passwordModalUser && (
+          <PasswordModal
+            isOpen={showPasswordModal}
+            onClose={handlePasswordModalClose}
+            onConfirm={handlePasswordConfirm}
+            userName={passwordModalUser.name}
+            isLoading={isResettingPassword}
           />
         )}
       </div>

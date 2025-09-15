@@ -37,6 +37,26 @@ module.exports = (sequelize) => {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
       field: 'is_active'
+    },
+    cnic: {
+      type: DataTypes.STRING(15),
+      allowNull: true,
+      unique: true,
+      validate: {
+        len: [13, 13],
+        isNumeric: true
+      }
+    },
+    phone: {
+      type: DataTypes.STRING(15),
+      allowNull: true,
+      validate: {
+        isNumeric: true
+      }
+    },
+    address: {
+      type: DataTypes.TEXT,
+      allowNull: true
     }
   }, {
     tableName: 'users',
