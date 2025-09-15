@@ -16,22 +16,47 @@ export async function GET(request) {
     }
 
     const users = await User.findAll({
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'created_at', 'updated_at'],
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'created_at', 'updated_at'],
+      include: [
+        {
+          model: require('../../../models').SupervisorAgent,
+          as: 'supervisorRelationships',
+          include: [
+            {
+              model: User,
+              as: 'supervisor',
+              attributes: ['id', 'firstName', 'lastName']
+            }
+          ],
+          required: false
+        }
+      ],
       order: [['created_at', 'DESC']]
     });
 
     // Format user data
-    const formattedUsers = users.map(user => ({
-      id: user.id,
-      email: user.email,
-      first_name: user.firstName,
-      last_name: user.lastName,
-      role: user.role,
-      role_display: getRoleDisplayName(user.role),
-      is_active: user.isActive,
-      created_at: user.created_at,
-      updated_at: user.updated_at
-    }));
+    const formattedUsers = users.map(user => {
+      const supervisorRelationship = user.supervisorRelationships && user.supervisorRelationships.length > 0 
+        ? user.supervisorRelationships[0] 
+        : null;
+      
+      return {
+        id: user.id,
+        email: user.email,
+        first_name: user.firstName,
+        last_name: user.lastName,
+        role: user.role,
+        role_display: getRoleDisplayName(user.role),
+        is_active: user.isActive,
+        cnic: user.cnic,
+        phone: user.phone,
+        address: user.address,
+        superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
+        supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
+        created_at: user.created_at,
+        updated_at: user.updated_at
+      };
+    });
 
     return NextResponse.json({
       success: true,
@@ -116,7 +141,10 @@ export async function POST(request) {
       email: email.toLowerCase(),
       password: password, // In production, hash this password
       role: role,
-      isActive: true
+      isActive: true,
+      cnic: cnic || null,
+      phone: phone || null,
+      address: address || null
     });
 
     // If it's a lead agent and superiorId is provided, create supervisor relationship
@@ -137,6 +165,9 @@ export async function POST(request) {
       role: newUser.role,
       role_display: getRoleDisplayName(newUser.role),
       is_active: newUser.isActive,
+      cnic: newUser.cnic,
+      phone: newUser.phone,
+      address: newUser.address,
       created_at: newUser.created_at
     };
 
