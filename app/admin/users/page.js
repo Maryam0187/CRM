@@ -2,21 +2,20 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
+import { useToast } from '../../../contexts/ToastContext';
 import ProtectedRoute from '../../../components/ProtectedRoute';
 import AdminRoute from '../../../components/AdminRoute';
 import UserForm from '../../../components/UserForm';
-import PasswordModal from '../../../components/PasswordModal';
+
 
 export default function AdminUsersPage() {
   const { user } = useAuth();
+  const { showSuccess, showError } = useToast();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showUserForm, setShowUserForm] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [passwordModalUser, setPasswordModalUser] = useState(null);
-  const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -101,87 +100,7 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleDeleteUser = async (userId) => {
-    if (!user) {
-      setError('User not authenticated');
-      return;
-    }
 
-    if (!confirm('Are you sure you want to deactivate this user?')) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/users/${userId}`, {
-        method: 'DELETE',
-        headers: {
-          'x-user-id': user.id.toString(),
-          'x-user-role': user.role
-        }
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        fetchUsers(); // Refresh the users list
-      } else {
-        setError(data.error || 'Failed to deactivate user');
-      }
-    } catch (err) {
-      setError('Failed to deactivate user');
-      console.error('Error deactivating user:', err);
-    }
-  };
-
-  const handleResetPassword = (userId, firstName, lastName) => {
-    setPasswordModalUser({
-      id: userId,
-      name: `${firstName} ${lastName}`
-    });
-    setShowPasswordModal(true);
-  };
-
-  const handlePasswordModalClose = () => {
-    setShowPasswordModal(false);
-    setPasswordModalUser(null);
-    setIsResettingPassword(false);
-  };
-
-  const handlePasswordConfirm = async (newPassword) => {
-    if (!user || !passwordModalUser) {
-      setError('User not authenticated');
-      return;
-    }
-
-    setIsResettingPassword(true);
-    setError('');
-
-    try {
-      const response = await fetch(`/api/users/${passwordModalUser.id}/reset-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': user.id.toString(),
-          'x-user-role': user.role
-        },
-        body: JSON.stringify({ password: newPassword })
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        alert('Password reset successfully!');
-        handlePasswordModalClose();
-      } else {
-        setError(data.error || 'Failed to reset password');
-      }
-    } catch (err) {
-      setError('Failed to reset password');
-      console.error('Error resetting password:', err);
-    } finally {
-      setIsResettingPassword(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -313,12 +232,6 @@ export default function AdminUsersPage() {
                               Edit
                             </button>
                             <button
-                              onClick={() => handleResetPassword(userItem.id, userItem.first_name, userItem.last_name)}
-                              className="text-orange-600 hover:text-orange-900"
-                            >
-                              Reset Password
-                            </button>
-                            <button
                               onClick={() => handleToggleUserStatus(userItem.id, userItem.is_active)}
                               className={`${
                                 userItem.is_active ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'
@@ -326,14 +239,6 @@ export default function AdminUsersPage() {
                             >
                               {userItem.is_active ? 'Deactivate' : 'Activate'}
                             </button>
-                            {user && userItem.id !== user.id && (
-                              <button
-                                onClick={() => handleDeleteUser(userItem.id)}
-                                className="text-red-600 hover:text-red-900"
-                              >
-                                Delete
-                              </button>
-                            )}
                           </div>
                         </td>
                       </tr>
@@ -355,16 +260,6 @@ export default function AdminUsersPage() {
           />
         )}
 
-        {/* Password Reset Modal */}
-        {showPasswordModal && passwordModalUser && (
-          <PasswordModal
-            isOpen={showPasswordModal}
-            onClose={handlePasswordModalClose}
-            onConfirm={handlePasswordConfirm}
-            userName={passwordModalUser.name}
-            isLoading={isResettingPassword}
-          />
-        )}
       </div>
       </AdminRoute>
     </ProtectedRoute>
