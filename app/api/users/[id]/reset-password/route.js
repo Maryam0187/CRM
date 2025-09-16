@@ -34,9 +34,9 @@ export async function POST(request, { params }) {
       );
     }
 
-    // Update user password
+    // Update user password (will be automatically hashed by User model hooks)
     await user.update({
-      password: password.trim() // In production, hash this password
+      password: password.trim()
     });
 
     return NextResponse.json({

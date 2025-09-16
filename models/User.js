@@ -1,4 +1,5 @@
 const { DataTypes } = require('sequelize');
+const bcrypt = require('bcrypt');
 
 module.exports = (sequelize) => {
   const User = sequelize.define('User', {
@@ -62,8 +63,27 @@ module.exports = (sequelize) => {
     tableName: 'users',
     timestamps: true,
     createdAt: 'created_at',
-    updatedAt: 'updated_at'
+    updatedAt: 'updated_at',
+    hooks: {
+      beforeCreate: async (user) => {
+        if (user.password) {
+          const saltRounds = 12;
+          user.password = await bcrypt.hash(user.password, saltRounds);
+        }
+      },
+      beforeUpdate: async (user) => {
+        if (user.changed('password') && user.password) {
+          const saltRounds = 12;
+          user.password = await bcrypt.hash(user.password, saltRounds);
+        }
+      }
+    }
   });
+
+  // Add instance method for password comparison
+  User.prototype.comparePassword = async function(candidatePassword) {
+    return await bcrypt.compare(candidatePassword, this.password);
+  };
 
   User.associate = (models) => {
     // User has many customers
