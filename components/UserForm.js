@@ -2,10 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import PasswordModal from './PasswordModal';
 
 export default function UserForm({ user, onClose, onSuccess }) {
   const { user: currentUser } = useAuth();
+  const { showSuccess, showError } = useToast();
   console.log('UserForm component rendered with user:', user);
   const [formData, setFormData] = useState({
     first_name: '',
@@ -307,14 +309,14 @@ export default function UserForm({ user, onClose, onSuccess }) {
       const data = await response.json();
       
       if (data.success) {
-        alert('Password reset successfully!');
+        showSuccess('Password reset successfully!');
         handlePasswordModalClose();
         setError(''); // Clear any existing errors
       } else {
-        setError(data.error || 'Failed to reset password');
+        showError(data.error || 'Failed to reset password');
       }
     } catch (err) {
-      setError('Failed to reset password');
+      showError('Failed to reset password');
       console.error('Error resetting password:', err);
     } finally {
       setIsResettingPassword(false);
