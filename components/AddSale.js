@@ -4,10 +4,12 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DateModal from './DateModal';
 import ReceiverModal from './ReceiverModal';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function AddSale() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user } = useAuth();
   
   // Check if we're in edit mode
   const editId = searchParams.get('id');
@@ -369,7 +371,7 @@ export default function AddSale() {
       // Prepare sale data
       const saleData = {
         customerId: customerId,
-        agentId: 2, // You might want to get this from auth context
+        agentId: user?.id, // Get agentId from the logged in user
         status: status,
         pinCode: sanitizeValue(saleForm.pin_code),
         pinCodeStatus: sanitizeEnumValue(saleForm.pin_code_status),

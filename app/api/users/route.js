@@ -139,7 +139,7 @@ export async function POST(request) {
       firstName: first_name,
       lastName: last_name,
       email: email.toLowerCase(),
-      password: password, // In production, hash this password
+      password: password, // Will be automatically hashed by User model hooks
       role: role,
       isActive: true,
       cnic: cnic || null,

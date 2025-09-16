@@ -35,9 +35,9 @@ export async function POST(request) {
       );
     }
 
-    // For now, we'll do a simple password comparison
-    // In production, you should use bcrypt or similar for password hashing
-    if (userDataValues.password !== password) {
+    // Compare password using bcrypt
+    const isPasswordValid = await user.comparePassword(password);
+    if (!isPasswordValid) {
       return NextResponse.json(
         { error: 'Invalid email or password' },
         { status: 401 }

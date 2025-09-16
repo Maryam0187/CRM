@@ -3,20 +3,20 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up (queryInterface, Sequelize) {
-    /**
-     * Add altering commands here.
-     *
-     * Example:
-     * await queryInterface.createTable('users', { id: Sequelize.INTEGER });
-     */
+    // Update the role ENUM to include all required roles
+    await queryInterface.changeColumn('users', 'role', {
+      type: Sequelize.ENUM('admin', 'supervisor', 'agent', 'processor', 'verification'),
+      defaultValue: 'agent',
+      allowNull: false
+    });
   },
 
   async down (queryInterface, Sequelize) {
-    /**
-     * Add reverting commands here.
-     *
-     * Example:
-     * await queryInterface.dropTable('users');
-     */
+    // Revert to original roles
+    await queryInterface.changeColumn('users', 'role', {
+      type: Sequelize.ENUM('admin', 'agent', 'manager'),
+      defaultValue: 'agent',
+      allowNull: false
+    });
   }
 };
