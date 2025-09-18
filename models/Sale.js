@@ -1,4 +1,5 @@
 const { DataTypes } = require('sequelize');
+const { encryptSensitiveData, decryptSensitiveData, isEncrypted, getDataBasedOnRole } = require('../lib/sensitive-data');
 
 module.exports = (sequelize) => {
   const Sale = sequelize.define('Sale', {
@@ -47,7 +48,7 @@ module.exports = (sequelize) => {
       field: 'ssn_name'
     },
     ssnNumber: {
-      type: DataTypes.STRING(20),
+      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
       allowNull: true,
       field: 'ssn_number'
     },
@@ -81,7 +82,7 @@ module.exports = (sequelize) => {
       field: 'account_holder'
     },
     accountNumber: {
-      type: DataTypes.STRING(50),
+      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
       allowNull: true,
       field: 'account_number'
     },
@@ -91,7 +92,7 @@ module.exports = (sequelize) => {
       field: 'security_question'
     },
     securityAnswer: {
-      type: DataTypes.TEXT,
+      type: DataTypes.TEXT, // Already TEXT - will accommodate encrypted data
       allowNull: true,
       field: 'security_answer'
     },
@@ -183,8 +184,80 @@ module.exports = (sequelize) => {
     tableName: 'sales',
     timestamps: true,
     createdAt: 'created_at',
-    updatedAt: 'updated_at'
+    updatedAt: 'updated_at',
+    hooks: {
+      beforeCreate: async (sale) => {
+        // Encrypt sensitive fields before saving
+        if (sale.ssnNumber) {
+          sale.ssnNumber = encryptSensitiveData(sale.ssnNumber);
+        }
+        if (sale.accountNumber) {
+          sale.accountNumber = encryptSensitiveData(sale.accountNumber);
+        }
+        if (sale.securityAnswer) {
+          sale.securityAnswer = encryptSensitiveData(sale.securityAnswer);
+        }
+      },
+      beforeUpdate: async (sale) => {
+        // Encrypt sensitive fields if they have changed
+        if (sale.changed('ssnNumber') && sale.ssnNumber) {
+          sale.ssnNumber = encryptSensitiveData(sale.ssnNumber);
+        }
+        if (sale.changed('accountNumber') && sale.accountNumber) {
+          sale.accountNumber = encryptSensitiveData(sale.accountNumber);
+        }
+        if (sale.changed('securityAnswer') && sale.securityAnswer) {
+          sale.securityAnswer = encryptSensitiveData(sale.securityAnswer);
+        }
+      },
+      afterFind: async (result, options) => {
+        // Decrypt and apply role-based masking after retrieving from database
+        if (!result) return;
+        
+        const sales = Array.isArray(result) ? result : [result];
+        
+        // Get user role from options (passed from query)
+        const userRole = options?.userRole || 'agent'; // Default to agent if no role specified
+        
+        for (const sale of sales) {
+          if (sale && sale.dataValues) {
+            const data = sale.dataValues;
+            
+            // Decrypt all fields and return full data (no masking)
+            if (data.ssnNumber && isEncrypted(data.ssnNumber)) {
+              data.ssnNumber = decryptSensitiveData(data.ssnNumber);
+            }
+            
+            if (data.accountNumber && isEncrypted(data.accountNumber)) {
+              data.accountNumber = decryptSensitiveData(data.accountNumber);
+            }
+            
+            if (data.securityAnswer && isEncrypted(data.securityAnswer)) {
+              data.securityAnswer = decryptSensitiveData(data.securityAnswer);
+            }
+          }
+        }
+      }
+    }
   });
+
+  // Add instance methods for data access (returns full decrypted data)
+  Sale.prototype.getDataForRole = function(userRole) {
+    const data = { ...this.dataValues };
+    
+    // Return full decrypted data (no masking for any user)
+    if (data.ssnNumber && isEncrypted(data.ssnNumber)) {
+      data.ssnNumber = decryptSensitiveData(data.ssnNumber);
+    }
+    if (data.accountNumber && isEncrypted(data.accountNumber)) {
+      data.accountNumber = decryptSensitiveData(data.accountNumber);
+    }
+    if (data.securityAnswer && isEncrypted(data.securityAnswer)) {
+      data.securityAnswer = decryptSensitiveData(data.securityAnswer);
+    }
+    
+    return data;
+  };
 
   Sale.associate = (models) => {
     // Sale belongs to a customer

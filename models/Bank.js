@@ -1,4 +1,5 @@
 const { DataTypes } = require('sequelize');
+const { encryptSensitiveData, decryptSensitiveData, isEncrypted, getDataBasedOnRole } = require('../lib/sensitive-data');
 
 module.exports = (sequelize) => {
   const Bank = sequelize.define('Bank', {
@@ -36,22 +37,22 @@ module.exports = (sequelize) => {
       field: 'account_holder'
     },
     accountNumber: {
-      type: DataTypes.STRING(50),
+      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
       allowNull: false,
       field: 'account_number'
     },
     routingNumber: {
-      type: DataTypes.STRING(20),
+      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
       allowNull: false,
       field: 'routing_number'
     },
     checkNumber: {
-      type: DataTypes.STRING(20),
+      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
       allowNull: false,
       field: 'check_number'
     },
     driverLicense: {
-      type: DataTypes.STRING(50),
+      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
       allowNull: false,
       field: 'driver_license'
     },
@@ -61,7 +62,7 @@ module.exports = (sequelize) => {
       field: 'name_on_license'
     },
     stateId: {
-      type: DataTypes.STRING(50),
+      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
       allowNull: false,
       field: 'state_id'
     },
@@ -77,8 +78,77 @@ module.exports = (sequelize) => {
     tableName: 'banks',
     timestamps: true,
     createdAt: 'created_at',
-    updatedAt: 'updated_at'
+    updatedAt: 'updated_at',
+    hooks: {
+      beforeCreate: async (bank) => {
+        // Encrypt sensitive fields before saving
+        if (bank.accountNumber) {
+          bank.accountNumber = encryptSensitiveData(bank.accountNumber);
+        }
+        if (bank.routingNumber) {
+          bank.routingNumber = encryptSensitiveData(bank.routingNumber);
+        }
+        if (bank.checkNumber) {
+          bank.checkNumber = encryptSensitiveData(bank.checkNumber);
+        }
+        if (bank.driverLicense) {
+          bank.driverLicense = encryptSensitiveData(bank.driverLicense);
+        }
+        if (bank.stateId) {
+          bank.stateId = encryptSensitiveData(bank.stateId);
+        }
+      },
+      beforeUpdate: async (bank) => {
+        // Encrypt sensitive fields if they have changed
+        if (bank.changed('accountNumber') && bank.accountNumber) {
+          bank.accountNumber = encryptSensitiveData(bank.accountNumber);
+        }
+        if (bank.changed('routingNumber') && bank.routingNumber) {
+          bank.routingNumber = encryptSensitiveData(bank.routingNumber);
+        }
+        if (bank.changed('checkNumber') && bank.checkNumber) {
+          bank.checkNumber = encryptSensitiveData(bank.checkNumber);
+        }
+        if (bank.changed('driverLicense') && bank.driverLicense) {
+          bank.driverLicense = encryptSensitiveData(bank.driverLicense);
+        }
+        if (bank.changed('stateId') && bank.stateId) {
+          bank.stateId = encryptSensitiveData(bank.stateId);
+        }
+      },
+      // Note: We removed the afterFind hook to avoid double processing
+      // Role-based access control is now handled manually in the API routes
+    }
   });
+
+  // Add instance methods for role-based data access
+  Bank.prototype.getDataForRole = function(userRole) {
+    const data = { ...this.dataValues };
+    
+    // First decrypt the data, then apply role-based masking
+    if (data.accountNumber && isEncrypted(data.accountNumber)) {
+      const decrypted = decryptSensitiveData(data.accountNumber);
+      data.accountNumber = getDataBasedOnRole(decrypted, userRole, 'account');
+    }
+    if (data.routingNumber && isEncrypted(data.routingNumber)) {
+      const decrypted = decryptSensitiveData(data.routingNumber);
+      data.routingNumber = getDataBasedOnRole(decrypted, userRole, 'routing');
+    }
+    if (data.checkNumber && isEncrypted(data.checkNumber)) {
+      const decrypted = decryptSensitiveData(data.checkNumber);
+      data.checkNumber = getDataBasedOnRole(decrypted, userRole, 'check');
+    }
+    if (data.driverLicense && isEncrypted(data.driverLicense)) {
+      const decrypted = decryptSensitiveData(data.driverLicense);
+      data.driverLicense = getDataBasedOnRole(decrypted, userRole, 'license');
+    }
+    if (data.stateId && isEncrypted(data.stateId)) {
+      const decrypted = decryptSensitiveData(data.stateId);
+      data.stateId = getDataBasedOnRole(decrypted, userRole, 'state_id');
+    }
+    
+    return data;
+  };
 
   Bank.associate = (models) => {
     // Bank belongs to a sale

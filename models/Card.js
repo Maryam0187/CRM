@@ -1,4 +1,5 @@
 const { DataTypes } = require('sequelize');
+const { encryptSensitiveData, decryptSensitiveData, isEncrypted, getDataBasedOnRole } = require('../lib/sensitive-data');
 
 module.exports = (sequelize) => {
   const Card = sequelize.define('Card', {
@@ -40,16 +41,16 @@ module.exports = (sequelize) => {
       field: 'customer_name'
     },
     cardNumber: {
-      type: DataTypes.STRING(20),
+      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
       allowNull: false,
       field: 'card_number'
     },
     cvv: {
-      type: DataTypes.STRING(4),
+      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
       allowNull: false
     },
     expiryDate: {
-      type: DataTypes.STRING(7),
+      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
       allowNull: false,
       field: 'expiry_date'
     },
@@ -65,8 +66,57 @@ module.exports = (sequelize) => {
     tableName: 'cards',
     timestamps: true,
     createdAt: 'created_at',
-    updatedAt: 'updated_at'
+    updatedAt: 'updated_at',
+    hooks: {
+      beforeCreate: async (card) => {
+        // Encrypt sensitive fields before saving
+        if (card.cardNumber) {
+          card.cardNumber = encryptSensitiveData(card.cardNumber);
+        }
+        if (card.cvv) {
+          card.cvv = encryptSensitiveData(card.cvv);
+        }
+        if (card.expiryDate) {
+          card.expiryDate = encryptSensitiveData(card.expiryDate);
+        }
+      },
+      beforeUpdate: async (card) => {
+        // Encrypt sensitive fields if they have changed
+        if (card.changed('cardNumber') && card.cardNumber) {
+          card.cardNumber = encryptSensitiveData(card.cardNumber);
+        }
+        if (card.changed('cvv') && card.cvv) {
+          card.cvv = encryptSensitiveData(card.cvv);
+        }
+        if (card.changed('expiryDate') && card.expiryDate) {
+          card.expiryDate = encryptSensitiveData(card.expiryDate);
+        }
+      },
+      // Note: We removed the afterFind hook to avoid double processing
+      // Role-based access control is now handled manually in the API routes
+    }
   });
+
+  // Add instance methods for role-based data access
+  Card.prototype.getDataForRole = function(userRole) {
+    const data = { ...this.dataValues };
+    
+    // First decrypt the data, then apply role-based masking
+    if (data.cardNumber && isEncrypted(data.cardNumber)) {
+      const decrypted = decryptSensitiveData(data.cardNumber);
+      data.cardNumber = getDataBasedOnRole(decrypted, userRole, 'card');
+    }
+    if (data.cvv && isEncrypted(data.cvv)) {
+      const decrypted = decryptSensitiveData(data.cvv);
+      data.cvv = getDataBasedOnRole(decrypted, userRole, 'cvv');
+    }
+    if (data.expiryDate && isEncrypted(data.expiryDate)) {
+      const decrypted = decryptSensitiveData(data.expiryDate);
+      data.expiryDate = getDataBasedOnRole(decrypted, userRole, 'default');
+    }
+    
+    return data;
+  };
 
   Card.associate = (models) => {
     // Card belongs to a sale

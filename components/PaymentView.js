@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { formatDisplayDate } from '../lib/validation.js';
 import { useAuth } from '../contexts/AuthContext';
 import { isAdmin, isAgent, isSupervisor, isProcessor, isVerification } from '../lib/roleUtils';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -262,7 +263,7 @@ export default function PaymentView() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
             <h3 className="mt-2 text-sm font-medium text-gray-900">No payment information found</h3>
-            <p className="mt-1 text-sm text-gray-500">This sale doesn't have any payment methods added yet.</p>
+            <p className="mt-1 text-sm text-gray-500">This sale doesn&apos;t have any payment methods added yet.</p>
           </div>
         ) : (
           payments.map((payment) => (
@@ -350,48 +351,93 @@ export default function PaymentView() {
                         <div>
                           <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">Cards</h5>
                           <div className="space-y-3">
-                            {payment.cards.map((card, index) => (
-                              <div key={index} className="bg-gray-50 rounded-lg p-4">
-                                <div className="flex justify-between items-start mb-2">
-                                  <div className="flex items-center space-x-2">
-                                    <span className="text-sm font-medium text-gray-900">{card.provider ? card.provider.toUpperCase() : 'N/A'}</span>
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                      card.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                                    }`}>
-                                      {card.status}
-                                    </span>
+                            {payment.cards.map((card, index) => {
+                              // Helper functions for expiration status
+                              const getCardBgClass = () => {
+                                if (card.isExpired) return 'bg-red-50 border-l-4 border-red-500 rounded-lg p-4';
+                                if (card.isExpiringSoon) return 'bg-yellow-50 border-l-4 border-yellow-500 rounded-lg p-4';
+                                return 'bg-green-50 border-l-4 border-green-500 rounded-lg p-4';
+                              };
+                              
+                              const getExpiryTextClass = () => {
+                                if (card.isExpired) return 'text-red-700 font-bold';
+                                if (card.isExpiringSoon) return 'text-yellow-700 font-bold';
+                                return 'text-green-700';
+                              };
+                              
+                              const getStatusBadgeClass = () => {
+                                if (card.isExpired) return 'bg-red-100 text-red-800';
+                                if (card.isExpiringSoon) return 'bg-yellow-100 text-yellow-800';
+                                return 'bg-green-100 text-green-800';
+                              };
+                              
+                              return (
+                                <div key={index} className={getCardBgClass()}>
+                                  <div className="flex justify-between items-start mb-3">
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-sm font-medium text-gray-900">{card.provider ? card.provider.toUpperCase() : 'N/A'}</span>
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusBadgeClass()}`}>
+                                        {card.isExpired && '❌ Expired'}
+                                        {card.isExpiringSoon && '⚠️ Expiring Soon'}
+                                        {!card.isExpired && !card.isExpiringSoon && '✅ Valid'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">Card Number:</span>
+                                      <span className="font-mono">
+                                        {card.cardNumber}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">CVV:</span>
+                                      <span className="font-mono">
+                                        {card.cvv}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">Expiry:</span>
+                                      <span className={`font-mono ${getExpiryTextClass()}`}>
+                                        {card.expiryDate && card.expiryDate.trim() !== '' ? card.expiryDate : 'N/A'}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">Name on Card:</span>
+                                      <span>{card.customerName || 'N/A'}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">Type:</span>
+                                      <span className="capitalize">{card.cardType || 'N/A'}</span>
+                                    </div>
+                                    
+                                    
+                                    {card.expirationStatus && (
+                              
+                                      <div className="mt-2 pt-2 border-t border-gray-200">
+                                        
+                                        <div className="flex justify-between text-xs">
+                                          <span className="text-gray-600">Status:</span>
+                                          <span className={card.isExpired ? 'text-red-600 font-medium' : card.isExpiringSoon ? 'text-yellow-600 font-medium' : 'text-green-600 font-medium'}>
+                                            {card.expirationStatus.message}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between text-sm mt-2">
+                                      <span className="text-gray-600">Added:</span>
+                                      <span className="text-gray-500 text-xs">
+                                        {card.createdDate
+                                          ? formatDisplayDate(card.createdDate)
+                                          : card.created_at
+                                            ? formatDisplayDate(card.created_at)
+                                            : 'N/A'}
+                                      </span>
+                                    </div>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                                <div className="space-y-1">
-                                  <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600">Card Number:</span>
-                                    <span className="font-mono">
-                                      {card.cardNumber}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600">CVV:</span>
-                                    <span className="font-mono">
-                                      {card.cvv}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600">Expiry:</span>
-                                    <span className="font-mono">
-                                      {card.expiryDate && card.expiryDate.trim() !== '' ? card.expiryDate : 'N/A'}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600">Name on Card:</span>
-                                    <span>{card.customerName || 'N/A'}</span>
-                                  </div>
-                                  <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600">Type:</span>
-                                    <span>{card.cardType || 'N/A'}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -427,19 +473,30 @@ export default function PaymentView() {
                                     </span>
                                   </div>
                                   <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Check Number:</span>
+                                    <span className="font-mono">
+                                      {bank.checkNumber || 'N/A'}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
                                     <span className="text-gray-600">Account Holder:</span>
                                     <span>{bank.accountHolder || 'N/A'}</span>
                                   </div>
-                                  <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600">Check Number:</span>
-                                    <span>{bank.checkNumber || 'N/A'}</span>
-                                  </div>
+                                  
                                   <div className="flex justify-between text-sm">
                                     <span className="text-gray-600">Driver License:</span>
                                     <span className="font-mono">
                                       {bank.driverLicense}
                                     </span>
                                   </div>
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Added:</span>
+                                    <span className="text-gray-500 text-xs">
+                                      {bank.createdDate || formatDisplayDate(bank.created_at) || 'N/A'}
+                                    </span>
+                                  </div>
+                                    </div>
                                 </div>
                               </div>
                             ))}

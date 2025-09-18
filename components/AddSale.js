@@ -5,6 +5,19 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import DateModal from './DateModal';
 import ReceiverModal from './ReceiverModal';
 import { useAuth } from '../contexts/AuthContext';
+import apiClient from '../lib/apiClient.js';
+import { 
+  formatPhoneNumber, 
+  formatCellNumber, 
+  formatLandline,
+  formatSSN,
+  formatCurrency,
+  formatDate,
+  formatTime,
+  validatePhoneNumber,
+  validateSSN,
+  validateCurrency 
+} from '../lib/validation.js';
 
 export default function AddSale() {
   const router = useRouter();
@@ -106,7 +119,7 @@ export default function AddSale() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/sales/${editId}`);
+      const response = await apiClient.get(`/api/sales/${editId}`);
       const result = await response.json();
       
       if (result.success) {
@@ -176,17 +189,35 @@ export default function AddSale() {
 
   // Handle customer form changes
   const handleCustomerChange = (field, value) => {
+    // Format input based on field type
+    let formattedValue = value;
+    if (field === 'landlineNo') {
+      formattedValue = formatLandline(value);
+    } else if (field === 'cellNo') {
+      formattedValue = formatCellNumber(value);
+    }
+    
     setCustomer(prev => ({
       ...prev,
-      [field]: value
+      [field]: formattedValue
     }));
   };
 
   // Handle sale form changes
   const handleSaleFormChange = (field, value) => {
+    // Format input based on field type
+    let formattedValue = value;
+    if (field === 'ssnNumber') {
+      formattedValue = formatSSN(value);
+    } else if (field === 'regularBill' || field === 'promotionalBill' || field === 'lastPayment' || field === 'balance') {
+      formattedValue = formatCurrency(value);
+    } else if (field === 'techVisitTime') {
+      formattedValue = formatTime(value);
+    }
+    
     setSaleForm(prev => ({
       ...prev,
-      [field]: value
+      [field]: formattedValue
     }));
   };
 
@@ -296,7 +327,7 @@ export default function AddSale() {
       
       if (isEditMode) {
         // For edit mode, get customer ID from existing sale
-        const saleResponse = await fetch(`/api/sales/${editId}`);
+        const saleResponse = await apiClient.get(`/api/sales/${editId}`);
         const saleResult = await saleResponse.json();
         if (saleResult.success) {
           customerId = saleResult.data.customerId;
@@ -313,11 +344,7 @@ export default function AddSale() {
               status: 'prospect'
             };
             
-            const customerUpdateResponse = await fetch(`/api/customers/${customerId}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(customerUpdateData)
-            });
+            const customerUpdateResponse = await apiClient.put(`/api/customers/${customerId}`, customerUpdateData);
             
             const customerUpdateResult = await customerUpdateResponse.json();
             if (!customerUpdateResult.success) {
@@ -345,11 +372,7 @@ export default function AddSale() {
           status: 'prospect'
         };
         
-        const customerResponse = await fetch('/api/customers', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(customerData)
-        });
+        const customerResponse = await apiClient.post('/api/customers', customerData);
         
         const customerResult = await customerResponse.json();
         if (!customerResult.success) {
@@ -405,22 +428,14 @@ export default function AddSale() {
       
       // Save or update sale
       if (isEditMode) {
-        const response = await fetch(`/api/sales/${editId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(saleData)
-        });
+        const response = await apiClient.put(`/api/sales/${editId}`, saleData);
         
         const result = await response.json();
         if (!result.success) {
           throw new Error(result.message || 'Failed to update sale');
         }
       } else {
-        const response = await fetch('/api/sales', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(saleData)
-        });
+        const response = await apiClient.post('/api/sales', saleData);
         
         const result = await response.json();
         if (!result.success) {
@@ -588,7 +603,7 @@ export default function AddSale() {
                     value={customer.landlineNo}
                     onChange={(e) => handleCustomerChange('landlineNo', e.target.value)}
                     className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                    placeholder="(555) 555-1234"
+                    placeholder="555-123-4567"
                   />
                 </div>
                 <div>
@@ -601,7 +616,7 @@ export default function AddSale() {
                     value={customer.cellNo}
                     onChange={(e) => handleCustomerChange('cellNo', e.target.value)}
                     className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                    placeholder="212-456-7890"
+                    placeholder="555-123-4567"
                   />
                 </div>
               </div>
@@ -709,7 +724,7 @@ export default function AddSale() {
                     value={saleForm.ssnNumber}
                     onChange={(e) => handleSaleFormChange('ssnNumber', e.target.value)}
                     className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                    placeholder="Enter SSN Number"
+                    placeholder="123-45-6789"
                   />
                 </div>
 
@@ -1004,7 +1019,7 @@ export default function AddSale() {
                       value={saleForm.regularBill}
                       onChange={(e) => handleSaleFormChange('regularBill', e.target.value)}
                       className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full pl-10 p-2.5"
-                      placeholder="Enter Regular Bill"
+                      placeholder="$123.45"
                     />
                   </div>
                 </div>
@@ -1024,7 +1039,7 @@ export default function AddSale() {
                       value={saleForm.promotionalBill}
                       onChange={(e) => handleSaleFormChange('promotionalBill', e.target.value)}
                       className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full pl-10 p-2.5"
-                      placeholder="Enter Promotional Bill"
+                      placeholder="$123.45"
                     />
                   </div>
                 </div>
@@ -1098,7 +1113,7 @@ export default function AddSale() {
                       value={saleForm.lastPayment}
                       onChange={(e) => handleSaleFormChange('lastPayment', e.target.value)}
                       className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full pl-10 p-2.5"
-                      placeholder="Enter Last Payment"
+                      placeholder="$123.45"
                     />
                   </div>
                 </div>
@@ -1132,7 +1147,7 @@ export default function AddSale() {
                       value={saleForm.balance}
                       onChange={(e) => handleSaleFormChange('balance', e.target.value)}
                       className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full pl-10 p-2.5"
-                      placeholder="Balance"
+                      placeholder="$123.45"
                     />
                   </div>
                 </div>

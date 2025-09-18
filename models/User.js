@@ -43,10 +43,7 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING(15),
       allowNull: true,
       unique: true,
-      validate: {
-        len: [13, 13],
-        isNumeric: true
-      }
+      // Removed validation to make CNIC non-required and more flexible
     },
     phone: {
       type: DataTypes.STRING(15),

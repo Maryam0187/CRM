@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import apiClient from '../lib/apiClient.js';
 import { useToast } from '../contexts/ToastContext';
 import PasswordModal from './PasswordModal';
 
@@ -100,12 +101,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
 
     try {
       setLoadingRoles(true);
-      const response = await fetch('/api/roles', {
-        headers: {
-          'x-user-id': currentUser.id.toString(),
-          'x-user-role': currentUser.role
-        }
-      });
+      const response = await apiClient.get('/api/roles');
       const data = await response.json();
       
       if (data.success) {
@@ -129,12 +125,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
 
     try {
       setLoadingSupervisors(true);
-      const response = await fetch('/api/supervisors', {
-        headers: {
-          'x-user-id': currentUser.id.toString(),
-          'x-user-role': currentUser.role
-        }
-      });
+      const response = await apiClient.get('/api/supervisors');
       const data = await response.json();
       
       if (data.success) {
@@ -296,15 +287,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
     setError('');
 
     try {
-      const response = await fetch(`/api/users/${user.id}/reset-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id.toString(),
-          'x-user-role': currentUser.role
-        },
-        body: JSON.stringify({ password: newPassword })
-      });
+      const response = await apiClient.post(`/api/users/${user.id}/reset-password`, { password: newPassword });
 
       const data = await response.json();
       

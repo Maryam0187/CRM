@@ -15,7 +15,7 @@ export async function GET(request, { params }) {
       );
     }
 
-    const userId = params.id;
+    const userId = (await params).id;
 
     const user = await User.findByPk(userId, {
       attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'created_at', 'updated_at'],
@@ -90,7 +90,7 @@ export async function PUT(request, { params }) {
       );
     }
 
-    const userId = params.id;
+    const userId = (await params).id;
     const {
       first_name,
       last_name,
@@ -160,7 +160,31 @@ export async function PUT(request, { params }) {
     if (cnic !== undefined) updateData.cnic = cnic;
     if (address !== undefined) updateData.address = address;
 
-    await user.update(updateData);
+    try {
+      await user.update(updateData);
+    } catch (validationError) {
+      // Handle validation errors with user-friendly messages
+      if (validationError.name === 'SequelizeValidationError') {
+        const errors = validationError.errors.map(err => {
+          if (err.path === 'phone' && err.validatorKey === 'isNumeric') {
+            return 'Phone number must contain only numbers (no spaces, dashes, or special characters)';
+          } else if (err.path === 'cnic' && err.validatorKey === 'isNumeric') {
+            return 'CNIC format is invalid. Please use only numbers';
+          } else if (err.path === 'cnic' && err.validatorKey === 'len') {
+            return 'CNIC must be exactly 13 digits';
+          } else {
+            return `${err.path}: ${err.message}`;
+          }
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          message: 'Validation failed', 
+          errors: errors 
+        }, { status: 400 });
+      }
+      throw validationError; // Re-throw if not a validation error
+    }
 
     // Handle supervisor relationship for agents
     if (role === 'agent' && superiorId !== undefined) {
@@ -223,7 +247,7 @@ export async function DELETE(request, { params }) {
       );
     }
 
-    const userId = params.id;
+    const userId = (await params).id;
 
     // Prevent admin from deleting themselves
     if (parseInt(userId) === authResult.user.id) {

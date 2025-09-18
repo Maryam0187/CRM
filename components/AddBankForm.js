@@ -6,6 +6,7 @@ import {
   formatNumericOnly, 
   formatRoutingNumber 
 } from '../lib/validation.js';
+import apiClient from '../lib/apiClient.js';
 
 export default function AddBankForm({ mode, saleId, onSuccess }) {
   const [formData, setFormData] = useState({
@@ -87,11 +88,7 @@ export default function AddBankForm({ mode, saleId, onSuccess }) {
       };
 
       // Save to API
-      const response = await fetch('/api/banks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bankData)
-      });
+      const response = await apiClient.post('/api/banks', bankData);
 
       const result = await response.json();
 

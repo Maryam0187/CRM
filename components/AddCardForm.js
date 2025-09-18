@@ -6,6 +6,7 @@ import {
   formatCardNumber, 
   formatExpiryDate 
 } from '../lib/validation.js';
+import apiClient from '../lib/apiClient.js';
 
 export default function AddCardForm({ mode, saleId, onSuccess }) {
   const [formData, setFormData] = useState({
@@ -82,12 +83,8 @@ export default function AddCardForm({ mode, saleId, onSuccess }) {
         notes: formData.notes
       };
 
-      // Save to API
-      const response = await fetch('/api/cards', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cardData)
-      });
+      // Save to API with authentication
+      const response = await apiClient.post('/api/cards', cardData);
 
       const result = await response.json();
 
