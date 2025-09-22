@@ -30,6 +30,11 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
+  // Supervisor-specific state
+  const [supervisedAgents, setSupervisedAgents] = useState([]);
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [showingSupervisorSales, setShowingSupervisorSales] = useState(false);
+  
   // Payment modal state
   const [isPaymentModalVisible, setIsPaymentModalVisible] = useState(false);
   const [selectedSaleId, setSelectedSaleId] = useState(null);
@@ -37,8 +42,25 @@ export default function Home() {
   const [paymentNotifications, setPaymentNotifications] = useState({});
 
 
+  // Set supervised agents from user session data
+  const initializeSupervisedAgents = () => {
+    if (user?.role !== 'supervisor' || !user?.supervisedAgents) return;
+    
+    // Convert supervised agents data to match the expected format
+    const agentsData = user.supervisedAgents.map(agent => ({
+      agent: agent
+    }));
+    
+    setSupervisedAgents(agentsData);
+    
+    // Set first agent as default selected if available
+    if (agentsData.length > 0) {
+      setSelectedAgent(agentsData[0].agent);
+    }
+  };
+
   // Fetch sales data from API
-  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter) => {
+  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter, agentId = null) => {
     setLoading(true);
     setError(null);
     try {
@@ -48,9 +70,25 @@ export default function Home() {
       if (dateFilterValue) params.append('dateFilter', dateFilterValue);
       
       // Add user information for role-based filtering
-      if (user) {
-        params.append('userId', user.id);
-        params.append('userRole', user.role);
+      if (user?.role === 'supervisor') {
+        // For supervisors, show data for selected agent or supervisor's own sales
+        const targetUserId = agentId || (showingSupervisorSales ? user.id : selectedAgent?.id);
+        if (targetUserId) {
+          params.append('userId', targetUserId);
+          if (showingSupervisorSales) {
+            params.append('userRole', 'supervisor_own');
+          } else if (selectedAgent) {
+            params.append('userRole', 'agent');
+          } else {
+            params.append('userRole', 'supervisor');
+          }
+        }
+      } else {
+        // For other roles, show their own data
+        if (user) {
+          params.append('userId', user.id);
+          params.append('userRole', user.role);
+        }
       }
       
       const url = `/api/sales${params.toString() ? `?${params.toString()}` : ''}`;
@@ -70,10 +108,21 @@ export default function Home() {
     }
   };
 
-  // Load sales data on component mount and when status or date filter changes
+  // Initialize supervised agents for supervisors from session data
   useEffect(() => {
-    fetchSalesData(status, dateFilter);
-  }, [status, dateFilter]);
+    if (user?.role === 'supervisor') {
+      initializeSupervisedAgents();
+    }
+  }, [user]);
+
+  // Load sales data on component mount and when status, date filter, or selected agent changes
+  useEffect(() => {
+    if (user?.role === 'supervisor' && (selectedAgent || showingSupervisorSales)) {
+      fetchSalesData(status, dateFilter);
+    } else if (user?.role !== 'supervisor') {
+      fetchSalesData(status, dateFilter);
+    }
+  }, [status, dateFilter, selectedAgent, showingSupervisorSales]);
 
   // Auto-clear payment notifications after 5 seconds
   useEffect(() => {
@@ -85,6 +134,17 @@ export default function Home() {
       return () => clearTimeout(timer);
     }
   }, [paymentNotifications]);
+
+  // Handler functions for supervisor interface
+  const handleAgentSelect = (agent) => {
+    setSelectedAgent(agent);
+    setShowingSupervisorSales(false);
+  };
+
+  const handleShowSupervisorSales = () => {
+    setShowingSupervisorSales(true);
+    setSelectedAgent(null);
+  };
 
   // Sales table columns configuration
   const salesColumns = [
@@ -363,6 +423,11 @@ export default function Home() {
               <p className="mt-1 text-sm text-gray-600">
                 Welcome back, {user?.first_name || 'User'}! Here&apos;s your sales performance and activities.
               </p>
+              {user?.role === 'agent' && user?.supervisor && (
+                <p className="mt-2 text-sm text-green-600 font-medium">
+                  Your Supervisor: {user.supervisor.firstName} {user.supervisor.lastName}
+                </p>
+              )}
             </div>
             <div className="mt-4 sm:mt-0 flex space-x-3">
               <button 
@@ -376,6 +441,60 @@ export default function Home() {
       </div>
       </div>
 
+      {/* Supervisor Agent Selection Interface */}
+      {user?.role === 'supervisor' && (
+        <div className="bg-white border-b border-gray-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-medium text-gray-700">View sales for:</span>
+              
+              {/* Me Button */}
+              <button
+                onClick={handleShowSupervisorSales}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                  showingSupervisorSales
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Me ({user?.first_name})
+              </button>
+              
+              {/* Agent Buttons */}
+              {supervisedAgents.map((relationship) => (
+                <button
+                  key={relationship.agent.id}
+                  onClick={() => handleAgentSelect(relationship.agent)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                    selectedAgent?.id === relationship.agent.id
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {relationship.agent.firstName} {relationship.agent.lastName}
+                </button>
+              ))}
+              
+              {supervisedAgents.length === 0 && !loading && (
+                <span className="text-sm text-gray-500 italic">No agents assigned</span>
+              )}
+            </div>
+            
+            {/* Current View Indicator */}
+            <div className="mt-3 text-sm text-gray-600">
+              {showingSupervisorSales ? (
+                <span>Showing your sales data</span>
+              ) : selectedAgent ? (
+                <span>
+                  Showing sales data for <strong>{selectedAgent.firstName} {selectedAgent.lastName}</strong>
+                </span>
+              ) : (
+                <span>Select an agent or "Me" to view sales data</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
         {/* Main Content */}
         <div className="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-8">

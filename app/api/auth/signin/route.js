@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { User } from '../../../../models';
+import { User, SupervisorAgent } from '../../../../models';
 
 export async function POST(request) {
   try {
@@ -13,9 +13,33 @@ export async function POST(request) {
       );
     }
 
-    // Find user by email
+    // Find user by email with supervisor/agent information based on role
     const user = await User.findOne({
-      where: { email: email.toLowerCase() }
+      where: { email: email.toLowerCase() },
+      include: [
+        {
+          model: SupervisorAgent,
+          as: 'supervisorRelationships',
+          include: [
+            {
+              model: User,
+              as: 'supervisor',
+              attributes: ['id', 'firstName', 'lastName', 'email']
+            }
+          ]
+        },
+        {
+          model: SupervisorAgent,
+          as: 'supervisedAgents',
+          include: [
+            {
+              model: User,
+              as: 'agent',
+              attributes: ['id', 'firstName', 'lastName', 'email', 'role', 'isActive']
+            }
+          ]
+        }
+      ]
     });
 
     const userDataValues = user?.dataValues ? user.dataValues : user;
@@ -44,6 +68,33 @@ export async function POST(request) {
       );
     }
 
+    // Get supervisor information if user is an agent
+    let supervisorInfo = null;
+    if (userDataValues.role === 'agent' && userDataValues.supervisorRelationships && userDataValues.supervisorRelationships.length > 0) {
+      const supervisorRelation = userDataValues.supervisorRelationships[0];
+      if (supervisorRelation && supervisorRelation.supervisor) {
+        supervisorInfo = {
+          id: supervisorRelation.supervisor.id,
+          firstName: supervisorRelation.supervisor.firstName,
+          lastName: supervisorRelation.supervisor.lastName,
+          email: supervisorRelation.supervisor.email
+        };
+      }
+    }
+
+    // Get supervised agents if user is a supervisor
+    let supervisedAgents = null;
+    if (userDataValues.role === 'supervisor' && userDataValues.supervisedAgents && userDataValues.supervisedAgents.length > 0) {
+      supervisedAgents = userDataValues.supervisedAgents.map(relation => ({
+        id: relation.agent.id,
+        firstName: relation.agent.firstName,
+        lastName: relation.agent.lastName,
+        email: relation.agent.email,
+        role: relation.agent.role,
+        isActive: relation.agent.isActive
+      }));
+    }
+
     // Return user data (excluding password)
     const userData = {
       id: userDataValues.id,
@@ -52,7 +103,9 @@ export async function POST(request) {
       last_name: userDataValues.lastName,
       role: userDataValues.role,
       is_active: userDataValues.isActive,
-      created_at: userDataValues.created_at
+      created_at: userDataValues.created_at,
+      supervisor: supervisorInfo,
+      supervisedAgents: supervisedAgents
     };
 
     return NextResponse.json({

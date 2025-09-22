@@ -44,6 +44,20 @@ export async function GET(request) {
         // Filter by supervised agents
         sales = sales.filter(sale => agentIds.includes(sale.agentId));
       }
+    } else if (userRole === 'supervisor_own' && userId) {
+      // Supervisor viewing their own sales (when "Me" button is clicked)
+      if (status && dateFilter) {
+        sales = await SaleService.findByStatusAndDate(status, dateFilter);
+      } else if (status) {
+        sales = await SaleService.findByStatus(status);
+      } else if (dateFilter) {
+        sales = await SaleService.findByDate(dateFilter);
+      } else {
+        sales = await SaleService.findAll();
+      }
+      
+      // Filter by supervisor's own ID
+      sales = sales.filter(sale => sale.agentId === parseInt(userId));
     } else if (userRole === 'agent' && userId) {
       // Agent can only see their own sales
       if (status && dateFilter) {
