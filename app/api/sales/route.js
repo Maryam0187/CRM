@@ -1,4 +1,4 @@
-import { SaleService, SupervisorAgentService } from '../../../lib/sequelize-db.js';
+import { SaleService, SupervisorAgentService, CustomerService } from '../../../lib/sequelize-db.js';
 
 export async function GET(request) {
   try {

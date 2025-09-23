@@ -80,6 +80,10 @@ export default function AddSale() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
+  
+  // Dialog state for customer warning
+  const [showCustomerDialog, setShowCustomerDialog] = useState(false);
+  const [customerWarning, setCustomerWarning] = useState(null);
 
   // System info for receiver modal
   const [systemInfo, setSystemInfo] = useState({
@@ -317,6 +321,87 @@ export default function AddSale() {
   };
 
   // Add or update sale with status
+  // Handle customer dialog close and continue with sale
+  const handleCustomerDialogClose = async (status) => {
+    setShowCustomerDialog(false);
+    setCustomerWarning(null);
+    
+    // Continue with the sale using the existing customer
+    if (customerWarning && customerWarning.customerId) {
+      await continueSaleWithExistingCustomer(status, customerWarning.customerId);
+    }
+  };
+
+  // Continue sale creation with existing customer
+  const continueSaleWithExistingCustomer = async (status, existingCustomerId) => {
+    setSaving(true);
+    setError(null);
+    
+    try {
+      // Helper function to convert empty strings to null for ENUM fields
+      const sanitizeEnumValue = (value) => {
+        return (value === '' || value === null || value === undefined) ? null : value;
+      };
+
+      // Helper function to convert empty strings to null for other fields
+      const sanitizeValue = (value) => {
+        return (value === '' || value === null || value === undefined) ? null : value;
+      };
+
+      // Prepare sale data
+      const saleData = {
+        customerId: existingCustomerId,
+        agentId: user?.id, // Get agentId from the logged in user
+        status: status,
+        pinCode: sanitizeValue(saleForm.pin_code),
+        pinCodeStatus: sanitizeEnumValue(saleForm.pin_code_status),
+        ssnName: sanitizeValue(saleForm.ssnName),
+        ssnNumber: sanitizeValue(saleForm.ssnNumber),
+        carrier: sanitizeValue(saleForm.carrier),
+        basicPackage: sanitizeValue(saleForm.basicPackage),
+        basicPackageStatus: sanitizeEnumValue(saleForm.basicPackageStatus),
+        NoFTV: sanitizeValue(saleForm.NoFTV),
+        AccHolder: sanitizeValue(saleForm.AccHolder),
+        AccNumber: sanitizeValue(saleForm.AccNumber),
+        securityQuestion: sanitizeValue(saleForm.securityQuestion),
+        securityAnswer: sanitizeValue(saleForm.securityAnswer),
+        regularBill: sanitizeValue(saleForm.regularBill),
+        promotionalBill: sanitizeValue(saleForm.promotionalBill),
+        bundle: sanitizeEnumValue(saleForm.bundle),
+        company: sanitizeValue(saleForm.company),
+        lastPayment: sanitizeValue(saleForm.lastPayment),
+        lastPaymentDate: saleForm.lastPaymentDate ? new Date(saleForm.lastPaymentDate).toISOString() : null,
+        balance: sanitizeValue(saleForm.balance),
+        dueOnDate: saleForm.dueOnDate ? new Date(saleForm.dueOnDate).toISOString() : null,
+        breakdown: sanitizeValue(saleForm.breakdown),
+        notes: sanitizeValue(saleForm.notes),
+        services: saleForm.services || [],
+        receivers: saleForm.receivers || {},
+        receiversInfo: saleForm.receiversInfo || {},
+        techVisitDate: saleForm.techVisitDate ? new Date(saleForm.techVisitDate).toISOString() : null,
+        techVisitTime: saleForm.techVisitTime ? new Date(saleForm.techVisitTime).toISOString() : null,
+        appointmentDate: saleForm.appointmentDate ? new Date(saleForm.appointmentDate).toISOString() : null,
+        appointmentTime: saleForm.appointmentTime ? new Date(saleForm.appointmentTime).toISOString() : null
+      };
+
+      // Create the sale
+      const response = await apiClient.post('/api/sales', saleData);
+      
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.message || 'Failed to create sale');
+      }
+      
+      // Navigate back to home
+      router.push('/');
+    } catch (error) {
+      console.error('Error creating sale:', error);
+      setError(error.message || 'Failed to create sale');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const addSale = async (status) => {
     setSaving(true);
     setError(null);
@@ -361,24 +446,69 @@ export default function AddSale() {
           throw new Error('Customer first name is required');
         }
         
-        // For new sale, create customer first
-        const customerData = {
-          firstName: customer.firstName.trim(),
-          lastName: null, // Use null instead of empty string
-          email: null, // Use null instead of empty string
-          phone: customer.landlineNo || customer.cellNo, // Use landline or cell as phone
-          landline: customer.landlineNo,
-          address: customer.address,
-          status: 'prospect'
-        };
-        
-        const customerResponse = await apiClient.post('/api/customers', customerData);
-        
-        const customerResult = await customerResponse.json();
-        if (!customerResult.success) {
-          throw new Error(customerResult.message || 'Failed to create customer');
+        // For new sale, check if customer already exists first
+        if (customer.landlineNo) {
+          const checkResponse = await apiClient.post('/api/customers/check-existing', {
+            landline: customer.landlineNo,
+            firstName: customer.firstName.trim()
+          });
+          
+          const checkResult = await checkResponse.json();
+          if (checkResult.success && checkResult.exists) {
+            // Customer already exists, show dialog and wait for user confirmation
+            const lastSaleDateTime = checkResult.lastSale ? new Date(checkResult.lastSale.created_at).toLocaleString() : 'No previous sales';
+            const agentName = checkResult.lastSale?.agent ? `${checkResult.lastSale.agent.firstName} ${checkResult.lastSale.agent.lastName}` : 'Unknown';
+            
+            // Show dialog with customer information
+            setCustomerWarning({
+              customerName: checkResult.customer.firstName,
+              lastSaleDateTime: lastSaleDateTime,
+              agentName: agentName,
+              customerId: checkResult.customer.id
+            });
+            setShowCustomerDialog(true);
+            setSaving(false);
+            return; // Stop here and wait for user to close dialog
+          } else {
+            // Customer doesn't exist, create new one
+            const customerData = {
+              firstName: customer.firstName.trim(),
+              lastName: null, // Use null instead of empty string
+              email: null, // Use null instead of empty string
+              phone: customer.landlineNo || customer.cellNo, // Use landline or cell as phone
+              landline: customer.landlineNo,
+              address: customer.address,
+              status: 'prospect'
+            };
+            
+            const customerResponse = await apiClient.post('/api/customers', customerData);
+            
+            const customerResult = await customerResponse.json();
+            if (!customerResult.success) {
+              throw new Error(customerResult.message || 'Failed to create customer');
+            }
+            customerId = customerResult.data.id;
+          }
+        } else {
+          // No landline provided, create new customer
+          const customerData = {
+            firstName: customer.firstName.trim(),
+            lastName: null, // Use null instead of empty string
+            email: null, // Use null instead of empty string
+            phone: customer.landlineNo || customer.cellNo, // Use landline or cell as phone
+            landline: customer.landlineNo,
+            address: customer.address,
+            status: 'prospect'
+          };
+          
+          const customerResponse = await apiClient.post('/api/customers', customerData);
+          
+          const customerResult = await customerResponse.json();
+          if (!customerResult.success) {
+            throw new Error(customerResult.message || 'Failed to create customer');
+          }
+          customerId = customerResult.data.id;
         }
-        customerId = customerResult.data.id;
       }
       
       // Helper function to convert empty strings to null for ENUM fields
@@ -1220,6 +1350,59 @@ export default function AddSale() {
           onClose={() => setIsReceiverModalOpen(false)}
           onSave={saveSystemInfo}
         />
+      )}
+
+      {/* Customer Existence Dialog */}
+      {showCustomerDialog && customerWarning && (
+        <div className="fixed inset-0 bg-black flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <div className="flex items-center mb-4">
+                <div className="flex-shrink-0">
+                  <svg className="h-6 w-6 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-lg font-medium text-gray-900">
+                    Customer Already Exists
+                  </h3>
+                </div>
+              </div>
+              
+              <div className="mb-4">
+                <p className="text-sm text-gray-600 mb-2">
+                  <strong>Customer:</strong> {customerWarning.customerName}
+                </p>
+                <p className="text-sm text-gray-600 mb-2">
+                  <strong>Last Sale:</strong> {customerWarning.lastSaleDateTime}
+                </p>
+                <p className="text-sm text-gray-500 mt-3">
+                  You can proceed with this customer if needed (e.g., for technical issues or follow-up sales).
+                </p>
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => {
+                    setShowCustomerDialog(false);
+                    setCustomerWarning(null);
+                    setSaving(false);
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleCustomerDialogClose(saleStatus)}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  Continue with Sale
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
