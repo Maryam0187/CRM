@@ -90,7 +90,13 @@ export default function DateFilter({ onFilterChange, className = "", value = 'to
     } else if (button.label === 'By month') {
       setOpenDateRange(false);
       setOpenMonthRange(true);
-      const currentMonth = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      // Use UTC to avoid timezone issues
+      const now = new Date();
+      const currentMonth = now.toLocaleString('en-US', { 
+        month: 'long', 
+        year: 'numeric',
+        timeZone: 'UTC'
+      });
       setDates2(currentMonth);
       onFilterChange(currentMonth);
     } else {
@@ -226,10 +232,18 @@ export default function DateFilter({ onFilterChange, className = "", value = 'to
               <label className="block text-sm font-medium text-gray-700 mb-1">Select Month</label>
               <input
                 type="month"
-                value={dates2 ? new Date(dates2 + ' 01').toISOString().slice(0, 7) : ''}
+                value={dates2 ? (() => {
+                  const [month, year] = dates2.split(' ');
+                  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                                     'July', 'August', 'September', 'October', 'November', 'December'];
+                  const monthIndex = monthNames.indexOf(month);
+                  return `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+                })() : ''}
                 onChange={(e) => {
-                  const monthDate = new Date(e.target.value + '-01');
-                  const monthString = monthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+                  const [year, month] = e.target.value.split('-');
+                  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                                     'July', 'August', 'September', 'October', 'November', 'December'];
+                  const monthString = `${monthNames[parseInt(month) - 1]} ${year}`;
                   handleMonthChange(monthString);
                 }}
                 className="w-40 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"

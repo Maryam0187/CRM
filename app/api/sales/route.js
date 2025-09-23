@@ -8,19 +8,23 @@ export async function GET(request) {
     const userId = searchParams.get('userId');
     const userRole = searchParams.get('userRole');
     
-    let sales;
+    // Pagination parameters
+    const page = parseInt(searchParams.get('page')) || 1;
+    const limit = parseInt(searchParams.get('limit')) || 10;
     
-    // Role-based data filtering
+    let result;
+    
+    // Role-based data filtering with pagination
     if (userRole === 'admin') {
       // Admin can see all sales
       if (status && dateFilter) {
-        sales = await SaleService.findByStatusAndDate(status, dateFilter);
+        result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit);
       } else if (status) {
-        sales = await SaleService.findByStatus(status);
+        result = await SaleService.findByStatusPaginated(status, page, limit);
       } else if (dateFilter) {
-        sales = await SaleService.findByDate(dateFilter);
+        result = await SaleService.findByDatePaginated(dateFilter, page, limit);
       } else {
-        sales = await SaleService.findAll();
+        result = await SaleService.findAllPaginated(page, limit);
       }
     } else if (userRole === 'supervisor' && userId) {
       // Supervisor can see their agents' sales
@@ -28,66 +32,131 @@ export async function GET(request) {
       const agentIds = supervisedAgents.map(agent => agent.id);
       
       if (agentIds.length === 0) {
-        sales = [];
+        result = {
+          data: [],
+          pagination: {
+            currentPage: page,
+            totalPages: 0,
+            totalItems: 0,
+            itemsPerPage: limit,
+            hasNextPage: false,
+            hasPrevPage: false
+          }
+        };
       } else {
-        // Filter sales by supervised agents
+        // Get all sales first, then filter by supervised agents
+        let allSales;
         if (status && dateFilter) {
-          sales = await SaleService.findByStatusAndDate(status, dateFilter);
+          allSales = await SaleService.findByStatusAndDate(status, dateFilter);
         } else if (status) {
-          sales = await SaleService.findByStatus(status);
+          allSales = await SaleService.findByStatus(status);
         } else if (dateFilter) {
-          sales = await SaleService.findByDate(dateFilter);
+          allSales = await SaleService.findByDate(dateFilter);
         } else {
-          sales = await SaleService.findAll();
+          allSales = await SaleService.findAll();
         }
         
         // Filter by supervised agents
-        sales = sales.filter(sale => agentIds.includes(sale.agentId));
+        const filteredSales = allSales.filter(sale => agentIds.includes(sale.agentId));
+        
+        // Apply pagination manually
+        const startIndex = (page - 1) * limit;
+        const endIndex = startIndex + limit;
+        const paginatedData = filteredSales.slice(startIndex, endIndex);
+        
+        result = {
+          data: paginatedData,
+          pagination: {
+            currentPage: page,
+            totalPages: Math.ceil(filteredSales.length / limit),
+            totalItems: filteredSales.length,
+            itemsPerPage: limit,
+            hasNextPage: page < Math.ceil(filteredSales.length / limit),
+            hasPrevPage: page > 1
+          }
+        };
       }
     } else if (userRole === 'supervisor_own' && userId) {
       // Supervisor viewing their own sales (when "Me" button is clicked)
+      let allSales;
       if (status && dateFilter) {
-        sales = await SaleService.findByStatusAndDate(status, dateFilter);
+        allSales = await SaleService.findByStatusAndDate(status, dateFilter);
       } else if (status) {
-        sales = await SaleService.findByStatus(status);
+        allSales = await SaleService.findByStatus(status);
       } else if (dateFilter) {
-        sales = await SaleService.findByDate(dateFilter);
+        allSales = await SaleService.findByDate(dateFilter);
       } else {
-        sales = await SaleService.findAll();
+        allSales = await SaleService.findAll();
       }
       
       // Filter by supervisor's own ID
-      sales = sales.filter(sale => sale.agentId === parseInt(userId));
+      const filteredSales = allSales.filter(sale => sale.agentId === parseInt(userId));
+      
+      // Apply pagination manually
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedData = filteredSales.slice(startIndex, endIndex);
+      
+      result = {
+        data: paginatedData,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(filteredSales.length / limit),
+          totalItems: filteredSales.length,
+          itemsPerPage: limit,
+          hasNextPage: page < Math.ceil(filteredSales.length / limit),
+          hasPrevPage: page > 1
+        }
+      };
     } else if (userRole === 'agent' && userId) {
       // Agent can only see their own sales
+      let allSales;
       if (status && dateFilter) {
-        sales = await SaleService.findByStatusAndDate(status, dateFilter);
+        allSales = await SaleService.findByStatusAndDate(status, dateFilter);
       } else if (status) {
-        sales = await SaleService.findByStatus(status);
+        allSales = await SaleService.findByStatus(status);
       } else if (dateFilter) {
-        sales = await SaleService.findByDate(dateFilter);
+        allSales = await SaleService.findByDate(dateFilter);
       } else {
-        sales = await SaleService.findAll();
+        allSales = await SaleService.findAll();
       }
       
       // Filter by agent ID
-      sales = sales.filter(sale => sale.agentId === parseInt(userId));
+      const filteredSales = allSales.filter(sale => sale.agentId === parseInt(userId));
+      
+      // Apply pagination manually
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedData = filteredSales.slice(startIndex, endIndex);
+      
+      result = {
+        data: paginatedData,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(filteredSales.length / limit),
+          totalItems: filteredSales.length,
+          itemsPerPage: limit,
+          hasNextPage: page < Math.ceil(filteredSales.length / limit),
+          hasPrevPage: page > 1
+        }
+      };
     } else {
       // Default behavior for other roles or no role specified
       if (status && dateFilter) {
-        sales = await SaleService.findByStatusAndDate(status, dateFilter);
+        result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit);
       } else if (status) {
-        sales = await SaleService.findByStatus(status);
+        result = await SaleService.findByStatusPaginated(status, page, limit);
       } else if (dateFilter) {
-        sales = await SaleService.findByDate(dateFilter);
+        result = await SaleService.findByDatePaginated(dateFilter, page, limit);
       } else {
-        sales = await SaleService.findAll();
+        result = await SaleService.findAllPaginated(page, limit);
       }
     }
     
     return Response.json({
       success: true,
-      data: sales
+      data: result.data,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Get sales error:', error);

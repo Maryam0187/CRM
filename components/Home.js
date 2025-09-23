@@ -30,6 +30,18 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(5);
+  const [paginationInfo, setPaginationInfo] = useState({
+    currentPage: 1,
+    totalPages: 1,
+    totalItems: 0,
+    itemsPerPage: 5,
+    hasNextPage: false,
+    hasPrevPage: false
+  });
+  
   // Supervisor-specific state
   const [supervisedAgents, setSupervisedAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
@@ -60,7 +72,7 @@ export default function Home() {
   };
 
   // Fetch sales data from API
-  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter, agentId = null) => {
+  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage) => {
     setLoading(true);
     setError(null);
     try {
@@ -68,6 +80,10 @@ export default function Home() {
       const params = new URLSearchParams();
       if (statusFilter) params.append('status', statusFilter);
       if (dateFilterValue) params.append('dateFilter', dateFilterValue);
+      
+      // Add pagination parameters
+      params.append('page', page.toString());
+      params.append('limit', limit.toString());
       
       // Add user information for role-based filtering
       if (user?.role === 'supervisor') {
@@ -97,6 +113,9 @@ export default function Home() {
       
       if (result.success) {
         setSalesData(result.data);
+        if (result.pagination) {
+          setPaginationInfo(result.pagination);
+        }
       } else {
         setError(result.message || 'Failed to fetch sales data');
       }
@@ -115,14 +134,14 @@ export default function Home() {
     }
   }, [user]);
 
-  // Load sales data on component mount and when status, date filter, or selected agent changes
+  // Load sales data on component mount and when status, date filter, selected agent, or pagination changes
   useEffect(() => {
     if (user?.role === 'supervisor' && (selectedAgent || showingSupervisorSales)) {
-      fetchSalesData(status, dateFilter);
+      fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage);
     } else if (user?.role !== 'supervisor') {
-      fetchSalesData(status, dateFilter);
+      fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage);
     }
-  }, [status, dateFilter, selectedAgent, showingSupervisorSales]);
+  }, [status, dateFilter, selectedAgent, showingSupervisorSales, currentPage, itemsPerPage]);
 
   // Auto-clear payment notifications after 5 seconds
   useEffect(() => {
@@ -139,11 +158,35 @@ export default function Home() {
   const handleAgentSelect = (agent) => {
     setSelectedAgent(agent);
     setShowingSupervisorSales(false);
+    setCurrentPage(1); // Reset to first page when switching agents
   };
 
   const handleShowSupervisorSales = () => {
     setShowingSupervisorSales(true);
     setSelectedAgent(null);
+    setCurrentPage(1); // Reset to first page when switching views
+  };
+
+  // Pagination control functions
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
+  };
+
+  const handleItemsPerPageChange = (newItemsPerPage) => {
+    setItemsPerPage(newItemsPerPage);
+    setCurrentPage(1); // Reset to first page when changing items per page
+  };
+
+  const handlePreviousPage = () => {
+    if (paginationInfo.hasPrevPage) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (paginationInfo.hasNextPage) {
+      setCurrentPage(currentPage + 1);
+    }
   };
 
   // Sales table columns configuration
@@ -334,24 +377,27 @@ export default function Home() {
   const handleFilterChange = (filterValue) => {
     console.log('Date filter changed:', filterValue);
     updateFilter('dateFilter', filterValue);
+    setCurrentPage(1); // Reset to first page when changing filters
     // Fetch sales data with the new date filter
-    fetchSalesData(status, filterValue);
+    fetchSalesData(status, filterValue, null, 1, itemsPerPage);
   };
 
   const handleStatusChange = (e) => {
     updateFilter('status', e.target.value);
+    setCurrentPage(1); // Reset to first page when changing filters
     // Fetch sales data with the new status filter
-    fetchSalesData(e.target.value, dateFilter);
+    fetchSalesData(e.target.value, dateFilter, null, 1, itemsPerPage);
   };
 
   const clearStatus = () => {
     updateFilter('status', '');
+    setCurrentPage(1); // Reset to first page when clearing filters
     // Fetch sales data without status filter
-    fetchSalesData('', dateFilter);
+    fetchSalesData('', dateFilter, null, 1, itemsPerPage);
   };
 
   const handleRefresh = () => {
-    fetchSalesData(status, dateFilter);
+    fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage);
   };
 
   const handleEdit = (saleId) => {
@@ -451,8 +497,11 @@ export default function Home() {
               {/* Me Button */}
               <button
                 onClick={handleShowSupervisorSales}
+                disabled={loading}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                  showingSupervisorSales
+                  loading
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : showingSupervisorSales
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
@@ -465,8 +514,11 @@ export default function Home() {
                 <button
                   key={relationship.agent.id}
                   onClick={() => handleAgentSelect(relationship.agent)}
+                  disabled={loading}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                    selectedAgent?.id === relationship.agent.id
+                    loading
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : selectedAgent?.id === relationship.agent.id
                       ? 'bg-green-600 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
@@ -567,13 +619,94 @@ export default function Home() {
                 </button>
               </div>
             ) : (
-              <Table
-                data={formatSalesData(salesData)}
-                columns={salesColumns}
-                itemsPerPage={5}
-                onRowClick={handleRowClick}
-                emptyMessage={loading ? "Loading sales data..." : "No sales found for the selected criteria"}
-              />
+              <>
+                <Table
+                  data={formatSalesData(salesData)}
+                  columns={salesColumns}
+                  itemsPerPage={itemsPerPage}
+                  onRowClick={handleRowClick}
+                  emptyMessage={loading ? "Loading sales data..." : "No sales found for the selected criteria"}
+                />
+                
+                {/* Pagination Controls */}
+                {paginationInfo.totalPages > 1 && (
+                  <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    {/* Items per page selector */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-700">Show:</span>
+                      <select
+                        value={itemsPerPage}
+                        onChange={(e) => handleItemsPerPageChange(parseInt(e.target.value))}
+                        disabled={loading}
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <option value={5}>5</option>
+                        <option value={10}>10</option>
+                        <option value={20}>20</option>
+                        <option value={50}>50</option>
+                      </select>
+                      <span className="text-sm text-gray-700">per page</span>
+                    </div>
+
+                    {/* Pagination info */}
+                    <div className="text-sm text-gray-700">
+                      Showing {((paginationInfo.currentPage - 1) * paginationInfo.itemsPerPage) + 1} to{' '}
+                      {Math.min(paginationInfo.currentPage * paginationInfo.itemsPerPage, paginationInfo.totalItems)} of{' '}
+                      {paginationInfo.totalItems} results
+                    </div>
+
+                    {/* Pagination buttons */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handlePreviousPage}
+                        disabled={!paginationInfo.hasPrevPage || loading}
+                        className="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      
+                      {/* Page numbers */}
+                      <div className="flex items-center gap-1">
+                        {Array.from({ length: Math.min(5, paginationInfo.totalPages) }, (_, i) => {
+                          let pageNum;
+                          if (paginationInfo.totalPages <= 5) {
+                            pageNum = i + 1;
+                          } else if (paginationInfo.currentPage <= 3) {
+                            pageNum = i + 1;
+                          } else if (paginationInfo.currentPage >= paginationInfo.totalPages - 2) {
+                            pageNum = paginationInfo.totalPages - 4 + i;
+                          } else {
+                            pageNum = paginationInfo.currentPage - 2 + i;
+                          }
+                          
+                          return (
+                            <button
+                              key={pageNum}
+                              onClick={() => handlePageChange(pageNum)}
+                              disabled={loading}
+                              className={`px-3 py-2 text-sm font-medium rounded-md ${
+                                pageNum === paginationInfo.currentPage
+                                  ? 'bg-blue-600 text-white'
+                                  : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                              } disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                              {pageNum}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      
+                      <button
+                        onClick={handleNextPage}
+                        disabled={!paginationInfo.hasNextPage || loading}
+                        className="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

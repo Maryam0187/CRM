@@ -104,12 +104,14 @@ export default function Navbar() {
                   
                   {/* User Dropdown Menu */}
                   {isUserMenuOpen && (
-                    <div className="origin-top-right absolute right-0 mt-2 w-48 rounded-md shadow-lg py-1 bg-white ring-1 ring-black ring-opacity-5 focus:outline-none">
+                    <div className="origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg py-1 bg-white ring-1 ring-black ring-opacity-5 focus:outline-none">
                       <div className="px-4 py-2 border-b border-gray-200">
-                        <p className="text-sm font-medium text-gray-900">
+                        <p className="text-sm font-medium text-gray-900 truncate">
                           {user ? `${user.first_name} ${user.last_name}` : 'User'}
                         </p>
-                        <p className="text-sm text-gray-500">{user?.email}</p>
+                        <p className="text-sm text-gray-500 truncate" title={user?.email}>
+                          {user?.email}
+                        </p>
                         <p className="text-xs text-blue-600 capitalize">{user?.role}</p>
                       </div>
                       <button
