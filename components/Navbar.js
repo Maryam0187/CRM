@@ -49,31 +49,21 @@ export default function Navbar() {
               >
                 My Dashboard
               </Link>
-              <Link
-                href="/customers"
-                className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
-              >
-                My Customers
-              </Link>
-              <Link
-                href="/leads"
-                className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
-              >
-                My Leads
-              </Link>
-              <Link
-                href="/reports"
-                className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
-              >
-                My Performance
-              </Link>
               {isAuthenticated && isAdmin(user) && (
-                <Link
-                  href="/admin/users"
-                  className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
-                >
-                  User Management
-                </Link>
+                <>
+                  <Link
+                    href="/admin/users"
+                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                  >
+                    User Management
+                  </Link>
+                  <Link
+                    href="/admin/customers"
+                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                  >
+                    Customer Management
+                  </Link>
+                </>
               )}
             </div>
           </div>
@@ -181,35 +171,23 @@ export default function Navbar() {
             >
               My Dashboard
             </Link>
-            <Link
-              href="/customers"
-              className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
-              onClick={() => setIsMenuOpen(false)}
-            >
-              My Customers
-            </Link>
-            <Link
-              href="/leads"
-              className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
-              onClick={() => setIsMenuOpen(false)}
-            >
-              My Leads
-            </Link>
-            <Link
-              href="/reports"
-              className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
-              onClick={() => setIsMenuOpen(false)}
-            >
-              My Performance
-            </Link>
             {isAuthenticated && isAdmin(user) && (
-              <Link
-                href="/admin/users"
-                className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                User Management
-              </Link>
+              <>
+                <Link
+                  href="/admin/users"
+                  className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  User Management
+                </Link>
+                <Link
+                  href="/admin/customers"
+                  className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Customer Management
+                </Link>
+              </>
             )}
             <div className="border-t border-gray-200 pt-4 pb-3">
               {!isAuthenticated ? (

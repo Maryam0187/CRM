@@ -1,11 +1,17 @@
 import { CustomerService } from '../../../lib/sequelize-db.js';
 
-export async function GET() {
+export async function GET(request) {
   try {
-    const customers = await CustomerService.findAll();
+    const { searchParams } = new URL(request.url);
+    const page = parseInt(searchParams.get('page')) || 1;
+    const limit = parseInt(searchParams.get('limit')) || 10;
+    
+    const result = await CustomerService.findAllPaginated(page, limit);
+    
     return Response.json({
       success: true,
-      data: customers
+      data: result.data,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Get customers error:', error);
