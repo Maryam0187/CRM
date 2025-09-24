@@ -19,6 +19,33 @@ import {
   validateCurrency 
 } from '../lib/validation.js';
 
+// Helper function to calculate time ago
+const getTimeAgo = (dateString) => {
+  if (!dateString) return 'No previous sales';
+  
+  const now = new Date();
+  const pastDate = new Date(dateString);
+  const diffInMs = now - pastDate;
+  const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+  
+  if (diffInDays === 0) {
+    return 'Today';
+  } else if (diffInDays === 1) {
+    return '1 day ago';
+  } else if (diffInDays < 7) {
+    return `${diffInDays} days ago`;
+  } else if (diffInDays < 30) {
+    const weeks = Math.floor(diffInDays / 7);
+    return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`;
+  } else if (diffInDays < 365) {
+    const months = Math.floor(diffInDays / 30);
+    return months === 1 ? '1 month ago' : `${months} months ago`;
+  } else {
+    const years = Math.floor(diffInDays / 365);
+    return years === 1 ? '1 year ago' : `${years} years ago`;
+  }
+};
+
 export default function AddSale() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -326,9 +353,55 @@ export default function AddSale() {
     setShowCustomerDialog(false);
     setCustomerWarning(null);
     
-    // Continue with the sale using the existing customer
-    if (customerWarning && customerWarning.customerId) {
-      await continueSaleWithExistingCustomer(status, customerWarning.customerId);
+    if (customerWarning) {
+      if (customerWarning.matchType === 'exact' && customerWarning.customerId) {
+        // Exact match - add sale to existing customer
+        await continueSaleWithExistingCustomer(status, customerWarning.customerId);
+      } else if (customerWarning.matchType === 'landline') {
+        if (customerWarning.selectedCustomerId) {
+          // Selected existing customer - add sale to selected customer
+          await continueSaleWithExistingCustomer(status, customerWarning.selectedCustomerId);
+        } else {
+          // No selection - create new customer
+          await continueSaleWithNewCustomer(status);
+        }
+      }
+    }
+  };
+
+  // Continue sale creation with new customer
+  const continueSaleWithNewCustomer = async (status) => {
+    setSaving(true);
+    setError(null);
+    
+    try {
+      // Create new customer with the form data
+      const customerData = {
+        firstName: customer.firstName.trim(),
+        lastName: null,
+        email: null,
+        phone: customer.landlineNo || customer.cellNo,
+        landline: customer.landlineNo,
+        address: customer.address,
+        status: 'prospect'
+      };
+      
+      const customerResponse = await apiClient.post('/api/customers', customerData);
+      const customerResult = await customerResponse.json();
+      
+      if (!customerResult.success) {
+        throw new Error(customerResult.message || 'Failed to create customer');
+      }
+      
+      const customerId = customerResult.data.id;
+      
+      // Continue with sale creation using the new customer ID
+      await continueSaleWithExistingCustomer(status, customerId);
+      
+    } catch (error) {
+      console.error('Error creating new customer:', error);
+      setError(error.message || 'Failed to create customer');
+      setSaving(false);
     }
   };
 
@@ -455,20 +528,45 @@ export default function AddSale() {
           
           const checkResult = await checkResponse.json();
           if (checkResult.success && checkResult.exists) {
-            // Customer already exists, show dialog and wait for user confirmation
-            const lastSaleDateTime = checkResult.lastSale ? new Date(checkResult.lastSale.created_at).toLocaleString() : 'No previous sales';
-            const agentName = checkResult.lastSale?.agent ? `${checkResult.lastSale.agent.firstName} ${checkResult.lastSale.agent.lastName}` : 'Unknown';
-            
-            // Show dialog with customer information
-            setCustomerWarning({
-              customerName: checkResult.customer.firstName,
-              lastSaleDateTime: lastSaleDateTime,
-              agentName: agentName,
-              customerId: checkResult.customer.id
-            });
-            setShowCustomerDialog(true);
-            setSaving(false);
-            return; // Stop here and wait for user to close dialog
+            if (checkResult.matchType === 'exact') {
+              // Exact match found - same name and landline
+              const lastSaleDateTime = checkResult.lastSale ? new Date(checkResult.lastSale.created_at).toLocaleString() : 'No previous sales';
+              const lastSaleTimeAgo = checkResult.lastSale ? getTimeAgo(checkResult.lastSale.created_at) : 'No previous sales';
+              const agentName = checkResult.lastSale?.agent ? `${checkResult.lastSale.agent.firstName} ${checkResult.lastSale.agent.lastName}` : 'Unknown';
+              
+              // Check if the current user is the same as the last sale agent
+              const isCurrentUser = user && checkResult.lastSale?.agent && 
+                (user.id === checkResult.lastSale.agent.id || 
+                 (user.firstName === checkResult.lastSale.agent.firstName && user.lastName === checkResult.lastSale.agent.lastName));
+              
+              const displayAgentName = isCurrentUser ? 'You (yourself)' : 'Other agent';
+              
+              // Show dialog with exact match
+              setCustomerWarning({
+                matchType: 'exact',
+                customerName: checkResult.customer.firstName,
+                lastSaleDateTime: lastSaleDateTime,
+                lastSaleTimeAgo: lastSaleTimeAgo,
+                agentName: displayAgentName,
+                isCurrentUser: isCurrentUser,
+                customerId: checkResult.customer.id
+              });
+              setShowCustomerDialog(true);
+              setSaving(false);
+              return;
+              
+            } else if (checkResult.matchType === 'landline') {
+              // Landline exists with different names - show selection dialog
+              setCustomerWarning({
+                matchType: 'landline',
+                newCustomerName: customer.firstName.trim(),
+                landlineCustomers: checkResult.landlineCustomers,
+                customerCount: checkResult.landlineCustomers.length
+              });
+              setShowCustomerDialog(true);
+              setSaving(false);
+              return;
+            }
           } else {
             // Customer doesn't exist, create new one
             const customerData = {
@@ -1371,15 +1469,108 @@ export default function AddSale() {
               </div>
               
               <div className="mb-4">
-                <p className="text-sm text-gray-600 mb-2">
-                  <strong>Customer:</strong> {customerWarning.customerName}
-                </p>
-                <p className="text-sm text-gray-600 mb-2">
-                  <strong>Last Sale:</strong> {customerWarning.lastSaleDateTime}
-                </p>
-                <p className="text-sm text-gray-500 mt-3">
-                  You can proceed with this customer if needed (e.g., for technical issues or follow-up sales).
-                </p>
+                {customerWarning.matchType === 'exact' ? (
+                  // Exact match - same name and landline
+                  <>
+                    <p className="text-sm text-gray-600 mb-2">
+                      <strong>Exact match found:</strong> {customerWarning.customerName}
+                    </p>
+                    <p className="text-sm text-gray-600 mb-2">
+                      <strong>Last Sale:</strong> {customerWarning.lastSaleDateTime}
+                    </p>
+                    <p className="text-sm text-gray-500 mb-2">
+                      <strong>Time Since Last Sale:</strong> {customerWarning.lastSaleTimeAgo}
+                    </p>
+                    <p className={`text-sm mb-2 ${customerWarning.isCurrentUser ? 'text-green-600 font-medium' : 'text-gray-600'}`}>
+                      <strong>Last Sale Agent:</strong> {customerWarning.agentName}
+                    </p>
+                    <p className="text-sm text-blue-600 mt-3 font-medium">
+                      This will add a new sale to the existing customer.
+                    </p>
+                  </>
+                ) : (
+                  // Landline match - different names
+                  <>
+                    <p className="text-sm text-gray-600 mb-2">
+                      <strong>Landline exists with {customerWarning.customerCount} different customer(s):</strong>
+                    </p>
+                    <p className="text-xs text-gray-500 mb-3">
+                      👆 Click on a customer below to select them, or create a new customer
+                    </p>
+                    <div className="max-h-32 overflow-y-auto mb-3">
+                      {customerWarning.landlineCustomers.map((customer, index) => (
+                        <div key={customer.id} className="mb-2">
+                          <button
+                            onClick={() => {
+                              setCustomerWarning(prev => ({
+                                ...prev,
+                                selectedCustomerId: customer.id,
+                                selectedCustomerName: customer.firstName
+                              }));
+                            }}
+                            className={`w-full text-left p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                              customerWarning.selectedCustomerId === customer.id
+                                ? 'bg-blue-100 border-blue-400 text-blue-800 shadow-md'
+                                : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:shadow-sm'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="text-sm font-medium">
+                                  {customer.firstName} {customer.lastName || ''}
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  ID: {customer.id} • Created: {new Date(customer.created_at).toLocaleDateString()}
+                                </div>
+                              </div>
+                              {customerWarning.selectedCustomerId === customer.id && (
+                                <div className="ml-2">
+                                  <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border-t pt-3">
+                      <button
+                        onClick={() => {
+                          setCustomerWarning(prev => ({
+                            ...prev,
+                            selectedCustomerId: null,
+                            selectedCustomerName: null
+                          }));
+                        }}
+                        className={`w-full text-left p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                          !customerWarning.selectedCustomerId
+                            ? 'bg-green-100 border-green-400 text-green-800 shadow-md'
+                            : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-green-50 hover:border-green-300 hover:shadow-sm'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="text-sm font-medium text-blue-600">
+                              Create New Customer: {customerWarning.newCustomerName}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              This will create a new customer with the entered name
+                            </div>
+                          </div>
+                          {!customerWarning.selectedCustomerId && (
+                            <div className="ml-2">
+                              <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
               
               <div className="flex justify-end space-x-3">
@@ -1397,7 +1588,12 @@ export default function AddSale() {
                   onClick={() => handleCustomerDialogClose(saleStatus)}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  Continue with Sale
+                  {customerWarning.matchType === 'exact' 
+                    ? 'Add Sale to Existing Customer'
+                    : customerWarning.selectedCustomerId 
+                      ? `Add Sale to ${customerWarning.selectedCustomerName}`
+                      : 'Create New Customer'
+                  }
                 </button>
               </div>
             </div>

@@ -11,19 +11,34 @@ export async function POST(request) {
       );
     }
     
-    // Check if customer already exists
-    const existingCustomer = await CustomerService.findByLandlineAndName(landline, firstName);
+    // First, try exact match (name + landline)
+    const exactMatch = await CustomerService.findByLandlineAndName(landline, firstName);
     
-    if (existingCustomer) {
-      // Get the last sale for this customer
-      const lastSale = await CustomerService.getLastSaleForCustomer(existingCustomer.id);
+    if (exactMatch) {
+      // Exact match found - same name and landline
+      const lastSale = await CustomerService.getLastSaleForCustomer(exactMatch.id);
       
       return Response.json({
         success: true,
         exists: true,
-        customer: existingCustomer,
+        matchType: 'exact',
+        customer: exactMatch,
         lastSale: lastSale,
-        message: `Customer already exists. Last sale: ${lastSale ? new Date(lastSale.created_at).toLocaleString() : 'No previous sales'}. You can proceed with this customer if needed.`
+        message: `Exact match found: ${exactMatch.firstName}. Will add new sale to existing customer.`
+      });
+    }
+    
+    // No exact match, check if landline exists with different names
+    const landlineCustomers = await CustomerService.findAllByLandline(landline);
+    
+    if (landlineCustomers && landlineCustomers.length > 0) {
+      // Landline exists with different names - show all options
+      return Response.json({
+        success: true,
+        exists: true,
+        matchType: 'landline',
+        landlineCustomers: landlineCustomers,
+        message: `Landline exists with ${landlineCustomers.length} different customer(s). Please select or create new customer.`
       });
     }
     
