@@ -63,6 +63,18 @@ export default function Navbar() {
                   >
                     Customer Management
                   </Link>
+                  <Link
+                    href="/admin/carriers"
+                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                  >
+                    Carrier Management
+                  </Link>
+                  <Link
+                    href="/admin/receivers"
+                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                  >
+                    Receiver Management
+                  </Link>
                 </>
               )}
             </div>
@@ -186,6 +198,20 @@ export default function Navbar() {
                   onClick={() => setIsMenuOpen(false)}
                 >
                   Customer Management
+                </Link>
+                <Link
+                  href="/admin/carriers"
+                  className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Carrier Management
+                </Link>
+                <Link
+                  href="/admin/receivers"
+                  className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Receiver Management
                 </Link>
               </>
             )}
