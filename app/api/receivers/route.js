@@ -5,12 +5,20 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page')) || 1;
     const limit = parseInt(searchParams.get('limit')) || 10;
+    const carrierId = searchParams.get('carrierId');
     
-    const result = await ReceiverService.findAllPaginated(page, limit);
+    let result;
+    if (carrierId) {
+      // Fetch receivers by carrier ID
+      result = await ReceiverService.findByCarrierId(carrierId);
+    } else {
+      // Fetch all receivers with pagination
+      result = await ReceiverService.findAllPaginated(page, limit);
+    }
     
     return Response.json({
       success: true,
-      data: result.data,
+      data: result.data || result,
       pagination: result.pagination
     });
   } catch (error) {

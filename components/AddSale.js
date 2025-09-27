@@ -179,20 +179,64 @@ export default function AddSale() {
     { text: 'Downgrade', value: 'downgrade' }
   ];
 
-  const carrierOptions = [
-    'Dish', 'DirecTV', 'Comcast', 'Spectrum', 'AT&T U-verse', 
-    'Metrocast', 'EGO Cable', 'Cable'
-  ];
+  // State for carriers and receivers from database
+  const [carriers, setCarriers] = useState([]);
+  const [receivers, setReceivers] = useState([]);
+  const [loadingCarriers, setLoadingCarriers] = useState(false);
+  const [loadingReceivers, setLoadingReceivers] = useState(false);
 
   const serviceOptions = [
     'Tech Visit', 'Receiver Shipment', 'Remotely Upgrade', 'Remote Shipment'
   ];
 
-  const receiverOptions = ['311', '322', '211k', '211z', '222'];
-
   const timeOptions = ['8am - 12pm', '12pm - 4pm', '12pm - 5pm'];
 
   const companyOptions = ['Frontier', 'CenturyLink', 'Windstream'];
+
+  // Fetch carriers from database
+  const fetchCarriers = async () => {
+    try {
+      setLoadingCarriers(true);
+      const response = await apiClient.get('/api/carriers');
+      const data = await response.json();
+      console.log('Carriers API response:', data);
+      if (data.success) {
+        console.log('Setting carriers:', data.data);
+        setCarriers(data.data);
+      } else {
+        console.error('Carriers API failed:', data);
+      }
+    } catch (error) {
+      console.error('Error fetching carriers:', error);
+    } finally {
+      setLoadingCarriers(false);
+    }
+  };
+
+  // Fetch receivers by carrier
+  const fetchReceiversByCarrier = async (carrierId) => {
+    if (!carrierId) {
+      setReceivers([]);
+      return;
+    }
+    
+    try {
+      setLoadingReceivers(true);
+      const response = await apiClient.get(`/api/receivers?carrierId=${carrierId}`);
+      const data = await response.json();
+      console.log('Receivers API response:', data);
+      if (data.success) {
+        console.log('Setting receivers:', data.data);
+        setReceivers(data.data);
+      } else {
+        console.error('Receivers API failed:', data);
+      }
+    } catch (error) {
+      console.error('Error fetching receivers:', error);
+    } finally {
+      setLoadingReceivers(false);
+    }
+  };
 
   // Fetch sale data for edit mode
   const fetchSaleData = async () => {
@@ -271,6 +315,11 @@ export default function AddSale() {
       setLoading(false);
     }
   };
+
+  // Load carriers on component mount
+  useEffect(() => {
+    fetchCarriers();
+  }, []);
 
   // Load data on component mount if in edit mode
   useEffect(() => {
@@ -370,6 +419,16 @@ export default function AddSale() {
       ...prev,
       [field]: formattedValue
     }));
+
+    // If carrier is changed, fetch receivers for that carrier
+    if (field === 'carrier') {
+      const selectedCarrier = carriers.find(c => c.name === value);
+      if (selectedCarrier) {
+        fetchReceiversByCarrier(selectedCarrier.id);
+      } else {
+        setReceivers([]);
+      }
+    }
   };
 
   // Handle service selection
@@ -1573,11 +1632,15 @@ export default function AddSale() {
                     value={saleForm.carrier}
                     onChange={(e) => handleSaleFormChange('carrier', e.target.value)}
                     className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                    disabled={loadingCarriers}
                   >
-                    <option value="">Select Carrier</option>
-                    {carrierOptions.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
+                    <option value="">{loadingCarriers ? 'Loading carriers...' : 'Select Carrier'}</option>
+                    {console.log('Rendering carriers:', carriers)}
+                    {carriers && carriers.length > 0 ? carriers.map((carrier) => (
+                      <option key={carrier.id} value={carrier.name}>{carrier.name}</option>
+                    )) : (
+                      <option value="" disabled>No carriers available</option>
+                    )}
                   </select>
                 </div>
 
@@ -1712,25 +1775,35 @@ export default function AddSale() {
                   <label className="block mb-2 text-sm font-medium text-gray-900">
                     Select Receiver
                   </label>
-                  <div className="space-y-2">
-                    {receiverOptions.map((receiver) => (
-                      <label key={receiver} className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={selectedReceiver.includes(receiver)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              handleReceiverChange([...selectedReceiver, receiver]);
-                            } else {
-                              handleReceiverChange(selectedReceiver.filter(r => r !== receiver));
-                            }
-                          }}
-                          className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-                        />
-                        <span className="ml-2 text-sm text-gray-900">{receiver}</span>
-                      </label>
-                    ))}
-                  </div>
+                  {!saleForm.carrier ? (
+                    <p className="text-sm text-gray-500">Please select a carrier first</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {loadingReceivers ? (
+                        <p className="text-sm text-gray-500">Loading receivers...</p>
+                      ) : receivers.length === 0 ? (
+                        <p className="text-sm text-gray-500">No receivers available for this carrier</p>
+                      ) : (
+                        receivers.map((receiver) => (
+                          <label key={receiver.id} className="flex items-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedReceiver.includes(receiver.name)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  handleReceiverChange([...selectedReceiver, receiver.name]);
+                                } else {
+                                  handleReceiverChange(selectedReceiver.filter(r => r !== receiver.name));
+                                }
+                              }}
+                              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                            <span className="ml-2 text-sm text-gray-900">{receiver.name}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Receiver Quantity Controls */}
