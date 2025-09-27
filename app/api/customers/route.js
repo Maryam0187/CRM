@@ -46,6 +46,32 @@ export async function POST(request) {
     }, { status: 201 });
   } catch (error) {
     console.error('Create customer error:', error);
+    
+    // Handle duplicate customer error
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return Response.json(
+        { 
+          success: false, 
+          message: 'A customer with this name and landline number already exists. Please use a different name or landline number.',
+          error: 'DUPLICATE_CUSTOMER'
+        },
+        { status: 409 }
+      );
+    }
+    
+    // Handle validation errors
+    if (error.name === 'SequelizeValidationError') {
+      const validationErrors = error.errors.map(err => err.message).join(', ');
+      return Response.json(
+        { 
+          success: false, 
+          message: `Validation error: ${validationErrors}`,
+          error: 'VALIDATION_ERROR'
+        },
+        { status: 400 }
+      );
+    }
+    
     return Response.json(
       { success: false, message: 'Failed to create customer', error: error.message },
       { status: 500 }

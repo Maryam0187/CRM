@@ -123,7 +123,7 @@ export default function CustomerManagement() {
                         Customer
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Contact
+                        Contact & Address
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Status
@@ -158,16 +158,41 @@ export default function CustomerManagement() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-6 py-4">
                           <div className="text-sm text-gray-900">
                             {customer.phone && (
-                              <div>Phone: {customer.phone}</div>
+                              <div className="mb-1">Phone: {customer.phone}</div>
                             )}
                             {customer.landline && (
-                              <div>Landline: {customer.landline}</div>
+                              <div className="mb-1">Landline: {customer.landline}</div>
                             )}
                             {customer.email && (
-                              <div>Email: {customer.email}</div>
+                              <div className="mb-1">Email: {customer.email}</div>
+                            )}
+                            {(customer.address || customer.city || customer.state) && (
+                              <div className="mt-2 pt-2 border-t border-gray-200">
+                                <div className="text-xs font-medium text-gray-600 mb-1">Address:</div>
+                                {customer.address && (
+                                  <div className="text-xs text-gray-700 mb-1">{customer.address}</div>
+                                )}
+                                {(customer.city || customer.state || customer.country) && (
+                                  <div className="text-xs text-gray-700">
+                                    {[customer.city, customer.state, customer.country].filter(Boolean).join(', ')}
+                                  </div>
+                                )}
+                                {customer.mailingAddress && (
+                                  <div className="mt-1 text-xs text-gray-600">
+                                    <div className="font-medium">Mailing:</div>
+                                    <div className="text-gray-700">{customer.mailingAddress}</div>
+                                  </div>
+                                )}
+                                {customer.customerFeedback && (
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <div className="text-xs font-medium text-gray-600 mb-1">Feedback:</div>
+                                    <div className="text-xs text-gray-700">{customer.customerFeedback}</div>
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </div>
                         </td>
@@ -177,9 +202,11 @@ export default function CustomerManagement() {
                               ? 'bg-green-100 text-green-800'
                               : customer.status === 'inactive'
                               ? 'bg-red-100 text-red-800'
+                              : customer.status === 'non_prospect'
+                              ? 'bg-gray-100 text-gray-800'
                               : 'bg-yellow-100 text-yellow-800'
                           }`}>
-                            {customer.status || 'prospect'}
+                            {customer.status === 'non_prospect' ? 'Non-Prospect' : customer.status || 'prospect'}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">

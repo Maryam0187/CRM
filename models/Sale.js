@@ -27,7 +27,7 @@ module.exports = (sequelize) => {
       }
     },
     status: {
-      type: DataTypes.ENUM('lead', 'voicemail', 'hang-up', 'no_response', 'appointment', 'active', 'pending', 'completed', 'cancelled'),
+      type: DataTypes.ENUM('lead', 'voicemail', 'hang-up', 'no_response', 'appointment', 'active', 'payment_info', 'pending', 'completed', 'cancelled'),
       defaultValue: 'lead'
     },
     
@@ -282,6 +282,12 @@ module.exports = (sequelize) => {
     Sale.hasMany(models.Bank, {
       foreignKey: 'saleId',
       as: 'banks'
+    });
+
+    // Sale has many sales logs
+    Sale.hasMany(models.SalesLog, {
+      foreignKey: 'saleId',
+      as: 'salesLogs'
     });
 
   };

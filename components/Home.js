@@ -7,6 +7,7 @@ import Table from './Table';
 import DateFilter from './DateFilter';
 import ProtectedRoute from './ProtectedRoute';
 import PaymentModal from './PaymentModal';
+import SalesTimeline from './SalesTimeline';
 import { useAuth } from '../contexts/AuthContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
 
@@ -52,6 +53,10 @@ export default function Home() {
   const [selectedSaleId, setSelectedSaleId] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
   const [paymentNotifications, setPaymentNotifications] = useState({});
+  
+  // Timeline modal state
+  const [isTimelineModalVisible, setIsTimelineModalVisible] = useState(false);
+  const [selectedTimelineSaleId, setSelectedTimelineSaleId] = useState(null);
 
 
   // Set supervised agents from user session data
@@ -361,6 +366,21 @@ export default function Home() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                 </svg>
                 Add Payment
+              </button>
+            )}
+            {user?.role === 'admin' && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedTimelineSaleId(row.id);
+                  setIsTimelineModalVisible(true);
+                }}
+                className="inline-flex items-center px-3 py-1 text-xs font-medium text-purple-600 bg-purple-50 rounded-md hover:bg-purple-100 transition-colors duration-200"
+              >
+                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Timeline
               </button>
             )}
           </div>
@@ -742,6 +762,16 @@ export default function Home() {
         saleId={selectedSaleId}
         onClose={handlePaymentModalClose}
         onSuccess={handlePaymentSuccess}
+      />
+
+      {/* Sales Timeline Modal */}
+      <SalesTimeline
+        isOpen={isTimelineModalVisible}
+        onClose={() => {
+          setIsTimelineModalVisible(false);
+          setSelectedTimelineSaleId(null);
+        }}
+        saleId={selectedTimelineSaleId}
       />
       </div>
     </ProtectedRoute>

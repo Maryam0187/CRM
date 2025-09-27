@@ -131,6 +131,12 @@ module.exports = (sequelize) => {
       otherKey: 'supervisorId',
       as: 'supervisors'
     });
+
+    // User has many sales logs
+    User.hasMany(models.SalesLog, {
+      foreignKey: 'agentId',
+      as: 'salesLogs'
+    });
   };
 
   return User;
