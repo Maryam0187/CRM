@@ -36,12 +36,34 @@ module.exports = (sequelize) => {
       type: DataTypes.TEXT,
       allowNull: true
     },
+    state: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    city: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    country: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    mailingAddress: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: 'mailing_address'
+    },
+    customerFeedback: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: 'customer_feedback'
+    },
     company: {
       type: DataTypes.STRING(255),
       allowNull: true
     },
     status: {
-      type: DataTypes.ENUM('active', 'inactive', 'prospect'),
+      type: DataTypes.ENUM('active', 'inactive', 'prospect', 'non_prospect'),
       defaultValue: 'prospect'
     },
     createdBy: {
@@ -83,6 +105,12 @@ module.exports = (sequelize) => {
     Customer.hasMany(models.Card, {
       foreignKey: 'customerId',
       as: 'cards'
+    });
+
+    // Customer has many sales logs
+    Customer.hasMany(models.SalesLog, {
+      foreignKey: 'customerId',
+      as: 'salesLogs'
     });
 
   };

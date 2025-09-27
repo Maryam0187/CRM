@@ -1,4 +1,4 @@
-import { Card } from '../../../models/index.js';
+import { Card, Sale, SalesLog } from '../../../models/index.js';
 import { 
   validateCardForm, 
   cleanCardData,
@@ -51,6 +51,29 @@ export async function POST(request) {
     const cleanedCardData = cleanCardData(cardData);
 
     const card = await Card.create(cleanedCardData);
+    
+    // Update sale status to payment_info when card is created
+    if (card.saleId) {
+      await Sale.update(
+        { status: 'payment_info' },
+        { where: { id: card.saleId } }
+      );
+      
+      // Get the sale to retrieve customerId
+      const sale = await Sale.findByPk(card.saleId);
+      
+      // Log the status change in sales logs
+      await SalesLog.create({
+        saleId: card.saleId,
+        customerId: sale.customerId,
+        agentId: user.id,
+        action: 'payment_info_added',
+        status: 'payment_info',
+        note: 'Payment information added via card',
+        cardId: card.id,
+        timestamp: new Date()
+      });
+    }
     
     return Response.json({
       success: true,

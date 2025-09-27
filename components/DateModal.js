@@ -2,16 +2,22 @@
 
 import { useState } from 'react';
 
-export default function DateModal({ title, onClose, onDateSelect }) {
+export default function DateModal({ title, onClose, onDateSelect, showTime = false }) {
   const [selectedDate, setSelectedDate] = useState('');
+  const [selectedTime, setSelectedTime] = useState('');
 
   const handleDateChange = (e) => {
     setSelectedDate(e.target.value);
   };
 
+  const handleTimeChange = (e) => {
+    setSelectedTime(e.target.value);
+  };
+
   const handleAdd = () => {
     if (selectedDate) {
-      onDateSelect(selectedDate);
+      const result = showTime ? { date: selectedDate, time: selectedTime } : selectedDate;
+      onDateSelect(result);
     }
   };
 
@@ -40,15 +46,29 @@ export default function DateModal({ title, onClose, onDateSelect }) {
         <div className="p-6">
           <div className="mb-4">
             <p className="text-sm text-gray-600 mb-4">
-              {selectedDate && `Selected: ${new Date(selectedDate).toLocaleDateString()}`}
+              {selectedDate && `Selected: ${new Date(selectedDate).toLocaleDateString()}${selectedTime ? ` at ${selectedTime}` : ''}`}
             </p>
-            <div className="relative">
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={handleDateChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-900"
-              />
+            <div className="space-y-4">
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={handleDateChange}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+                />
+              </div>
+              {showTime && (
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Time</label>
+                  <input
+                    type="time"
+                    value={selectedTime}
+                    onChange={handleTimeChange}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>

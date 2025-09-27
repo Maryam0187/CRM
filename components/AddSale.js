@@ -60,11 +60,23 @@ export default function AddSale() {
     firstName: '',
     landlineNo: '',
     cellNo: '',
-    address: ''
+    address: '',
+    state: '',
+    city: '',
+    country: 'USA',
+    mailingAddress: '',
+    customerFeedback: ''
+  });
+
+  // Customer validation state
+  const [customerValidation, setCustomerValidation] = useState({
+    firstName: { isValid: true, message: '' },
+    landlineNo: { isValid: true, message: '' }
   });
 
   // Sale form state
   const [saleForm, setSaleForm] = useState({
+    status: 'new', // Add status field
     pin_code: '',
     pin_code_status: '',
     ssnName: '',
@@ -90,6 +102,8 @@ export default function AddSale() {
     dueonDate: '',
     techVisitDate: '',
     techVisitTime: '',
+    appointmentDate: '',
+    appointmentTime: '',
     services: [],
     receivers: {},
     receiversInfo: {}
@@ -120,6 +134,43 @@ export default function AddSale() {
     locationId: '',
     room: ''
   });
+
+  // Step detection logic
+  const getCurrentStep = () => {
+    if (!saleForm.status) return 'first'; // Default to first step for new sales
+    
+    const status = saleForm.status.toLowerCase();
+    console.log('Current sale status:', status, 'Edit mode:', isEditMode);
+    
+    // First step: initial contact (only for new sales or specific initial statuses)
+    if (['new', 'lead', 'hang-up', 'voicemail', 'no_response'].includes(status)) {
+      console.log('Detected as first step');
+      return 'first';
+    }
+    
+    // Third step: processing (only when status is pending for charge)
+    if (['pending', 'verification', 'process', 'charge_pending'].includes(status)) {
+      console.log('Detected as third step');
+      return 'third';
+    }
+    
+    // Admin step: final actions
+    if (['completed', 'cancelled', 'approved', 'declined', 'done', 'chargeback'].includes(status)) {
+      console.log('Detected as admin step');
+      return 'admin';
+    }
+    
+    // Second step: active engagement (for all other statuses including edit mode)
+    // This includes: 'active', 'payment_info', 'appointment', 'second_call', 'customer_agree', etc.
+    console.log('Detected as second step (default)');
+    return 'second';
+  };
+
+  // Check if payment info has been added (cards or banks)
+  const hasPaymentInfo = () => {
+    // This will be updated when we implement card/bank detection
+    return false;
+  };
 
   // Options for dropdowns
   const packageStatusOptions = [
@@ -162,12 +213,18 @@ export default function AddSale() {
             firstName: sale.customer.firstName || '',
             landlineNo: sale.landlineNo || sale.customer.phone || '',
             cellNo: sale.cellNo || '',
-            address: sale.address || ''
+            address: sale.address || sale.customer.address || '',
+            state: sale.customer.state || '',
+            city: sale.customer.city || '',
+            country: sale.customer.country || 'USA',
+            mailingAddress: sale.customer.mailingAddress || '',
+            customerFeedback: sale.customer.customerFeedback || ''
           });
         }
         
         // Populate sale form data
         setSaleForm({
+          status: sale.status || 'new', // Add status field
           pin_code: sale.pinCode || '',
           pin_code_status: sale.pinCodeStatus || '',
           ssnName: sale.ssnName || '',
@@ -193,6 +250,8 @@ export default function AddSale() {
           dueonDate: sale.dueOnDate || '',
           techVisitDate: sale.techVisitDate || '',
           techVisitTime: sale.techVisitTime || '',
+          appointmentDate: sale.appointmentDate || '',
+          appointmentTime: sale.appointmentTime || '',
           services: sale.services || [],
           receivers: sale.receivers || {},
           receiversInfo: sale.receiversInfo || {}
@@ -218,6 +277,41 @@ export default function AddSale() {
     fetchSaleData();
   }, [editId]);
 
+  // Validation functions
+  const validateCustomerName = (name) => {
+    if (!name || name.trim() === '') {
+      return { isValid: false, message: 'Customer name is required' };
+    }
+    if (name.trim().length < 2) {
+      return { isValid: false, message: 'Customer name must be at least 2 characters' };
+    }
+    if (name.trim().length > 100) {
+      return { isValid: false, message: 'Customer name must be less than 100 characters' };
+    }
+    if (!/^[a-zA-Z\s'-]+$/.test(name.trim())) {
+      return { isValid: false, message: 'Customer name can only contain letters, spaces, hyphens, and apostrophes' };
+    }
+    return { isValid: true, message: '' };
+  };
+
+  const validateLandline = (landline) => {
+    if (!landline || landline.trim() === '') {
+      return { isValid: false, message: 'Landline number is required' };
+    }
+    // Remove formatting for validation
+    const cleanLandline = landline.replace(/[^\d]/g, '');
+    if (cleanLandline.length < 10) {
+      return { isValid: false, message: 'Landline number must be at least 10 digits' };
+    }
+    if (cleanLandline.length > 15) {
+      return { isValid: false, message: 'Landline number must be less than 15 digits' };
+    }
+    if (!/^\d+$/.test(cleanLandline)) {
+      return { isValid: false, message: 'Landline number can only contain digits' };
+    }
+    return { isValid: true, message: '' };
+  };
+
   // Handle customer form changes
   const handleCustomerChange = (field, value) => {
     // Format input based on field type
@@ -232,6 +326,32 @@ export default function AddSale() {
       ...prev,
       [field]: formattedValue
     }));
+
+    // Validate the field
+    let validation = { isValid: true, message: '' };
+    if (field === 'firstName') {
+      validation = validateCustomerName(formattedValue);
+    } else if (field === 'landlineNo') {
+      validation = validateLandline(formattedValue);
+    }
+
+    setCustomerValidation(prev => ({
+      ...prev,
+      [field]: validation
+    }));
+  };
+
+  // Validate all customer fields
+  const validateAllCustomerFields = () => {
+    const nameValidation = validateCustomerName(customer.firstName);
+    const landlineValidation = validateLandline(customer.landlineNo);
+    
+    setCustomerValidation({
+      firstName: nameValidation,
+      landlineNo: landlineValidation
+    });
+
+    return nameValidation.isValid && landlineValidation.isValid;
   };
 
   // Handle sale form changes
@@ -347,6 +467,69 @@ export default function AddSale() {
     // You can add logic here to handle the selected date
   };
 
+  // Open appointment modal with date and time selection
+  const openAppointmentModal = () => {
+    setSaleStatus('appointment');
+    setIsDateModalOpen(true);
+  };
+
+  const handleAppointmentSelect = (dateTimeData) => {
+    if (typeof dateTimeData === 'object' && dateTimeData.date) {
+      // Update the sale form with appointment date and time
+      setSaleForm(prev => ({
+        ...prev,
+        appointmentDate: dateTimeData.date,
+        appointmentTime: dateTimeData.time || ''
+      }));
+      
+      // Log the appointment action with the selected date and time
+      logSalesAction('appointment', 'appointment', {
+        appointmentDate: dateTimeData.date,
+        appointmentTime: dateTimeData.time || ''
+      });
+    }
+    setIsDateModalOpen(false);
+  };
+
+  // Step-specific action handlers
+  const handleFirstStepAction = (action, status) => {
+    if (action === 'appointment') {
+      openAppointmentModal();
+    } else if (action === 'customer_agree') {
+      logSalesAction('customer_agree', 'active');
+    } else {
+      logSalesAction(action, status);
+    }
+  };
+
+  const handleSecondStepAction = (action, status) => {
+    if (action === 'update_sale_data') {
+      // Update sale data without changing status
+      logSalesAction('update_sale_data', saleForm.status);
+    } else if (action === 'add_note') {
+      // Add note without changing status
+      logSalesAction('add_note', saleForm.status);
+    } else if (action === 'add_appointment') {
+      // Add new appointment without changing status
+      openAppointmentModal();
+    } else if (action === 'customer_agree') {
+      logSalesAction('customer_agree', 'active');
+    } else if (action === 'second_call') {
+      logSalesAction('second_call', 'active');
+    } else {
+      logSalesAction(action, status);
+    }
+  };
+
+  const handleThirdStepAction = (action, status) => {
+    logSalesAction(action, status);
+  };
+
+  const handleAdminAction = (action, status) => {
+    logSalesAction(action, status);
+  };
+
+
   // Add or update sale with status
   // Handle customer dialog close and continue with sale
   const handleCustomerDialogClose = async (status) => {
@@ -374,6 +557,13 @@ export default function AddSale() {
     setSaving(true);
     setError(null);
     
+    // Validate customer fields before proceeding
+    if (!validateAllCustomerFields()) {
+      setError('Please fix the validation errors before proceeding');
+      setSaving(false);
+      return;
+    }
+    
     try {
       // Create new customer with the form data
       const customerData = {
@@ -383,6 +573,11 @@ export default function AddSale() {
         phone: customer.landlineNo || customer.cellNo,
         landline: customer.landlineNo,
         address: customer.address,
+        state: customer.state,
+        city: customer.city,
+        country: 'USA', // Always set to USA
+        mailingAddress: customer.mailingAddress,
+        customerFeedback: customer.customerFeedback,
         status: 'prospect'
       };
       
@@ -390,7 +585,14 @@ export default function AddSale() {
       const customerResult = await customerResponse.json();
       
       if (!customerResult.success) {
-        throw new Error(customerResult.message || 'Failed to create customer');
+        // Handle specific error cases based on error type
+        if (customerResult.error === 'DUPLICATE_CUSTOMER') {
+          throw new Error('A customer with this name and landline number already exists. Please use a different name or landline number.');
+        } else if (customerResult.error === 'VALIDATION_ERROR') {
+          throw new Error(customerResult.message || 'Please check the customer information and try again.');
+        } else {
+          throw new Error(customerResult.message || 'Failed to create customer');
+        }
       }
       
       const customerId = customerResult.data.id;
@@ -475,10 +677,143 @@ export default function AddSale() {
     }
   };
 
+  // Sales logging function
+  const logSalesAction = async (action, status, additionalData = {}) => {
+    setSaving(true);
+    setError(null);
+    setSaleStatus(status);
+    
+    // Update sale form status
+    setSaleForm(prev => ({
+      ...prev,
+      status: status
+    }));
+    
+    // Validate customer fields before proceeding
+    if (!validateAllCustomerFields()) {
+      setError('Please fix the validation errors before proceeding');
+      setSaving(false);
+      return;
+    }
+    
+    try {
+      // First, save the sale with the new status and get the sale ID
+      const saleResult = await addSale(status);
+      
+      // Only log if we have valid IDs
+      if (saleResult?.id && (customer.id || saleResult.customerId)) {
+        const logData = {
+          saleId: saleResult.id,
+          customerId: customer.id || saleResult.customerId,
+          agentId: user?.id,
+          action,
+          status,
+          currentSaleData: {
+            ...saleForm,
+            customer,
+            status,
+            ...additionalData
+          },
+          breakdown: saleForm.breakdown || '',
+          note: saleForm.notes || '',
+          appointmentDate: saleForm.appointmentDate || null,
+          appointmentTime: saleForm.appointmentTime || null
+        };
+
+        // Log the action to sales logs
+        const response = await apiClient.post('/api/sales-logs', logData);
+        const responseData = await response.json();
+        
+        if (!responseData.success) {
+          console.error('Failed to log sales action:', responseData.error);
+        }
+      }
+    } catch (error) {
+      console.error('Error logging sales action:', error);
+      setError('Failed to log sales action');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Handle "Not a Customer" action - update customer status without creating sale
+  const handleNotACustomer = async () => {
+    setSaving(true);
+    setError(null);
+    
+    // Validate customer fields before proceeding
+    if (!validateAllCustomerFields()) {
+      setError('Please fix the validation errors before proceeding');
+      setSaving(false);
+      return;
+    }
+    
+    try {
+      // Check if customer exists
+      if (customer.firstName && customer.firstName.trim() !== '') {
+        // Create or update customer with "not_customer" status
+        const customerData = {
+          firstName: customer.firstName.trim(),
+          lastName: null,
+          email: null,
+          phone: customer.landlineNo || customer.cellNo,
+          landline: customer.landlineNo,
+          address: customer.address,
+          state: customer.state,
+          city: customer.city,
+          country: 'USA',
+          mailingAddress: customer.mailingAddress,
+          customerFeedback: customer.customerFeedback,
+          status: 'non_prospect' // Special status for non-prospect
+        };
+        
+        const customerResponse = await apiClient.post('/api/customers', customerData);
+        const customerResult = await customerResponse.json();
+        
+        if (!customerResult.success) {
+          console.error('Failed to create customer:', customerResult.message);
+          
+          // Handle specific error cases based on error type
+          if (customerResult.error === 'DUPLICATE_CUSTOMER') {
+            setError('A customer with this name and landline number already exists. Please use a different name or landline number.');
+          } else if (customerResult.error === 'VALIDATION_ERROR') {
+            setError(customerResult.message || 'Please check the customer information and try again.');
+          } else if (customerResult.message && customerResult.message.includes('already exists')) {
+            setError('This customer already exists in the system. Please check the customer list or use a different name.');
+          } else if (customerResult.message && customerResult.message.includes('duplicate')) {
+            setError('A customer with this information already exists. Please verify the customer details.');
+          } else {
+            setError(customerResult.message || 'Failed to create customer record. Please try again.');
+          }
+          return;
+        }
+        
+        // Note: No sales log entry for non-prospect customers since they don't have sales
+        
+        // Redirect to dashboard
+        router.push('/');
+      } else {
+        setError('Please enter customer name to mark as non-prospect');
+      }
+    } catch (error) {
+      console.error('Error marking customer as non-prospect:', error);
+      setError(error.message || 'Failed to mark customer as non-prospect. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const addSale = async (status) => {
     setSaving(true);
     setError(null);
     setSaleStatus(status);
+    
+    // Validate customer fields before proceeding
+    if (!validateAllCustomerFields()) {
+      setError('Please fix the validation errors before proceeding');
+      setSaving(false);
+      return null;
+    }
     
     try {
       let customerId;
@@ -499,6 +834,11 @@ export default function AddSale() {
               phone: customer.landlineNo || customer.cellNo, // Use landline or cell as phone
               landline: customer.landlineNo,
               address: customer.address,
+              state: customer.state,
+              city: customer.city,
+              country: 'USA', // Always set to USA
+              mailingAddress: customer.mailingAddress,
+              customerFeedback: customer.customerFeedback,
               status: 'prospect'
             };
             
@@ -655,6 +995,7 @@ export default function AddSale() {
       };
       
       // Save or update sale
+      let saleResult;
       if (isEditMode) {
         const response = await apiClient.put(`/api/sales/${editId}`, saleData);
         
@@ -662,6 +1003,7 @@ export default function AddSale() {
         if (!result.success) {
           throw new Error(result.message || 'Failed to update sale');
         }
+        saleResult = result.data;
       } else {
         const response = await apiClient.post('/api/sales', saleData);
         
@@ -669,10 +1011,13 @@ export default function AddSale() {
         if (!result.success) {
           throw new Error(result.message || 'Failed to create sale');
         }
+        saleResult = result.data;
       }
       
       // Navigate back to home
       router.push('/');
+      
+      return saleResult;
     } catch (error) {
       setError(error.message || 'An error occurred while saving the sale');
       console.error('Error saving sale:', error);
@@ -746,46 +1091,203 @@ export default function AddSale() {
         </div>
       )}
 
-      {/* Action Buttons */}
+      {/* Step-Based Action Buttons */}
       <div className="sticky top-16 z-30 bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => addSale('active')}
-              disabled={saving || loading}
-              className="bg-blue-600 text-white font-medium rounded-lg text-sm px-5 py-2.5 hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? 'Saving...' : 'Active'}
-            </button>
-            <button
-              onClick={() => addSale('pending')}
-              disabled={saving || loading}
-              className="bg-blue-600 text-white font-medium rounded-lg text-sm px-5 py-2.5 hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? 'Saving...' : 'Pending'}
-            </button>
-            <button
-              onClick={() => addSale('completed')}
-              disabled={saving || loading}
-              className="bg-blue-600 text-white font-medium rounded-lg text-sm px-5 py-2.5 hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? 'Saving...' : 'Completed'}
-            </button>
-            <button
-              onClick={() => addSale('cancelled')}
-              disabled={saving || loading}
-              className="bg-blue-600 text-white font-medium rounded-lg text-sm px-5 py-2.5 hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? 'Saving...' : 'Cancelled'}
-            </button>
-            <button
-              onClick={() => openDateModal('Appointment')}
-              disabled={saving || loading}
-              className="bg-blue-600 text-white font-medium rounded-lg text-sm px-5 py-2.5 hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Appointment
-            </button>
+          {/* Current Step Indicator */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Step {getCurrentStep() === 'first' ? '1' : getCurrentStep() === 'second' ? '2' : getCurrentStep() === 'third' ? '3' : 'Admin'}: 
+                {getCurrentStep() === 'first' ? ' Initial Contact' : 
+                 getCurrentStep() === 'second' ? ' Active Engagement' : 
+                 getCurrentStep() === 'third' ? ' Processing' : ' Final Actions'}
+              </h3>
+              <div className="text-sm text-gray-500">
+                <div>Status: {saleForm.status || 'New'}</div>
+                <div>Edit Mode: {isEditMode ? 'Yes' : 'No'}</div>
+                <div>Step: {getCurrentStep()}</div>
+              </div>
+            </div>
           </div>
+
+          {/* Step 1: Initial Contact Actions */}
+          {getCurrentStep() === 'first' && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              <button
+                onClick={() => handleFirstStepAction('hangup', 'hang-up')}
+                disabled={saving || loading}
+                className="bg-red-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                📞 Hangup
+              </button>
+              <button
+                onClick={() => handleFirstStepAction('voicemail', 'voicemail')}
+                disabled={saving || loading}
+                className="bg-orange-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-orange-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                📧 Voicemail
+              </button>
+              <button
+                onClick={() => handleFirstStepAction('no_response', 'no_response')}
+                disabled={saving || loading}
+                className="bg-gray-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ❌ No Response
+              </button>
+              <button
+                onClick={() => handleFirstStepAction('appointment', 'appointment')}
+                disabled={saving || loading}
+                className="bg-purple-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-purple-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                📅 Appointment
+              </button>
+              <button
+                onClick={() => handleFirstStepAction('lead_call', 'lead')}
+                disabled={saving || loading}
+                className="bg-blue-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🎯 Lead Call
+              </button>
+              <button
+                onClick={() => handleFirstStepAction('second_call', 'active')}
+                disabled={saving || loading}
+                className="bg-green-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🔄 Second Call
+              </button>
+              <button
+                onClick={() => handleFirstStepAction('customer_agree', 'active')}
+                disabled={saving || loading}
+                className="bg-green-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ✅ Customer Agree
+              </button>
+              <button
+                onClick={() => handleNotACustomer()}
+                disabled={saving || loading}
+                className="bg-gray-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-gray-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🚫 Non-Prospect
+              </button>
+            </div>
+          )}
+
+          {/* Step 2: Active Engagement Actions */}
+          {getCurrentStep() === 'second' && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              <button
+                onClick={() => handleSecondStepAction('update_sale_data', saleForm.status)}
+                disabled={saving || loading}
+                className="bg-blue-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                📝 Update Sale Data
+              </button>
+              <button
+                onClick={() => handleSecondStepAction('customer_agree', 'active')}
+                disabled={saving || loading}
+                className="bg-green-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ✅ Customer Agree
+              </button>
+              <button
+                onClick={() => handleSecondStepAction('add_note', saleForm.status)}
+                disabled={saving || loading}
+                className="bg-yellow-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-yellow-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                📝 Add Note
+              </button>
+              <button
+                onClick={() => handleSecondStepAction('add_appointment', saleForm.status)}
+                disabled={saving || loading}
+                className="bg-purple-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-purple-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                📅 Add Appointment
+              </button>
+              <button
+                onClick={() => handleSecondStepAction('second_call', 'active')}
+                disabled={saving || loading}
+                className="bg-green-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🔄 Second Call
+              </button>
+            </div>
+          )}
+
+          {/* Step 3: Processing Actions */}
+          {getCurrentStep() === 'third' && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              <button
+                onClick={() => handleThirdStepAction('verification', 'verification')}
+                disabled={saving || loading}
+                className="bg-indigo-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-indigo-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🔍 Verification
+              </button>
+              <button
+                onClick={() => handleThirdStepAction('process', 'process')}
+                disabled={saving || loading}
+                className="bg-yellow-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-yellow-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ⚙️ Process
+              </button>
+              <button
+                onClick={() => handleThirdStepAction('charge_pending', 'charge_pending')}
+                disabled={saving || loading}
+                className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                💰 Charge Pending
+              </button>
+            </div>
+          )}
+
+          {/* Admin Actions */}
+          {getCurrentStep() === 'admin' && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              <button
+                onClick={() => handleAdminAction('charge', 'charge')}
+                disabled={saving || loading}
+                className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                💰 Charge
+              </button>
+              <button
+                onClick={() => handleAdminAction('decline', 'declined')}
+                disabled={saving || loading}
+                className="bg-red-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ❌ Decline
+              </button>
+              <button
+                onClick={() => handleAdminAction('cancelled', 'cancelled')}
+                disabled={saving || loading}
+                className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🚫 Cancelled
+              </button>
+              <button
+                onClick={() => handleAdminAction('approved', 'approved')}
+                disabled={saving || loading}
+                className="bg-green-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ✅ Approved
+              </button>
+              <button
+                onClick={() => handleAdminAction('done', 'done')}
+                disabled={saving || loading}
+                className="bg-green-800 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-900 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ✅ Done
+              </button>
+              <button
+                onClick={() => handleAdminAction('chargeback', 'chargeback')}
+                disabled={saving || loading}
+                className="bg-red-800 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-900 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🔄 Chargeback
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -795,20 +1297,47 @@ export default function AddSale() {
           <div className="p-6">
             <h2 className="text-2xl font-bold text-center mb-6">Customer Information</h2>
             
+            {/* Validation Summary */}
+            {(!customerValidation.firstName.isValid || !customerValidation.landlineNo.isValid) && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-red-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 19.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                  <h3 className="text-sm font-medium text-red-800">Please fix the following errors:</h3>
+                </div>
+                <ul className="mt-2 text-sm text-red-700 list-disc list-inside">
+                  {!customerValidation.firstName.isValid && (
+                    <li>{customerValidation.firstName.message}</li>
+                  )}
+                  {!customerValidation.landlineNo.isValid && (
+                    <li>{customerValidation.landlineNo.message}</li>
+                  )}
+                </ul>
+              </div>
+            )}
+            
             <form className="space-y-6">
               <div className="grid gap-6 md:grid-cols-2">
                 <div>
                   <label htmlFor="firstName" className="block mb-2 text-sm font-medium text-gray-900">
-                    Name
+                    Name <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     id="firstName"
                     value={customer.firstName}
                     onChange={(e) => handleCustomerChange('firstName', e.target.value)}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                    className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 ${
+                      customerValidation.firstName.isValid 
+                        ? 'border-gray-300' 
+                        : 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                    }`}
                     placeholder="Enter Name"
                   />
+                  {!customerValidation.firstName.isValid && (
+                    <p className="mt-1 text-sm text-red-600">{customerValidation.firstName.message}</p>
+                  )}
                 </div>
                 <div>
                   <label htmlFor="spokeTo" className="block mb-2 text-sm font-medium text-gray-900">
@@ -823,16 +1352,23 @@ export default function AddSale() {
                 </div>
                 <div>
                   <label htmlFor="landline" className="block mb-2 text-sm font-medium text-gray-900">
-                    LandLine Number
+                    LandLine Number <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="tel"
                     id="landline"
                     value={customer.landlineNo}
                     onChange={(e) => handleCustomerChange('landlineNo', e.target.value)}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                    className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 ${
+                      customerValidation.landlineNo.isValid 
+                        ? 'border-gray-300' 
+                        : 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                    }`}
                     placeholder="555-123-4567"
                   />
+                  {!customerValidation.landlineNo.isValid && (
+                    <p className="mt-1 text-sm text-red-600">{customerValidation.landlineNo.message}</p>
+                  )}
                 </div>
                 <div>
                   <label htmlFor="cell" className="block mb-2 text-sm font-medium text-gray-900">
@@ -850,7 +1386,7 @@ export default function AddSale() {
               </div>
               <div>
                 <label htmlFor="address" className="block mb-2 text-sm font-medium text-gray-900">
-                  Address
+                  Physical/Service Address
                 </label>
                 <input
                   type="text"
@@ -858,7 +1394,78 @@ export default function AddSale() {
                   value={customer.address}
                   onChange={(e) => handleCustomerChange('address', e.target.value)}
                   className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                  placeholder="Street Address, City, State Zipcode"
+                  placeholder="Street Address"
+                />
+              </div>
+              
+              {/* Address Details */}
+              <div className="grid gap-6 md:grid-cols-3">
+                <div>
+                  <label htmlFor="country" className="block mb-2 text-sm font-medium text-gray-900">
+                    Country
+                  </label>
+                  <input
+                    type="text"
+                    id="country"
+                    value="USA"
+                    disabled
+                    className="bg-gray-100 border border-gray-300 text-gray-500 text-sm rounded-lg block w-full p-2.5 cursor-not-allowed"
+                    placeholder="USA"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="state" className="block mb-2 text-sm font-medium text-gray-900">
+                    State
+                  </label>
+                  <input
+                    type="text"
+                    id="state"
+                    value={customer.state}
+                    onChange={(e) => handleCustomerChange('state', e.target.value)}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                    placeholder="Enter State"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="city" className="block mb-2 text-sm font-medium text-gray-900">
+                    City
+                  </label>
+                  <input
+                    type="text"
+                    id="city"
+                    value={customer.city}
+                    onChange={(e) => handleCustomerChange('city', e.target.value)}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                    placeholder="Enter City"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label htmlFor="mailingAddress" className="block mb-2 text-sm font-medium text-gray-900">
+                  Mailing Address
+                </label>
+                <textarea
+                  id="mailingAddress"
+                  value={customer.mailingAddress}
+                  onChange={(e) => handleCustomerChange('mailingAddress', e.target.value)}
+                  className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                  placeholder="Enter Mailing Address (if different from above)"
+                  rows="3"
+                />
+              </div>
+              
+              <div>
+                <label htmlFor="customerFeedback" className="block mb-2 text-sm font-medium text-gray-900">
+                  Customer Feedback
+                </label>
+                <textarea
+                  id="customerFeedback"
+                  value={customer.customerFeedback}
+                  onChange={(e) => handleCustomerChange('customerFeedback', e.target.value)}
+                  className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                  placeholder="Enter customer feedback or notes about the interaction"
+                  rows="3"
                 />
               </div>
             </form>
@@ -1035,6 +1642,38 @@ export default function AddSale() {
                     </select>
                   </div>
                 )}
+
+                {/* Appointment Date */}
+                <div>
+                  <label htmlFor="appointmentDate" className="block mb-2 text-sm font-medium text-gray-900">
+                    Appointment Date
+                  </label>
+                  <input
+                    type="date"
+                    id="appointmentDate"
+                    value={saleForm.appointmentDate}
+                    onChange={(e) => handleSaleFormChange('appointmentDate', e.target.value)}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                  />
+                </div>
+
+                {/* Appointment Time */}
+                <div>
+                  <label htmlFor="appointmentTime" className="block mb-2 text-sm font-medium text-gray-900">
+                    Appointment Time
+                  </label>
+                  <select
+                    id="appointmentTime"
+                    value={saleForm.appointmentTime}
+                    onChange={(e) => handleSaleFormChange('appointmentTime', e.target.value)}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                  >
+                    <option value="">Select Time</option>
+                    {timeOptions.map((time) => (
+                      <option key={time} value={time}>{time}</option>
+                    ))}
+                  </select>
+                </div>
 
                 {/* Basic Package */}
                 <div>
@@ -1432,9 +2071,10 @@ export default function AddSale() {
       {/* Date Modal */}
       {isDateModalOpen && (
         <DateModal
-          title="Select Date"
+          title={saleStatus === 'appointment' ? "Set Appointment Date & Time" : "Select Date"}
           onClose={() => setIsDateModalOpen(false)}
-          onDateSelect={handleDateSelect}
+          onDateSelect={saleStatus === 'appointment' ? handleAppointmentSelect : handleDateSelect}
+          showTime={saleStatus === 'appointment'}
         />
       )}
 
@@ -1603,3 +2243,4 @@ export default function AddSale() {
     </div>
   );
 }
+

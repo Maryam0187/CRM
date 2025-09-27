@@ -1,12 +1,20 @@
-import { Bank } from '../../../models/index.js';
+import { Bank, Sale, SalesLog } from '../../../models/index.js';
 import { 
   validateBankForm, 
   cleanBankData 
 } from '../../../lib/validation.js';
+import { requireAuth } from '../../../lib/serverAuth.js';
 
 export async function POST(request) {
   try {
     const bankData = await request.json();
+    
+    // Get user info from authentication (like in cards)
+    const authResult = await requireAuth(request);
+    if (authResult.error) {
+      return Response.json({ error: authResult.error }, { status: authResult.status });
+    }
+    const { user } = authResult;
     
     // Validate required fields
     if (!bankData.saleId || !bankData.bankName || !bankData.accountHolder || 
@@ -33,6 +41,29 @@ export async function POST(request) {
     const cleanedBankData = cleanBankData(bankData);
 
     const bank = await Bank.create(cleanedBankData);
+    
+    // Update sale status to payment_info when bank is created
+    if (bank.saleId) {
+      await Sale.update(
+        { status: 'payment_info' },
+        { where: { id: bank.saleId } }
+      );
+      
+      // Get the sale to retrieve customerId
+      const sale = await Sale.findByPk(bank.saleId);
+      
+      // Log the status change in sales logs
+      await SalesLog.create({
+        saleId: bank.saleId,
+        customerId: sale.customerId,
+        agentId: user?.id || 1, // Use user ID from request or default to 1
+        action: 'payment_info_added',
+        status: 'payment_info',
+        note: 'Payment information added via bank',
+        bankId: bank.id,
+        timestamp: new Date()
+      });
+    }
     
     return Response.json({
       success: true,
