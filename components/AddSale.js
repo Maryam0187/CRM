@@ -413,9 +413,8 @@ export default function AddSale() {
       formattedValue = formatSSN(value);
     } else if (field === 'regularBill' || field === 'promotionalBill' || field === 'lastPayment' || field === 'balance') {
       formattedValue = formatCurrency(value);
-    } else if (field === 'techVisitTime') {
-      formattedValue = formatTime(value);
     }
+    // Note: techVisitTime uses predefined options like "8am - 12pm", so no formatting needed
     
     setSaleForm(prev => ({
       ...prev,
@@ -716,9 +715,9 @@ export default function AddSale() {
         receivers: saleForm.receivers || {},
         receiversInfo: saleForm.receiversInfo || {},
         techVisitDate: saleForm.techVisitDate ? new Date(saleForm.techVisitDate).toISOString() : null,
-        techVisitTime: saleForm.techVisitTime ? new Date(saleForm.techVisitTime).toISOString() : null,
+        techVisitTime: saleForm.techVisitTime || null,
         appointmentDate: saleForm.appointmentDate ? new Date(saleForm.appointmentDate).toISOString() : null,
-        appointmentTime: saleForm.appointmentTime ? new Date(saleForm.appointmentTime).toISOString() : null
+        appointmentTime: saleForm.appointmentTime || null
       };
 
       // Create the sale
@@ -760,7 +759,7 @@ export default function AddSale() {
     
     try {
       // First, save the sale with the new status and get the sale ID
-      const saleResult = await addSale(status);
+      const saleResult = await addSale(status, additionalData);
       
       // Only log if we have valid IDs
       if (saleResult?.id && (customer.id || saleResult.customerId)) {
@@ -779,8 +778,13 @@ export default function AddSale() {
           breakdown: saleForm.breakdown || '',
           note: saleForm.notes || '',
           appointmentDate: saleForm.appointmentDate || null,
-          appointmentTime: saleForm.appointmentTime || null
+          appointmentTime: saleForm.appointmentTime || null,
+          ...additionalData
         };
+
+        console.log('🔍 DEBUG: Log data:', logData);
+        console.log('🔍 DEBUG: Sale form:', saleForm);
+        console.log('🔍 DEBUG: Additional data:', additionalData);
 
         // Log the action to sales logs
         const response = await apiClient.post('/api/sales-logs', logData);
@@ -865,7 +869,7 @@ export default function AddSale() {
     }
   };
 
-  const addSale = async (status) => {
+  const addSale = async (status, additionalData = {}) => {
     setSaving(true);
     setError(null);
     setSaleStatus(status);
@@ -1054,7 +1058,9 @@ export default function AddSale() {
         receivers: saleForm.receivers,
         receiversInfo: saleForm.receiversInfo,
         techVisitDate: sanitizeValue(saleForm.techVisitDate),
-        techVisitTime: sanitizeValue(saleForm.techVisitTime)
+        techVisitTime: sanitizeValue(saleForm.techVisitTime),
+        appointmentDate: additionalData.appointmentDate ?? sanitizeValue(additionalData.appointmentDate),
+        appointmentTime:additionalData.appointmentTime ??  sanitizeValue(additionalData.appointmentTime)
       };
       
       // Save or update sale
@@ -1712,37 +1718,6 @@ export default function AddSale() {
                   </div>
                 )}
 
-                {/* Appointment Date */}
-                <div>
-                  <label htmlFor="appointmentDate" className="block mb-2 text-sm font-medium text-gray-900">
-                    Appointment Date
-                  </label>
-                  <input
-                    type="date"
-                    id="appointmentDate"
-                    value={saleForm.appointmentDate}
-                    onChange={(e) => handleSaleFormChange('appointmentDate', e.target.value)}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                  />
-                </div>
-
-                {/* Appointment Time */}
-                <div>
-                  <label htmlFor="appointmentTime" className="block mb-2 text-sm font-medium text-gray-900">
-                    Appointment Time
-                  </label>
-                  <select
-                    id="appointmentTime"
-                    value={saleForm.appointmentTime}
-                    onChange={(e) => handleSaleFormChange('appointmentTime', e.target.value)}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                  >
-                    <option value="">Select Time</option>
-                    {timeOptions.map((time) => (
-                      <option key={time} value={time}>{time}</option>
-                    ))}
-                  </select>
-                </div>
 
                 {/* Basic Package */}
                 <div>
