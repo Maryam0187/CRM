@@ -146,7 +146,7 @@ export default function DateFilter({ onFilterChange, className = "", value = 'to
   };
 
   return (
-    <div className={`relative bg-white shadow-md flex justify-center flex-wrap flex-row gap-4 z-50 px-8 py-3 rounded-lg mx-auto w-fit ${className}`}>
+    <div className={`relative bg-white shadow-md flex justify-center flex-wrap flex-row gap-4 z-1 px-8 py-3 rounded-lg mx-auto w-fit ${className}`}>
       {/* Date Range Picker */}
       {openDateRange && (
         <div ref={dateRangeRef} className="absolute top-[-85px]">

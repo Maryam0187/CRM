@@ -98,11 +98,23 @@ export default function SignIn() {
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         {/* Logo and Title */}
         <div className="flex justify-center">
-          <div className="flex items-center space-x-2">
-            <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xl">CRM</span>
+          <div className="flex flex-col items-center space-y-3">
+            <div className="relative">
+              <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-2xl flex items-center justify-center shadow-xl">
+                <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+              </div>
+              <div className="absolute -top-2 -right-2 w-6 h-6 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full border-3 border-white flex items-center justify-center shadow-lg">
+                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                </svg>
+              </div>
             </div>
-            <span className="text-2xl font-bold text-gray-900">Agent Portal</span>
+            <div className="text-center">
+              <h1 className="text-3xl font-bold text-gray-900">SalesCRM</h1>
+              <p className="text-sm text-gray-600 mt-1">Professional Sales Management Portal</p>
+            </div>
           </div>
         </div>
         
@@ -217,21 +229,6 @@ export default function SignIn() {
             </div>
           </form>
 
-          {/* Demo Credentials */}
-          <div className="mt-6">
-            <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-              <h3 className="text-sm font-medium text-blue-800 mb-2">Demo Credentials</h3>
-              <p className="text-xs text-blue-700 mb-1">
-                <strong>Email:</strong> john.doe@company.com
-              </p>
-              <p className="text-xs text-blue-700 mb-1">
-                <strong>Password:</strong> password123
-              </p>
-              <p className="text-xs text-blue-600 mt-2">
-                <em>Or use any user from the seeded database</em>
-              </p>
-            </div>
-          </div>
 
           {/* Additional Links */}
           <div className="mt-6">

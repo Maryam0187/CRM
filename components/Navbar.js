@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAuth } from '../contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { isAdmin } from '../lib/auth';
+import NotificationBell from './NotificationBell';
 
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -32,11 +33,24 @@ export default function Navbar() {
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <div className="flex items-center">
-            <Link href="/" className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-lg">CRM</span>
+            <Link href="/" className="flex items-center space-x-3">
+              <div className="relative">
+                <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-xl flex items-center justify-center shadow-lg">
+                  <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                  </svg>
+                </div>
+                <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white flex items-center justify-center">
+                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                </div>
               </div>
-              <span className="text-xl font-bold text-gray-800">Agent Portal</span>
+              <div className="flex flex-col">
+                <span className="text-xl font-bold text-gray-800 leading-tight">SalesCRM</span>
+                <span className="text-xs text-gray-500 font-medium">
+                  {user?.role === 'admin' ? 'Admin Portal' : 
+                   user?.role === 'supervisor' ? 'Supervisor Portal' : 'Agent Portal'}
+                </span>
+              </div>
             </Link>
           </div>
 
@@ -91,7 +105,11 @@ export default function Navbar() {
                   Sign In
                 </Link>
               ) : (
-                <div className="relative">
+                <>
+                  {/* Notification Bell */}
+                  <NotificationBell />
+                  
+                  <div className="relative">
                   <button 
                     onClick={toggleUserMenu}
                     className="bg-gray-800 flex text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white"
@@ -124,7 +142,8 @@ export default function Navbar() {
                       </button>
                     </div>
                   )}
-                </div>
+                  </div>
+                </>
               )}
             </div>
           </div>

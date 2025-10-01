@@ -58,8 +58,8 @@ export default function AddSale() {
   // Customer form state
   const [customer, setCustomer] = useState({
     firstName: '',
-    landlineNo: '',
-    cellNo: '',
+    landline: '',
+    phone: '',
     address: '',
     state: '',
     city: '',
@@ -71,12 +71,13 @@ export default function AddSale() {
   // Customer validation state
   const [customerValidation, setCustomerValidation] = useState({
     firstName: { isValid: true, message: '' },
-    landlineNo: { isValid: true, message: '' }
+    landline: { isValid: true, message: '' }
   });
 
   // Sale form state
   const [saleForm, setSaleForm] = useState({
     status: 'new', // Add status field
+    spoke_to: '',
     pin_code: '',
     pin_code_status: '',
     ssnName: '',
@@ -255,8 +256,8 @@ export default function AddSale() {
         if (sale.customer) {
           setCustomer({
             firstName: sale.customer.firstName || '',
-            landlineNo: sale.landlineNo || sale.customer.phone || '',
-            cellNo: sale.cellNo || '',
+            landline: sale.customer.landline || '',
+            phone: sale.customer.phone || '',
             address: sale.address || sale.customer.address || '',
             state: sale.customer.state || '',
             city: sale.customer.city || '',
@@ -269,6 +270,7 @@ export default function AddSale() {
         // Populate sale form data
         setSaleForm({
           status: sale.status || 'new', // Add status field
+          spoke_to: sale.spokeTo || '',
           pin_code: sale.pinCode || '',
           pin_code_status: sale.pinCodeStatus || '',
           ssnName: sale.ssnName || '',
@@ -365,9 +367,9 @@ export default function AddSale() {
   const handleCustomerChange = (field, value) => {
     // Format input based on field type
     let formattedValue = value;
-    if (field === 'landlineNo') {
+    if (field === 'landline') {
       formattedValue = formatLandline(value);
-    } else if (field === 'cellNo') {
+    } else if (field === 'phone') {
       formattedValue = formatCellNumber(value);
     }
     
@@ -380,7 +382,7 @@ export default function AddSale() {
     let validation = { isValid: true, message: '' };
     if (field === 'firstName') {
       validation = validateCustomerName(formattedValue);
-    } else if (field === 'landlineNo') {
+    } else if (field === 'landline') {
       validation = validateLandline(formattedValue);
     }
 
@@ -393,11 +395,11 @@ export default function AddSale() {
   // Validate all customer fields
   const validateAllCustomerFields = () => {
     const nameValidation = validateCustomerName(customer.firstName);
-    const landlineValidation = validateLandline(customer.landlineNo);
+    const landlineValidation = validateLandline(customer.landline);
     
     setCustomerValidation({
       firstName: nameValidation,
-      landlineNo: landlineValidation
+      landline: landlineValidation
     });
 
     return nameValidation.isValid && landlineValidation.isValid;
@@ -629,8 +631,8 @@ export default function AddSale() {
         firstName: customer.firstName.trim(),
         lastName: null,
         email: null,
-        phone: customer.landlineNo || customer.cellNo,
-        landline: customer.landlineNo,
+        phone: customer.phone,
+        landline: customer.landline,
         address: customer.address,
         state: customer.state,
         city: customer.city,
@@ -687,6 +689,7 @@ export default function AddSale() {
         customerId: existingCustomerId,
         agentId: user?.id, // Get agentId from the logged in user
         status: status,
+        spokeTo: sanitizeValue(saleForm.spoke_to),
         pinCode: sanitizeValue(saleForm.pin_code),
         pinCodeStatus: sanitizeEnumValue(saleForm.pin_code_status),
         ssnName: sanitizeValue(saleForm.ssnName),
@@ -697,8 +700,8 @@ export default function AddSale() {
         NoFTV: sanitizeValue(saleForm.NoFTV),
         AccHolder: sanitizeValue(saleForm.AccHolder),
         AccNumber: sanitizeValue(saleForm.AccNumber),
-        securityQuestion: sanitizeValue(saleForm.securityQuestion),
-        securityAnswer: sanitizeValue(saleForm.securityAnswer),
+        securityQuestion: sanitizeValue(saleForm.question),
+        securityAnswer: sanitizeValue(saleForm.answer),
         regularBill: sanitizeValue(saleForm.regularBill),
         promotionalBill: sanitizeValue(saleForm.promotionalBill),
         bundle: sanitizeEnumValue(saleForm.bundle),
@@ -815,8 +818,8 @@ export default function AddSale() {
           firstName: customer.firstName.trim(),
           lastName: null,
           email: null,
-          phone: customer.landlineNo || customer.cellNo,
-          landline: customer.landlineNo,
+          phone: customer.phone,
+          landline: customer.landline,
           address: customer.address,
           state: customer.state,
           city: customer.city,
@@ -890,8 +893,8 @@ export default function AddSale() {
               firstName: customer.firstName.trim(),
               lastName: null, // Use null instead of empty string
               email: null, // Use null instead of empty string
-              phone: customer.landlineNo || customer.cellNo, // Use landline or cell as phone
-              landline: customer.landlineNo,
+              phone: customer.phone, // Use  phone
+              landline: customer.landline,
               address: customer.address,
               state: customer.state,
               city: customer.city,
@@ -919,9 +922,9 @@ export default function AddSale() {
         }
         
         // For new sale, check if customer already exists first
-        if (customer.landlineNo) {
+        if (customer.landline) {
           const checkResponse = await apiClient.post('/api/customers/check-existing', {
-            landline: customer.landlineNo,
+            landline: customer.landline,
             firstName: customer.firstName.trim()
           });
           
@@ -972,8 +975,8 @@ export default function AddSale() {
               firstName: customer.firstName.trim(),
               lastName: null, // Use null instead of empty string
               email: null, // Use null instead of empty string
-              phone: customer.landlineNo || customer.cellNo, // Use landline or cell as phone
-              landline: customer.landlineNo,
+              phone: customer.phone, // Use phone
+              landline: customer.landline,
               address: customer.address,
               status: 'prospect'
             };
@@ -992,8 +995,8 @@ export default function AddSale() {
             firstName: customer.firstName.trim(),
             lastName: null, // Use null instead of empty string
             email: null, // Use null instead of empty string
-            phone: customer.landlineNo || customer.cellNo, // Use landline or cell as phone
-            landline: customer.landlineNo,
+            phone: customer.phone, // Use  phone
+            landline: customer.landline,
             address: customer.address,
             status: 'prospect'
           };
@@ -1023,6 +1026,7 @@ export default function AddSale() {
         customerId: customerId,
         agentId: user?.id, // Get agentId from the logged in user
         status: status,
+        spokeTo: sanitizeValue(saleForm.spoke_to),
         pinCode: sanitizeValue(saleForm.pin_code),
         pinCodeStatus: sanitizeEnumValue(saleForm.pin_code_status),
         ssnName: sanitizeValue(saleForm.ssnName),
@@ -1357,7 +1361,7 @@ export default function AddSale() {
             <h2 className="text-2xl font-bold text-center mb-6">Customer Information</h2>
             
             {/* Validation Summary */}
-            {(!customerValidation.firstName.isValid || !customerValidation.landlineNo.isValid) && (
+            {(!customerValidation.firstName.isValid || !customerValidation.landline.isValid) && (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                 <div className="flex items-center">
                   <svg className="w-5 h-5 text-red-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1369,8 +1373,8 @@ export default function AddSale() {
                   {!customerValidation.firstName.isValid && (
                     <li>{customerValidation.firstName.message}</li>
                   )}
-                  {!customerValidation.landlineNo.isValid && (
-                    <li>{customerValidation.landlineNo.message}</li>
+                  {!customerValidation.landline.isValid && (
+                    <li>{customerValidation.landline.message}</li>
                   )}
                 </ul>
               </div>
@@ -1405,6 +1409,8 @@ export default function AddSale() {
                   <input
                     type="text"
                     id="spokeTo"
+                    value={saleForm.spoke_to || ''}
+                      onChange={(e) => handleSaleFormChange('spoke_to', e.target.value)}
                     className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
                     placeholder="Enter Attendee Name"
                   />
@@ -1416,28 +1422,28 @@ export default function AddSale() {
                   <input
                     type="tel"
                     id="landline"
-                    value={customer.landlineNo}
-                    onChange={(e) => handleCustomerChange('landlineNo', e.target.value)}
+                    value={customer.landline}
+                    onChange={(e) => handleCustomerChange('landline', e.target.value)}
                     className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 ${
-                      customerValidation.landlineNo.isValid 
+                      customerValidation.landline.isValid 
                         ? 'border-gray-300' 
                         : 'border-red-500 focus:ring-red-500 focus:border-red-500'
                     }`}
                     placeholder="555-123-4567"
                   />
-                  {!customerValidation.landlineNo.isValid && (
-                    <p className="mt-1 text-sm text-red-600">{customerValidation.landlineNo.message}</p>
+                  {!customerValidation.landline.isValid && (
+                    <p className="mt-1 text-sm text-red-600">{customerValidation.landline.message}</p>
                   )}
                 </div>
                 <div>
-                  <label htmlFor="cell" className="block mb-2 text-sm font-medium text-gray-900">
+                  <label htmlFor="phone" className="block mb-2 text-sm font-medium text-gray-900">
                     Cell Number
                   </label>
                   <input
                     type="tel"
-                    id="cell"
-                    value={customer.cellNo}
-                    onChange={(e) => handleCustomerChange('cellNo', e.target.value)}
+                    id="phone"
+                    value={customer.phone}
+                    onChange={(e) => handleCustomerChange('phone', e.target.value)}
                     className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
                     placeholder="555-123-4567"
                   />

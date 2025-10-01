@@ -30,6 +30,11 @@ module.exports = (sequelize) => {
       type: DataTypes.ENUM('lead', 'voicemail', 'hang-up', 'no_response', 'appointment', 'active', 'payment_info', 'pending', 'completed', 'cancelled'),
       defaultValue: 'lead'
     },
+    spokeTo: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      field: 'spoke_to'
+    },
     
     // Sale Information
     pinCode: {
