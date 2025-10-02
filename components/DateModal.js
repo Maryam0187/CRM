@@ -1,10 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import StateSelector, { getStateTimezone, convertToTimezone, getTimezoneInfo } from './StateSelector';
 
-export default function DateModal({ title, onClose, onDateSelect, showTime = false, initialDate = '', initialTime = '' }) {
+export default function DateModal({ title, onClose, onDateSelect, showTime = false, initialDate = '', initialTime = '', showState = false, initialState = '', onStateChange }) {
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [selectedTime, setSelectedTime] = useState(initialTime);
+  const [selectedState, setSelectedState] = useState(initialState);
 
   const handleDateChange = (e) => {
     setSelectedDate(e.target.value);
@@ -14,9 +16,22 @@ export default function DateModal({ title, onClose, onDateSelect, showTime = fal
     setSelectedTime(e.target.value);
   };
 
+  const handleStateChange = (e) => {
+    const newState = e.target.value;
+    setSelectedState(newState);
+    if (onStateChange) {
+      onStateChange(newState);
+    }
+  };
+
+
   const handleAdd = () => {
     if (selectedDate) {
-      const result = showTime ? { date: selectedDate, time: selectedTime } : selectedDate;
+      const result = showTime ? { 
+        date: selectedDate, 
+        time: selectedTime,
+        ...(showState && { state: selectedState })
+      } : selectedDate;
       onDateSelect(result);
     }
   };
@@ -45,6 +60,14 @@ export default function DateModal({ title, onClose, onDateSelect, showTime = fal
         {/* Body */}
         <div className="p-6">
           <div className="mb-4">
+            {showState && (
+              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-800">
+                  <span className="font-medium">Instructions:</span> Enter the appointment time in the customer's local timezone. 
+                  The system will show you the equivalent Pakistan time and save the appointment in UTC format.
+                </p>
+              </div>
+            )}
             <p className="text-sm text-gray-600 mb-4">
               {selectedDate && `Selected: ${new Date(selectedDate).toLocaleDateString()}${selectedTime ? ` at ${selectedTime}` : ''}`}
             </p>
@@ -60,14 +83,40 @@ export default function DateModal({ title, onClose, onDateSelect, showTime = fal
               </div>
               {showTime && (
                 <div className="relative">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Time</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Customer's Local Time
+                    {selectedState && (
+                      <span className="ml-2 text-xs text-gray-500">
+                        ({getTimezoneInfo(selectedState)?.abbreviation || ''})
+                      </span>
+                    )}
+                  </label>
                   <input
                     type="time"
                     value={selectedTime}
                     onChange={handleTimeChange}
                     className="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-900"
                   />
+                  {selectedDate && selectedTime && selectedState && (
+                    <div className="mt-2">
+                      <div className="p-2 bg-blue-50 rounded-md">
+                        <p className="text-sm text-blue-700">
+                          <span className="font-medium">Pakistan Time (Your Time):</span> {convertToTimezone(selectedDate, selectedTime, selectedState, 'Asia/Karachi')}
+                          <span className="ml-2 text-xs opacity-75">(PKT)</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
+              )}
+              {showState && (
+                <StateSelector
+                  value={selectedState}
+                  onChange={handleStateChange}
+                  label="State"
+                  showTimezone={true}
+                  required={true}
+                />
               )}
             </div>
           </div>
@@ -77,7 +126,7 @@ export default function DateModal({ title, onClose, onDateSelect, showTime = fal
         <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
           <button
             onClick={handleAdd}
-            disabled={!selectedDate}
+            disabled={!selectedDate || (showState && !selectedState)}
             className="bg-blue-600 text-white font-medium rounded-lg text-sm px-5 py-2.5 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors duration-200"
           >
             Add

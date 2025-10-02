@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DateModal from './DateModal';
 import ReceiverModal from './ReceiverModal';
+import StateSelector, { getStateTimezone, convertToUTC, convertFromUTC } from './StateSelector';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient.js';
 import { 
@@ -125,6 +126,7 @@ export default function AddSale() {
   // Dialog state for customer warning
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [customerWarning, setCustomerWarning] = useState(null);
+
 
   // System info for receiver modal
   const [systemInfo, setSystemInfo] = useState({
@@ -266,6 +268,14 @@ export default function AddSale() {
           });
         }
         
+        // Convert UTC appointmentDateTime back to local time for display
+        let displayAppointmentDateTime = sale.appointmentDateTime || '';
+        if (sale.appointmentDateTime && sale.customer?.state) {
+          const localTime = convertFromUTC(sale.appointmentDateTime, sale.customer.state);
+          // We'll keep the original UTC value for saving, but we'll use local time for display
+          displayAppointmentDateTime = sale.appointmentDateTime; // Keep UTC for consistency
+        }
+
         // Populate sale form data
         setSaleForm({
           status: sale.status || 'new', // Add status field
@@ -295,7 +305,7 @@ export default function AddSale() {
           dueonDate: sale.dueOnDate || '',
           techVisitDate: sale.techVisitDate || '',
           techVisitTime: sale.techVisitTime || '',
-          appointmentDateTime: sale.appointmentDateTime || '',
+          appointmentDateTime: displayAppointmentDateTime,
           services: sale.services || [],
           receivers: sale.receivers || {},
           receiversInfo: sale.receiversInfo || {}
@@ -533,19 +543,37 @@ export default function AddSale() {
 
   const handleAppointmentSelect = (dateTimeData) => {
     if (typeof dateTimeData === 'object' && dateTimeData.date) {
-      // Combine date and time into a single datetime string
+      // Use state from modal if provided, otherwise fall back to customer form state
+      const stateForTimezone = dateTimeData.state || customer.state;
+      
+      // Check if state is selected for timezone conversion
+      if (!stateForTimezone) {
+        alert('Please select a state to properly convert the appointment time to UTC.');
+        setIsDateModalOpen(false);
+        return;
+      }
+
+      // If state was selected in modal, update the customer form state as well
+      if (dateTimeData.state && dateTimeData.state !== customer.state) {
+        setCustomer(prev => ({
+          ...prev,
+          state: dateTimeData.state
+        }));
+      }
+
+      // Combine date and time into a single datetime string with timezone conversion
       let appointmentDateTime = null;
       
       if (dateTimeData.date && dateTimeData.time) {
-        // Both date and time provided
-        appointmentDateTime = new Date(`${dateTimeData.date}T${dateTimeData.time}`).toISOString();
+        // Both date and time provided - convert to UTC based on selected state
+        appointmentDateTime = convertToUTC(dateTimeData.date, dateTimeData.time, stateForTimezone);
       } else if (dateTimeData.date && !dateTimeData.time) {
         // Only date provided - set time to start of day
-        appointmentDateTime = new Date(`${dateTimeData.date}T00:00:00`).toISOString();
+        appointmentDateTime = convertToUTC(dateTimeData.date, '00:00:00', stateForTimezone);
       } else if (!dateTimeData.date && dateTimeData.time) {
         // Only time provided - set date to today
         const today = new Date().toISOString().split('T')[0];
-        appointmentDateTime = new Date(`${today}T${dateTimeData.time}`).toISOString();
+        appointmentDateTime = convertToUTC(today, dateTimeData.time, stateForTimezone);
       }
       
       // Update the sale form with combined appointment datetime
@@ -1487,19 +1515,13 @@ export default function AddSale() {
                     placeholder="USA"
                   />
                 </div>
-                <div>
-                  <label htmlFor="state" className="block mb-2 text-sm font-medium text-gray-900">
-                    State
-                  </label>
-                  <input
-                    type="text"
-                    id="state"
-                    value={customer.state}
-                    onChange={(e) => handleCustomerChange('state', e.target.value)}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                    placeholder="Enter State"
-                  />
-                </div>
+                <StateSelector
+                  value={customer.state}
+                  onChange={(e) => handleCustomerChange('state', e.target.value)}
+                  label="State"
+                  showTimezone={true}
+                  className=""
+                />
                 <div>
                   <label htmlFor="city" className="block mb-2 text-sm font-medium text-gray-900">
                     City
@@ -2132,10 +2154,23 @@ export default function AddSale() {
           onClose={() => setIsDateModalOpen(false)}
           onDateSelect={saleStatus === 'appointment' ? handleAppointmentSelect : handleDateSelect}
           showTime={saleStatus === 'appointment'}
-          initialDate={saleStatus === 'appointment' && saleForm.appointmentDateTime ? 
-            saleForm.appointmentDateTime.split('T')[0] : ''}
-          initialTime={saleStatus === 'appointment' && saleForm.appointmentDateTime ? 
-            saleForm.appointmentDateTime.split('T')[1]?.substring(0, 5) : ''}
+          showState={saleStatus === 'appointment'}
+          initialState={customer.state}
+          onStateChange={(newState) => {
+            // Update customer state when changed in modal
+            setCustomer(prev => ({
+              ...prev,
+              state: newState
+            }));
+          }}
+          initialDate={saleStatus === 'appointment' && saleForm.appointmentDateTime && customer.state ? 
+            convertFromUTC(saleForm.appointmentDateTime, customer.state).date : 
+            (saleStatus === 'appointment' && saleForm.appointmentDateTime ? 
+              saleForm.appointmentDateTime.split('T')[0] : '')}
+          initialTime={saleStatus === 'appointment' && saleForm.appointmentDateTime && customer.state ? 
+            convertFromUTC(saleForm.appointmentDateTime, customer.state).time : 
+            (saleStatus === 'appointment' && saleForm.appointmentDateTime ? 
+              saleForm.appointmentDateTime.split('T')[1]?.substring(0, 5) : '')}
         />
       )}
 
