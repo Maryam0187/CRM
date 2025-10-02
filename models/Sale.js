@@ -175,15 +175,11 @@ module.exports = (sequelize) => {
     },
     
     // Appointment Information
-    appointmentDate: {
-      type: DataTypes.DATEONLY,
+    appointmentDateTime: {
+      type: DataTypes.DATE,
       allowNull: true,
-      field: 'appointment_date'
-    },
-    appointmentTime: {
-      type: DataTypes.STRING(50),
-      allowNull: true,
-      field: 'appointment_time'
+      field: 'appointment_datetime',
+      comment: 'Combined appointment date and time in UTC'
     }
   }, {
     tableName: 'sales',

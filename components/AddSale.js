@@ -103,8 +103,7 @@ export default function AddSale() {
     dueonDate: '',
     techVisitDate: '',
     techVisitTime: '',
-    appointmentDate: '',
-    appointmentTime: '',
+    appointmentDateTime: '',
     services: [],
     receivers: {},
     receiversInfo: {}
@@ -296,8 +295,7 @@ export default function AddSale() {
           dueonDate: sale.dueOnDate || '',
           techVisitDate: sale.techVisitDate || '',
           techVisitTime: sale.techVisitTime || '',
-          appointmentDate: sale.appointmentDate || '',
-          appointmentTime: sale.appointmentTime || '',
+          appointmentDateTime: sale.appointmentDateTime || '',
           services: sale.services || [],
           receivers: sale.receivers || {},
           receiversInfo: sale.receiversInfo || {}
@@ -535,17 +533,30 @@ export default function AddSale() {
 
   const handleAppointmentSelect = (dateTimeData) => {
     if (typeof dateTimeData === 'object' && dateTimeData.date) {
-      // Update the sale form with appointment date and time
+      // Combine date and time into a single datetime string
+      let appointmentDateTime = null;
+      
+      if (dateTimeData.date && dateTimeData.time) {
+        // Both date and time provided
+        appointmentDateTime = new Date(`${dateTimeData.date}T${dateTimeData.time}`).toISOString();
+      } else if (dateTimeData.date && !dateTimeData.time) {
+        // Only date provided - set time to start of day
+        appointmentDateTime = new Date(`${dateTimeData.date}T00:00:00`).toISOString();
+      } else if (!dateTimeData.date && dateTimeData.time) {
+        // Only time provided - set date to today
+        const today = new Date().toISOString().split('T')[0];
+        appointmentDateTime = new Date(`${today}T${dateTimeData.time}`).toISOString();
+      }
+      
+      // Update the sale form with combined appointment datetime
       setSaleForm(prev => ({
         ...prev,
-        appointmentDate: dateTimeData.date,
-        appointmentTime: dateTimeData.time || ''
+        appointmentDateTime: appointmentDateTime
       }));
       
-      // Log the appointment action with the selected date and time
+      // Log the appointment action with the combined datetime
       logSalesAction('appointment', 'appointment', {
-        appointmentDate: dateTimeData.date,
-        appointmentTime: dateTimeData.time || ''
+        appointmentDateTime: appointmentDateTime
       });
     }
     setIsDateModalOpen(false);
@@ -716,8 +727,7 @@ export default function AddSale() {
         receiversInfo: saleForm.receiversInfo || {},
         techVisitDate: saleForm.techVisitDate ? new Date(saleForm.techVisitDate).toISOString() : null,
         techVisitTime: saleForm.techVisitTime || null,
-        appointmentDate: saleForm.appointmentDate ? new Date(saleForm.appointmentDate).toISOString() : null,
-        appointmentTime: saleForm.appointmentTime || null
+        appointmentDateTime: saleForm.appointmentDateTime || null
       };
 
       // Create the sale
@@ -777,15 +787,9 @@ export default function AddSale() {
           },
           breakdown: saleForm.breakdown || '',
           note: saleForm.notes || '',
-          appointmentDate: saleForm.appointmentDate || null,
-          appointmentTime: saleForm.appointmentTime || null,
-          ...additionalData
+          appointmentDateTime: additionalData.appointmentDateTime || saleForm.appointmentDateTime || null
         };
-
-        console.log('🔍 DEBUG: Log data:', logData);
-        console.log('🔍 DEBUG: Sale form:', saleForm);
-        console.log('🔍 DEBUG: Additional data:', additionalData);
-
+       
         // Log the action to sales logs
         const response = await apiClient.post('/api/sales-logs', logData);
         const responseData = await response.json();
@@ -1059,8 +1063,7 @@ export default function AddSale() {
         receiversInfo: saleForm.receiversInfo,
         techVisitDate: sanitizeValue(saleForm.techVisitDate),
         techVisitTime: sanitizeValue(saleForm.techVisitTime),
-        appointmentDate: additionalData.appointmentDate ?? sanitizeValue(additionalData.appointmentDate),
-        appointmentTime:additionalData.appointmentTime ??  sanitizeValue(additionalData.appointmentTime)
+        appointmentDateTime: additionalData.appointmentDateTime || saleForm.appointmentDateTime || null
       };
       
       // Save or update sale
@@ -2129,6 +2132,10 @@ export default function AddSale() {
           onClose={() => setIsDateModalOpen(false)}
           onDateSelect={saleStatus === 'appointment' ? handleAppointmentSelect : handleDateSelect}
           showTime={saleStatus === 'appointment'}
+          initialDate={saleStatus === 'appointment' && saleForm.appointmentDateTime ? 
+            saleForm.appointmentDateTime.split('T')[0] : ''}
+          initialTime={saleStatus === 'appointment' && saleForm.appointmentDateTime ? 
+            saleForm.appointmentDateTime.split('T')[1]?.substring(0, 5) : ''}
         />
       )}
 

@@ -94,7 +94,7 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
     
     // If no previous data, show current data if it has meaningful content
     if (!previousSaleData) {
-      const significantFields = ['status', 'breakdown', 'notes', 'appointmentDate', 'appointmentTime'];
+      const significantFields = ['status', 'breakdown', 'notes', 'appointmentDateTime'];
       return significantFields.some(field => {
         const value = currentSaleData[field];
         return value !== null && value !== undefined && value !== '' && value !== 'new';
@@ -102,7 +102,7 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
     }
     
     // Compare current data with previous data to detect changes
-    const significantFields = ['status', 'currentStage', 'breakdown', 'notes', 'appointmentDate', 'appointmentTime'];
+    const significantFields = ['status', 'currentStage', 'breakdown', 'notes', 'appointmentDateTime'];
     
     return significantFields.some(field => {
       const currentValue = currentSaleData[field];
@@ -343,7 +343,7 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
                         )}
 
                         {/* Appointment Information */}
-                        {log.appointmentDate && (
+                        {log.appointmentDateTime && (
                           <div className="bg-white rounded-md p-3 mb-3 border border-gray-200">
                             <div className="flex items-center space-x-2 mb-2">
                               <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -352,10 +352,8 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
                               <span className="font-medium text-gray-900">Appointment</span>
                             </div>
                             <div className="text-sm text-gray-700">
-                              <div><span className="font-medium">Date:</span> {new Date(log.appointmentDate).toLocaleDateString()}</div>
-                              {log.appointmentTime && (
-                                <div><span className="font-medium">Time:</span> {log.appointmentTime}</div>
-                              )}
+                              <div><span className="font-medium">Date:</span> {new Date(log.appointmentDateTime).toLocaleDateString()}</div>
+                              <div><span className="font-medium">Time:</span> {new Date(log.appointmentDateTime).toLocaleTimeString()}</div>
                             </div>
                           </div>
                         )}

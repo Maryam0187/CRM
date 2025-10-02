@@ -53,8 +53,7 @@ export async function POST(request) {
       previousSaleData,
       breakdown,
       note,
-      appointmentDate,
-      appointmentTime
+      appointmentDateTime
     } = body;
 
     // Validate required fields
@@ -77,8 +76,7 @@ export async function POST(request) {
       previousSaleData: previousSaleData || null,
       breakdown: breakdown || null,
       note: note || null,
-      appointmentDate: appointmentDate || null,
-      appointmentTime: appointmentTime || null,
+      appointmentDateTime: appointmentDateTime || null,
       timestamp: new Date()
     };
 

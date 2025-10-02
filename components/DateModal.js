@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 
-export default function DateModal({ title, onClose, onDateSelect, showTime = false }) {
-  const [selectedDate, setSelectedDate] = useState('');
-  const [selectedTime, setSelectedTime] = useState('');
+export default function DateModal({ title, onClose, onDateSelect, showTime = false, initialDate = '', initialTime = '' }) {
+  const [selectedDate, setSelectedDate] = useState(initialDate);
+  const [selectedTime, setSelectedTime] = useState(initialTime);
 
   const handleDateChange = (e) => {
     setSelectedDate(e.target.value);
