@@ -226,9 +226,7 @@ export default function AddSale() {
       setLoadingReceivers(true);
       const response = await apiClient.get(`/api/receivers?carrierId=${carrierId}`);
       const data = await response.json();
-      console.log('Receivers API response:', data);
       if (data.success) {
-        console.log('Setting receivers:', data.data);
         setReceivers(data.data);
       } else {
         console.error('Receivers API failed:', data);
@@ -313,7 +311,43 @@ export default function AddSale() {
         
         // Set selected receivers
         if (sale.receivers) {
-          setSelectedReceiver(Object.keys(sale.receivers));
+          const receiverKeys = Object.keys(sale.receivers);
+          setSelectedReceiver(receiverKeys);
+        }
+        
+        // Fetch receivers for the selected carrier
+        if (sale.carrier) {
+          // Since carriers are saved by name in the database, always look by name
+          let selectedCarrier;
+          selectedCarrier = carriers.find(c => c.name === sale.carrier);
+          
+          if (selectedCarrier) {
+            fetchReceiversByCarrier(selectedCarrier.id);
+          } else {
+            // If carriers not loaded yet, fetch them directly
+            fetchCarriers().then(() => {
+              // Use a small delay to let the state update
+              setTimeout(() => {
+                // Re-fetch carriers to get the latest state
+                apiClient.get('/api/carriers').then(response => response.json()).then(data => {
+                  if (data.success && data.data.length > 0) {
+                    const retryCarrier = data.data.find(c => c.name === sale.carrier);
+                    if (retryCarrier) {
+                      fetchReceiversByCarrier(retryCarrier.id);
+                    } else {
+                      setError(`Carrier "${sale.carrier}" not found. Available carriers: ${data.data.map(c => c.name).join(', ')}`);
+                    }
+                  } else {
+                    setError('No carriers available. Please contact support.');
+                  }
+                }).catch(err => {
+                  setError('Error loading carriers. Please try again.');
+                });
+              }, 200);
+            }).catch(err => {
+              setError('Error loading carriers. Please try again.');
+            });
+          }
         }
       } else {
         setError(result.message || 'Failed to fetch sale data');
@@ -429,8 +463,16 @@ export default function AddSale() {
       [field]: formattedValue
     }));
 
-    // If carrier is changed, fetch receivers for that carrier
+    // If carrier is changed, reset receivers and fetch new ones
     if (field === 'carrier') {
+      // Reset selected receivers when carrier changes
+      setSelectedReceiver([]);
+      setSaleForm(prev => ({
+        ...prev,
+        receivers: {},
+        receiversInfo: {}
+      }));
+      
       const selectedCarrier = carriers.find(c => c.name === value);
       if (selectedCarrier) {
         fetchReceiversByCarrier(selectedCarrier.id);
@@ -1672,7 +1714,6 @@ export default function AddSale() {
                     disabled={loadingCarriers}
                   >
                     <option value="">{loadingCarriers ? 'Loading carriers...' : 'Select Carrier'}</option>
-                    {console.log('Rendering carriers:', carriers)}
                     {carriers && carriers.length > 0 ? carriers.map((carrier) => (
                       <option key={carrier.id} value={carrier.name}>{carrier.name}</option>
                     )) : (
