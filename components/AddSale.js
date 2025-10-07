@@ -1522,9 +1522,9 @@ export default function AddSale() {
                  getCurrentStep() === 'third' ? ' Processing' : ' Final Actions'}
               </h3>
               <div className="text-sm text-gray-500">
-                <div>Status: {saleForm.status || 'New'}</div>
+                {/* <div>Status: {saleForm.status || 'New'}</div>
                 <div>Edit Mode: {isEditMode ? 'Yes' : 'No'}</div>
-                <div>Step: {getCurrentStep()}</div>
+                <div>Step: {getCurrentStep()}</div> */}
                 {getCurrentStep() === 'admin' && user?.role !== 'admin' && (
                   <div className="text-orange-600 font-medium">Read-only: Admin actions required</div>
                 )}
@@ -1576,6 +1576,13 @@ export default function AddSale() {
                 className={`${getStatusColorClass(SALES_STATUSES.SALE_DONE)} text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 ✅ Sale Done
+              </button>
+              <button
+                onClick={handleNotACustomer}
+                disabled={saving || loading}
+                className="bg-gray-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-gray-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🚫 Not a Customer
               </button>
             </div>
           )}
