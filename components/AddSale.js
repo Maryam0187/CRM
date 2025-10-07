@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DateModal from './DateModal';
+import NoteModal from './NoteModal';
 import ReceiverModal from './ReceiverModal';
 import StateSelector, { getStateTimezone, convertToUTC, convertFromUTC } from './StateSelector';
 import { useAuth } from '../contexts/AuthContext';
@@ -19,6 +20,7 @@ import {
   validateSSN,
   validateCurrency 
 } from '../lib/validation.js';
+import { SALES_STATUSES, getStepForStatus, getStatusDisplayName, getStatusColorClass } from '../lib/salesStatuses.js';
 
 // Helper function to calculate time ago
 const getTimeAgo = (dateString) => {
@@ -112,7 +114,44 @@ export default function AddSale() {
 
   // Modal states
   const [isDateModalOpen, setIsDateModalOpen] = useState(false);
+  const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
+  const [isNoteEditModalOpen, setIsNoteEditModalOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState(null);
+  const notesContainerRef = useRef(null);
+  const lastNoteRef = useRef(null);
   const [isReceiverModalOpen, setIsReceiverModalOpen] = useState(false);
+
+  // Function to scroll notes container to bottom
+  const scrollNotesToBottom = () => {
+    // Try multiple approaches to ensure scrolling works
+    if (lastNoteRef.current) {
+      // Scroll to the last note element
+      lastNoteRef.current.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'end' 
+      });
+    } else if (notesContainerRef.current) {
+      // Fallback: scroll container to bottom
+      const container = notesContainerRef.current;
+      container.scrollTop = container.scrollHeight;
+    }
+  };
+
+  // State to track when a new note is added
+  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
+
+  // Auto-scroll only when a new note is added
+  useEffect(() => {
+    if (shouldScrollToBottom && notesContainerRef.current) {
+      // Small delay to ensure DOM is updated
+      const timer = setTimeout(() => {
+        scrollNotesToBottom();
+        setShouldScrollToBottom(false); // Reset the flag
+      }, 200);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [shouldScrollToBottom]);
   const [selectedReceiver, setSelectedReceiver] = useState([]);
   const [modalId, setModalId] = useState(null);
   const [saleStatus, setSaleStatus] = useState('');
@@ -142,30 +181,10 @@ export default function AddSale() {
     if (!saleForm.status) return 'first'; // Default to first step for new sales
     
     const status = saleForm.status.toLowerCase();
-    console.log('Current sale status:', status, 'Edit mode:', isEditMode);
     
-    // First step: initial contact (only for new sales or specific initial statuses)
-    if (['new', 'lead', 'hang-up', 'voicemail', 'no_response'].includes(status)) {
-      console.log('Detected as first step');
-      return 'first';
-    }
-    
-    // Third step: processing (only when status is pending for charge)
-    if (['pending', 'verification', 'process', 'charge_pending'].includes(status)) {
-      console.log('Detected as third step');
-      return 'third';
-    }
-    
-    // Admin step: final actions
-    if (['completed', 'cancelled', 'approved', 'declined', 'done', 'chargeback'].includes(status)) {
-      console.log('Detected as admin step');
-      return 'admin';
-    }
-    
-    // Second step: active engagement (for all other statuses including edit mode)
-    // This includes: 'active', 'payment_info', 'appointment', 'second_call', 'customer_agree', etc.
-    console.log('Detected as second step (default)');
-    return 'second';
+    // Use the centralized step detection function
+    const step = getStepForStatus(status);
+    return step;
   };
 
   // Check if payment info has been added (cards or banks)
@@ -201,15 +220,11 @@ export default function AddSale() {
       setLoadingCarriers(true);
       const response = await apiClient.get('/api/carriers');
       const data = await response.json();
-      console.log('Carriers API response:', data);
       if (data.success) {
-        console.log('Setting carriers:', data.data);
         setCarriers(data.data);
       } else {
-        console.error('Carriers API failed:', data);
       }
     } catch (error) {
-      console.error('Error fetching carriers:', error);
     } finally {
       setLoadingCarriers(false);
     }
@@ -229,10 +244,8 @@ export default function AddSale() {
       if (data.success) {
         setReceivers(data.data);
       } else {
-        console.error('Receivers API failed:', data);
       }
     } catch (error) {
-      console.error('Error fetching receivers:', error);
     } finally {
       setLoadingReceivers(false);
     }
@@ -354,7 +367,6 @@ export default function AddSale() {
       }
     } catch (err) {
       setError('Network error: Unable to fetch sale data');
-      console.error('Error fetching sale:', err);
     } finally {
       setLoading(false);
     }
@@ -632,12 +644,184 @@ export default function AddSale() {
     setIsDateModalOpen(false);
   };
 
+  // Open note modal
+  const openNoteModal = () => {
+    setIsNoteModalOpen(true);
+  };
+
+  // Open note edit modal
+  const openNoteEditModal = (note) => {
+    setEditingNote(note);
+    setIsNoteEditModalOpen(true);
+  };
+
+  // Handle note edit save
+  const handleNoteEditSave = async (editedNoteData) => {
+    await handleNoteEdit(
+      editingNote.id,
+      editedNoteData.note,
+      editedNoteData.date,
+      editedNoteData.time
+    );
+    setIsNoteEditModalOpen(false);
+    setEditingNote(null);
+  };
+
+  const handleNoteAdd = async (noteData) => {
+    // Get current date and time
+    const now = new Date();
+    const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const currentTime = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+    
+    // Create structured note object
+    const noteObject = {
+      id: Date.now(), // Unique ID for editing
+      timestamp: `${currentDate} ${currentTime}`,
+      note: noteData.note || 'Note added',
+      appointment: noteData.date && noteData.time ? `${noteData.date} ${noteData.time}` : null
+    };
+    
+    // Convert to string format with delimiter
+    const noteString = JSON.stringify(noteObject);
+    
+    // Update the sale form notes field with delimiter
+    const newNotes = saleForm.notes ? `${saleForm.notes}|||${noteString}` : noteString;
+    setSaleForm(prev => ({
+      ...prev,
+      notes: newNotes
+    }));
+    
+    // Update appointment_datetime if date and time are provided (like appointment action)
+    if (noteData.date && noteData.time && customer.state) {
+      const timezone = getStateTimezone(customer.state);
+      const appointmentDateTime = convertToUTC(noteData.date, noteData.time, timezone);
+      
+      setSaleForm(prev => ({
+        ...prev,
+        appointmentDateTime: appointmentDateTime
+      }));
+    }
+    
+    // Save notes to database if editing an existing sale
+    if (isEditMode && editId) {
+      try {
+        const response = await apiClient.put(`/api/sales/${editId}`, {
+          notes: newNotes,
+          status: saleForm.status
+        });
+        const result = await response.json();
+        if (result.success) {
+        } else {
+        }
+      } catch (error) {
+      }
+    } else {
+    }
+    
+    // Log the note addition action to sales logs (without triggering full sale update)
+      await logNoteAction('add_note', {
+        noteId: noteObject.id,
+        noteContent: noteObject.note,
+        appointment: noteObject.appointment,
+        timestamp: noteObject.timestamp
+      });
+      
+      // Trigger scroll only when adding a new note
+      setShouldScrollToBottom(true);
+      
+      setIsNoteModalOpen(false);
+  };
+
+  // Parse notes from delimiter-separated string to array
+  const parseNotes = (notesString) => {
+    if (!notesString) return [];
+    return notesString.split('|||').map(noteStr => {
+      try {
+        return JSON.parse(noteStr);
+      } catch (e) {
+        // Handle legacy format
+        return {
+          id: Date.now() + Math.random(),
+          timestamp: 'Legacy',
+          note: noteStr,
+          appointment: null
+        };
+      }
+    });
+  };
+
+  // Update a specific note
+  const handleNoteEdit = async (noteId, newNoteText, newAppointmentDate = null, newAppointmentTime = null) => {
+    const notes = parseNotes(saleForm.notes);
+    const updatedNotes = notes.map(note => {
+      if (note.id === noteId) {
+        const updatedNote = { ...note, note: newNoteText };
+        
+        // Update appointment if provided
+        if (newAppointmentDate && newAppointmentTime) {
+          updatedNote.appointment = `${newAppointmentDate} ${newAppointmentTime}`;
+          
+          // Also update the main appointment_datetime field if this note has an appointment
+          if (customer.state) {
+            const timezone = getStateTimezone(customer.state);
+            const appointmentDateTime = convertToUTC(newAppointmentDate, newAppointmentTime, timezone);
+            
+            setSaleForm(prev => ({
+              ...prev,
+              appointmentDateTime: appointmentDateTime
+            }));
+          }
+        } else if (newAppointmentDate === '' && newAppointmentTime === '') {
+          // Clear appointment if both fields are empty
+          updatedNote.appointment = null;
+        }
+        
+        return updatedNote;
+      }
+      return note;
+    });
+    
+    // Convert back to delimiter-separated string
+    const notesString = updatedNotes.map(note => JSON.stringify(note)).join('|||');
+    
+    setSaleForm(prev => ({
+      ...prev,
+      notes: notesString
+    }));
+    
+    // Save updated notes to database if editing an existing sale
+    if (isEditMode && editId) {
+      try {
+        const response = await apiClient.put(`/api/sales/${editId}`, {
+          notes: notesString,
+          status: saleForm.status
+        });
+        const result = await response.json();
+        if (result.success) {
+        } else {
+        }
+      } catch (error) {
+      }
+    }
+    
+    // Log the note edit action to sales logs (without triggering full sale update)
+    const editedNote = updatedNotes.find(note => note.id === noteId);
+    if (editedNote) {
+      await logNoteAction('edit_note', {
+        noteId: noteId,
+        noteContent: editedNote.note,
+        appointment: editedNote.appointment,
+        timestamp: editedNote.timestamp
+      });
+    }
+  };
+
   // Step-specific action handlers
   const handleFirstStepAction = (action, status) => {
     if (action === 'appointment') {
       openAppointmentModal();
-    } else if (action === 'customer_agree') {
-      logSalesAction('customer_agree', 'active');
+    }  else if (action === 'sale_done') {
+      logSalesAction('sale_done', SALES_STATUSES.SALE_DONE);
     } else {
       logSalesAction(action, status);
     }
@@ -648,27 +832,67 @@ export default function AddSale() {
       // Update sale data without changing status
       logSalesAction('update_sale_data', saleForm.status);
     } else if (action === 'add_note') {
-      // Add note without changing status
-      logSalesAction('add_note', saleForm.status);
+      // Open note modal
+      openNoteModal();
     } else if (action === 'add_appointment') {
       // Add new appointment without changing status
       openAppointmentModal();
-    } else if (action === 'customer_agree') {
-      logSalesAction('customer_agree', 'active');
-    } else if (action === 'second_call') {
-      logSalesAction('second_call', 'active');
+    } else if (action === 'cancelled') {
+      logSalesAction('cancelled', SALES_STATUSES.CANCELLED);
     } else {
       logSalesAction(action, status);
     }
   };
 
   const handleThirdStepAction = (action, status) => {
-    logSalesAction(action, status);
+    if (action === 'cancelled') {
+      logSalesAction('cancelled', SALES_STATUSES.CANCELLED);
+    } else {
+      logSalesAction(action, status);
+    }
   };
 
   const handleAdminAction = (action, status) => {
     logSalesAction(action, status);
   };
+
+  const handleLeadCallAction = (action, status) => {
+    if (action === 'sale_done') {
+      logSalesAction('sale_done', SALES_STATUSES.SALE_DONE);
+    } else if (action === 'cancelled') {
+      logSalesAction('cancelled', SALES_STATUSES.CANCELLED);
+    } else if (action === 'add_note') {
+      // Open note modal
+      openNoteModal();
+    } else if (action === 'update_sale_data') {
+      // Update sale data without changing status
+      logSalesAction('update_sale_data', SALES_STATUSES.LEAD_CALL);
+    } else if (action === 'add_payments') {
+      logSalesAction('add_payments', SALES_STATUSES.PAYMENT_INFO);
+    } else {
+      logSalesAction(action, status);
+    }
+  };
+
+
+  const handlePaymentInfoAction = (action, status) => {
+    if (action === 'verification') {
+      logSalesAction('verification', SALES_STATUSES.VERIFICATION);
+    } else if (action === 'process') {
+      logSalesAction('process', SALES_STATUSES.PROCESS);
+    } else if (action === 'ready_for_payment') {
+      logSalesAction('ready_for_payment', SALES_STATUSES.READY_FOR_PAYMENT);
+    } else if (action === 'cancelled') {
+      logSalesAction('cancelled', SALES_STATUSES.CANCELLED);
+    } else {
+      logSalesAction(action, status);
+    }
+  };
+
+  const handleReadyForPaymentAction = (action, status) => {
+    logSalesAction(action, status);
+  };
+
 
 
   // Add or update sale with status
@@ -742,7 +966,6 @@ export default function AddSale() {
       await continueSaleWithExistingCustomer(status, customerId);
       
     } catch (error) {
-      console.error('Error creating new customer:', error);
       setError(error.message || 'Failed to create customer');
       setSaving(false);
     }
@@ -811,10 +1034,61 @@ export default function AddSale() {
       // Navigate back to home
       router.push('/');
     } catch (error) {
-      console.error('Error creating sale:', error);
       setError(error.message || 'Failed to create sale');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Log note actions without triggering full sale update
+  const logNoteAction = async (action, noteData) => {
+    
+    // For note actions, we might not always have a saleId (for new sales)
+    // So we'll skip logging if we don't have the required data
+    if (!isEditMode || !editId) {
+      return;
+    }
+
+    if (!customer.id) {
+      return;
+    }
+
+    if (!user?.id) {
+      return;
+    }
+
+    if (!saleForm.status) {
+      return;
+    }
+
+    try {
+      const logData = {
+        saleId: editId,
+        customerId: customer.id,
+        agentId: user.id,
+        action: action,
+        status: saleForm.status,
+        note: noteData.noteContent || '',
+        appointmentDateTime: noteData.appointment ? 
+          (noteData.appointment.includes('T') ? noteData.appointment : 
+           `${noteData.appointment}T00:00:00Z`) : null,
+        currentSaleData: {
+          noteId: noteData.noteId,
+          noteContent: noteData.noteContent,
+          appointment: noteData.appointment,
+          timestamp: noteData.timestamp,
+          totalNotes: parseNotes(saleForm.notes).length
+        }
+      };
+      
+      
+      const response = await apiClient.post('/api/sales-logs', logData);
+      const responseData = await response.json();
+      
+      if (!responseData.success) {
+      } else {
+      }
+    } catch (error) {
     }
   };
 
@@ -865,11 +1139,9 @@ export default function AddSale() {
         const responseData = await response.json();
         
         if (!responseData.success) {
-          console.error('Failed to log sales action:', responseData.error);
         }
       }
     } catch (error) {
-      console.error('Error logging sales action:', error);
       setError('Failed to log sales action');
     } finally {
       setSaving(false);
@@ -911,7 +1183,6 @@ export default function AddSale() {
         const customerResult = await customerResponse.json();
         
         if (!customerResult.success) {
-          console.error('Failed to create customer:', customerResult.message);
           
           // Handle specific error cases based on error type
           if (customerResult.error === 'DUPLICATE_CUSTOMER') {
@@ -936,7 +1207,6 @@ export default function AddSale() {
         setError('Please enter customer name to mark as non-prospect');
       }
     } catch (error) {
-      console.error('Error marking customer as non-prospect:', error);
       setError(error.message || 'Failed to mark customer as non-prospect. Please try again.');
     } finally {
       setSaving(false);
@@ -986,7 +1256,6 @@ export default function AddSale() {
             
             const customerUpdateResult = await customerUpdateResponse.json();
             if (!customerUpdateResult.success) {
-              console.warn('Failed to update customer:', customerUpdateResult.message);
               // Don't throw error here, just log warning and continue with sale update
             }
           }
@@ -1162,7 +1431,6 @@ export default function AddSale() {
       return saleResult;
     } catch (error) {
       setError(error.message || 'An error occurred while saving the sale');
-      console.error('Error saving sale:', error);
     } finally {
       setSaving(false);
     }
@@ -1240,8 +1508,16 @@ export default function AddSale() {
           <div className="mb-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-900">
-                Step {getCurrentStep() === 'first' ? '1' : getCurrentStep() === 'second' ? '2' : getCurrentStep() === 'third' ? '3' : 'Admin'}: 
+                Step {getCurrentStep() === 'first' ? '1' : 
+                      getCurrentStep() === 'lead-call' ? 'Lead-Call' :
+                      getCurrentStep() === 'payment-info' ? 'Payment-Info' :
+                      getCurrentStep() === 'ready-for-payment' ? 'Ready-For-Payment' :
+                      getCurrentStep() === 'second' ? '2' : 
+                      getCurrentStep() === 'third' ? '3' : 'Admin'}: 
                 {getCurrentStep() === 'first' ? ' Initial Contact' : 
+                 getCurrentStep() === 'lead-call' ? (saleForm.status === 'cancelled' ? ' Lead Call (Cancelled Sale)' : ' Lead Call') :
+                 getCurrentStep() === 'payment-info' ? ' Payment Info' :
+                 getCurrentStep() === 'ready-for-payment' ? ' Ready for Payment' :
                  getCurrentStep() === 'second' ? ' Active Engagement' : 
                  getCurrentStep() === 'third' ? ' Processing' : ' Final Actions'}
               </h3>
@@ -1249,6 +1525,9 @@ export default function AddSale() {
                 <div>Status: {saleForm.status || 'New'}</div>
                 <div>Edit Mode: {isEditMode ? 'Yes' : 'No'}</div>
                 <div>Step: {getCurrentStep()}</div>
+                {getCurrentStep() === 'admin' && user?.role !== 'admin' && (
+                  <div className="text-orange-600 font-medium">Read-only: Admin actions required</div>
+                )}
               </div>
             </div>
           </div>
@@ -1257,102 +1536,249 @@ export default function AddSale() {
           {getCurrentStep() === 'first' && (
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               <button
-                onClick={() => handleFirstStepAction('hangup', 'hang-up')}
+                onClick={() => handleFirstStepAction('hangup', SALES_STATUSES.HANG_UP)}
                 disabled={saving || loading}
-                className="bg-red-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className={`${getStatusColorClass(SALES_STATUSES.HANG_UP)} text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 📞 Hangup
               </button>
               <button
-                onClick={() => handleFirstStepAction('voicemail', 'voicemail')}
+                onClick={() => handleFirstStepAction('no_response', SALES_STATUSES.NO_RESPONSE)}
                 disabled={saving || loading}
-                className="bg-orange-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-orange-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                📧 Voicemail
-              </button>
-              <button
-                onClick={() => handleFirstStepAction('no_response', 'no_response')}
-                disabled={saving || loading}
-                className="bg-gray-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className={`${getStatusColorClass(SALES_STATUSES.NO_RESPONSE)} text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 ❌ No Response
               </button>
               <button
-                onClick={() => handleFirstStepAction('appointment', 'appointment')}
+                onClick={() => handleFirstStepAction('voicemail', SALES_STATUSES.VOICEMAIL)}
                 disabled={saving || loading}
-                className="bg-purple-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-purple-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className={`${getStatusColorClass(SALES_STATUSES.VOICEMAIL)} text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-orange-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                📧 Voicemail
+              </button>
+              <button
+                onClick={() => handleFirstStepAction('appointment', SALES_STATUSES.APPOINTMENT)}
+                disabled={saving || loading}
+                className={`${getStatusColorClass(SALES_STATUSES.APPOINTMENT)} text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-purple-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 📅 Appointment
               </button>
               <button
-                onClick={() => handleFirstStepAction('lead_call', 'lead')}
+                onClick={() => handleFirstStepAction('lead_call', SALES_STATUSES.LEAD_CALL)}
                 disabled={saving || loading}
-                className="bg-blue-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className={`${getStatusColorClass(SALES_STATUSES.LEAD_CALL)} text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 🎯 Lead Call
               </button>
               <button
-                onClick={() => handleFirstStepAction('second_call', 'active')}
+                onClick={() => handleFirstStepAction('sale_done', SALES_STATUSES.SALE_DONE)}
                 disabled={saving || loading}
-                className="bg-green-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className={`${getStatusColorClass(SALES_STATUSES.SALE_DONE)} text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed`}
               >
-                🔄 Second Call
-              </button>
-              <button
-                onClick={() => handleFirstStepAction('customer_agree', 'active')}
-                disabled={saving || loading}
-                className="bg-green-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                ✅ Customer Agree
-              </button>
-              <button
-                onClick={() => handleNotACustomer()}
-                disabled={saving || loading}
-                className="bg-gray-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-gray-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                🚫 Non-Prospect
+                ✅ Sale Done
               </button>
             </div>
           )}
 
-          {/* Step 2: Active Engagement Actions */}
-          {getCurrentStep() === 'second' && (
+          {/* Lead-Call Actions */}
+          {getCurrentStep() === 'lead-call' && (
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               <button
-                onClick={() => handleSecondStepAction('update_sale_data', saleForm.status)}
-                disabled={saving || loading}
-                className="bg-blue-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                📝 Update Sale Data
-              </button>
-              <button
-                onClick={() => handleSecondStepAction('customer_agree', 'active')}
+                onClick={() => handleLeadCallAction('sale_done', SALES_STATUSES.SALE_DONE)}
                 disabled={saving || loading}
                 className="bg-green-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                ✅ Customer Agree
+                ✅ Sale Done
               </button>
               <button
-                onClick={() => handleSecondStepAction('add_note', saleForm.status)}
+                onClick={() => handleLeadCallAction('add_note', 'lead-call')}
                 disabled={saving || loading}
                 className="bg-yellow-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-yellow-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 📝 Add Note
               </button>
               <button
-                onClick={() => handleSecondStepAction('add_appointment', saleForm.status)}
+                onClick={() => handleLeadCallAction('update_sale_data', 'lead-call')}
                 disabled={saving || loading}
-                className="bg-purple-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-purple-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-blue-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                📅 Add Appointment
+                📝 Update Sale Data
               </button>
               <button
-                onClick={() => handleSecondStepAction('second_call', 'active')}
+                onClick={() => handleLeadCallAction('add_payments', 'payment_info')}
                 disabled={saving || loading}
                 className="bg-green-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                🔄 Second Call
+                💳 Add Payments
               </button>
+              <button
+                onClick={() => handleLeadCallAction('cancelled', SALES_STATUSES.CANCELLED)}
+                disabled={saving || loading}
+                className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ❌ Cancelled
+              </button>
+            </div>
+          )}
+
+
+          {/* Payment Info Actions */}
+          {getCurrentStep() === 'payment-info' && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              <button
+                onClick={() => handlePaymentInfoAction('verification', 'verification')}
+                disabled={saving || loading}
+                className="bg-indigo-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-indigo-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🔍 Verification
+              </button>
+              <button
+                onClick={() => handlePaymentInfoAction('process', 'process')}
+                disabled={saving || loading}
+                className="bg-yellow-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-yellow-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ⚙️ Process
+              </button>
+              <button
+                onClick={() => handlePaymentInfoAction('ready_for_payment', 'ready-for-payment')}
+                disabled={saving || loading}
+                className="bg-green-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ✅ Ready for Payment
+              </button>
+              <button
+                onClick={() => handlePaymentInfoAction('cancelled', SALES_STATUSES.CANCELLED)}
+                disabled={saving || loading}
+                className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ❌ Cancelled
+              </button>
+            </div>
+          )}
+
+          {/* Ready for Payment Actions - Only visible to admin users */}
+          {getCurrentStep() === 'ready-for-payment' && user?.role === 'admin' && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              <button
+                onClick={() => handleReadyForPaymentAction('charged', 'charged')}
+                disabled={saving || loading}
+                className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                💰 Charged
+              </button>
+              <button
+                onClick={() => handleReadyForPaymentAction('declined', 'declined')}
+                disabled={saving || loading}
+                className="bg-red-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ❌ Declined
+              </button>
+              <button
+                onClick={() => handleReadyForPaymentAction('chargeback', 'chargeback')}
+                disabled={saving || loading}
+                className="bg-red-800 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-900 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🔄 Chargeback
+              </button>
+              <button
+                onClick={() => handleReadyForPaymentAction('cancelled', SALES_STATUSES.CANCELLED)}
+                disabled={saving || loading}
+                className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ❌ Cancelled
+              </button>
+            </div>
+          )}
+
+          {/* Sale Status Display - For agents and supervisors when ready for payment */}
+          {getCurrentStep() === 'ready-for-payment' && user?.role !== 'admin' && (
+            <div className="bg-gray-100 border border-gray-300 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-medium text-gray-900">Sale Status</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Current status: <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColorClass(saleForm.status)} text-white`}>
+                      {getStatusDisplayName(saleForm.status)}
+                    </span>
+                  </p>
+                </div>
+                <div className="text-xs text-gray-500">
+                  Payment processing requires administrator approval
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Active Engagement Actions */}
+          {getCurrentStep() === 'second' && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              {/* Sale Done specific actions */}
+              {saleForm.status === 'sale-done' && (
+                <>
+                  <button
+                    onClick={() => handleSecondStepAction('add_note', SALES_STATUSES.SALE_DONE)}
+                    disabled={saving || loading}
+                    className="bg-yellow-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-yellow-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    📝 Add Note
+                  </button>
+                  <button
+                    onClick={() => handleSecondStepAction('add_payments', SALES_STATUSES.PAYMENT_INFO)}
+                    disabled={saving || loading}
+                    className="bg-green-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    💳 Add Payments
+                  </button>
+                  <button
+                    onClick={() => handleSecondStepAction('update_sale_data', SALES_STATUSES.SALE_DONE)}
+                    disabled={saving || loading}
+                    className="bg-blue-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    📝 Update Sale Data
+                  </button>
+                  <button
+                    onClick={() => handleSecondStepAction('cancelled', SALES_STATUSES.CANCELLED)}
+                    disabled={saving || loading}
+                    className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    ❌ Cancelled
+                  </button>
+                </>
+              )}
+              
+              {/* General Step 2 actions */}
+              {saleForm.status !== 'sale-done' && (
+                <>
+                  <button
+                    onClick={() => handleSecondStepAction('update_sale_data', saleForm.status)}
+                    disabled={saving || loading}
+                    className="bg-blue-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    📝 Update Sale Data
+                  </button>
+                  <button
+                    onClick={() => handleSecondStepAction('add_note', saleForm.status)}
+                    disabled={saving || loading}
+                    className="bg-yellow-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-yellow-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    📝 Add Note
+                  </button>
+                  <button
+                    onClick={() => handleSecondStepAction('add_appointment', saleForm.status)}
+                    disabled={saving || loading}
+                    className="bg-purple-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-purple-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    📅 Add Appointment
+                  </button>
+                  <button
+                    onClick={() => handleSecondStepAction('cancelled', SALES_STATUSES.CANCELLED)}
+                    disabled={saving || loading}
+                    className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    ❌ Cancelled
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -1380,46 +1806,39 @@ export default function AddSale() {
               >
                 💰 Charge Pending
               </button>
-            </div>
-          )}
-
-          {/* Admin Actions */}
-          {getCurrentStep() === 'admin' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               <button
-                onClick={() => handleAdminAction('charge', 'charge')}
-                disabled={saving || loading}
-                className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                💰 Charge
-              </button>
-              <button
-                onClick={() => handleAdminAction('decline', 'declined')}
-                disabled={saving || loading}
-                className="bg-red-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                ❌ Decline
-              </button>
-              <button
-                onClick={() => handleAdminAction('cancelled', 'cancelled')}
+                onClick={() => handleThirdStepAction('cancelled', SALES_STATUSES.CANCELLED)}
                 disabled={saving || loading}
                 className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                🚫 Cancelled
+                ❌ Cancelled
+              </button>
+            </div>
+          )}
+
+          {/* Admin Actions - Only visible to admin users */}
+          {getCurrentStep() === 'admin' && user?.role === 'admin' && (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              <button
+                onClick={() => handleAdminAction('charged', 'charged')}
+                disabled={saving || loading}
+                className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                💰 Charged
               </button>
               <button
-                onClick={() => handleAdminAction('approved', 'approved')}
+                onClick={() => handleAdminAction('declined', 'declined')}
                 disabled={saving || loading}
-                className="bg-green-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-red-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                ✅ Approved
+                ❌ Declined
               </button>
               <button
-                onClick={() => handleAdminAction('done', 'done')}
+                onClick={() => handleAdminAction('cancelled', SALES_STATUSES.CANCELLED)}
                 disabled={saving || loading}
-                className="bg-green-800 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-900 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                ✅ Done
+                ❌ Cancelled
               </button>
               <button
                 onClick={() => handleAdminAction('chargeback', 'chargeback')}
@@ -1428,6 +1847,25 @@ export default function AddSale() {
               >
                 🔄 Chargeback
               </button>
+            </div>
+          )}
+
+          {/* Sale Status Display - For agents and supervisors when in admin step */}
+          {getCurrentStep() === 'admin' && user?.role !== 'admin' && (
+            <div className="bg-gray-100 border border-gray-300 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-medium text-gray-900">Sale Status</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Current status: <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColorClass(saleForm.status)} text-white`}>
+                      {getStatusDisplayName(saleForm.status)}
+                    </span>
+                  </p>
+                </div>
+                <div className="text-xs text-gray-500">
+                  Only administrators can change final payment statuses
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -2171,17 +2609,69 @@ export default function AddSale() {
 
               {/* Notes */}
               <div>
-                <label htmlFor="notes" className="block mb-2 text-sm font-medium text-gray-900">
-                  Notes
-                </label>
-                <textarea
-                  id="notes"
-                  rows={8}
-                  value={saleForm.notes}
-                  onChange={(e) => handleSaleFormChange('notes', e.target.value)}
-                  className="block p-2.5 w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Notes"
-                />
+                <div className="flex items-center justify-between mb-2">
+                  <label htmlFor="notes" className="block text-sm font-medium text-gray-900">
+                    Notes
+                  </label>
+                  <button
+                    type="button"
+                    onClick={openNoteModal}
+                    className="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 transition-colors duration-200"
+                  >
+                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                    Add Note
+                  </button>
+                </div>
+                <div 
+                  ref={notesContainerRef}
+                  className="block p-2.5 w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 min-h-[200px] max-h-[400px] overflow-y-auto"
+                >
+                  {parseNotes(saleForm.notes).length === 0 ? (
+                    <div className="text-gray-500 italic">No notes yet. Click "Add Note" to add your first note.</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {parseNotes(saleForm.notes).map((note, index) => {
+                        const isLastNote = index === parseNotes(saleForm.notes).length - 1;
+                        return (
+                        <div 
+                          key={note.id} 
+                          ref={isLastNote ? lastNoteRef : null}
+                          className="border-l-4 border-blue-500 pl-3 py-2 bg-white rounded-r-lg"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="text-xs text-gray-500 mb-1">
+                                {note.timestamp}
+                              </div>
+                              <div className="text-gray-900 mb-1">
+                                {note.note}
+                              </div>
+                              {note.appointment && (
+                                <div className="text-xs text-green-600 font-medium">
+                                  📅 Appointment: {note.appointment}
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openNoteEditModal(note);
+                              }}
+                              className="ml-2 text-blue-600 hover:text-blue-800 text-xs px-2 py-1 border border-blue-300 rounded hover:bg-blue-50"
+                            >
+                              ✏️ Edit
+                            </button>
+                          </div>
+                        </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </form>
           </div>
@@ -2212,6 +2702,33 @@ export default function AddSale() {
             convertFromUTC(saleForm.appointmentDateTime, customer.state).time : 
             (saleStatus === 'appointment' && saleForm.appointmentDateTime ? 
               saleForm.appointmentDateTime.split('T')[1]?.substring(0, 5) : '')}
+        />
+      )}
+
+      {/* Note Modal */}
+      {isNoteModalOpen && (
+        <NoteModal
+          title="Add Note"
+          onClose={() => setIsNoteModalOpen(false)}
+          onNoteAdd={handleNoteAdd}
+          initialDate=""
+          initialTime=""
+          initialNote=""
+        />
+      )}
+
+      {/* Note Edit Modal */}
+      {isNoteEditModalOpen && editingNote && (
+        <NoteModal
+          title="Edit Note"
+          onClose={() => {
+            setIsNoteEditModalOpen(false);
+            setEditingNote(null);
+          }}
+          onNoteAdd={handleNoteEditSave}
+          initialDate={editingNote.appointment ? editingNote.appointment.split(' ')[0] : ''}
+          initialTime={editingNote.appointment ? editingNote.appointment.split(' ')[1] : ''}
+          initialNote={editingNote.note}
         />
       )}
 

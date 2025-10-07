@@ -1,5 +1,6 @@
 const { DataTypes } = require('sequelize');
 const { encryptSensitiveData, decryptSensitiveData, isEncrypted, getDataBasedOnRole } = require('../lib/sensitive-data');
+const { SALES_STATUS_ARRAY, DEFAULT_SALES_STATUS } = require('../lib/salesStatuses');
 
 module.exports = (sequelize) => {
   const Sale = sequelize.define('Sale', {
@@ -27,8 +28,8 @@ module.exports = (sequelize) => {
       }
     },
     status: {
-      type: DataTypes.ENUM('lead', 'voicemail', 'hang-up', 'no_response', 'appointment', 'active', 'payment_info', 'pending', 'completed', 'cancelled'),
-      defaultValue: 'lead'
+      type: DataTypes.ENUM(...SALES_STATUS_ARRAY),
+      defaultValue: DEFAULT_SALES_STATUS
     },
     spokeTo: {
       type: DataTypes.STRING(255),

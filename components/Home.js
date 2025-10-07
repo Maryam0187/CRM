@@ -211,7 +211,7 @@ export default function Home() {
           value === 'completed' ? 'bg-blue-100 text-blue-800' :
           'bg-red-100 text-red-800'
         }`}>
-          {value.charAt(0).toUpperCase() + value.slice(1)}
+          {value ? value.charAt(0).toUpperCase() + value.slice(1) : 'N/A'}
         </span>
       )
     },
@@ -450,7 +450,7 @@ export default function Home() {
     setPaymentNotifications(prev => ({
       ...prev,
       [selectedSaleId]: {
-        type: type.charAt(0).toUpperCase() + type.slice(1), // Capitalize first letter
+        type: type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Payment', // Capitalize first letter
         timestamp: new Date().toISOString()
       }
     }));
