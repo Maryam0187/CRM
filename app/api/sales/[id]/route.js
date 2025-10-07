@@ -5,6 +5,7 @@ export async function GET(request, { params }) {
     const { id } = await params;
     const sale = await SaleService.findById(id);
     
+    
     if (!sale) {
       return Response.json(
         { success: false, message: 'Sale not found' },
@@ -30,6 +31,7 @@ export async function PUT(request, { params }) {
     const { id } = await params;
     const updateData = await request.json();
     
+    
     // Sanitize enum fields - convert empty strings to null
     const sanitizeEnumField = (value) => {
       return (value === '' || value === null || value === undefined) ? null : value;
@@ -43,6 +45,12 @@ export async function PUT(request, { params }) {
       bundle: sanitizeEnumField(updateData.bundle),
       status: sanitizeEnumField(updateData.status)
     };
+    
+    // Map appointment_datetime to appointmentDateTime for the model
+    if (updateData.appointment_datetime !== undefined) {
+      sanitizedData.appointmentDateTime = updateData.appointment_datetime;
+      delete sanitizedData.appointment_datetime;
+    }
     
     const sale = await SaleService.update(id, sanitizedData);
     

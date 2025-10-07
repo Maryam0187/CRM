@@ -1,12 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import StateSelector, { getStateTimezone, convertToTimezone, getTimezoneInfo } from './StateSelector';
 
-export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '', initialTime = '', initialNote = '' }) {
+export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '', initialTime = '', initialNote = '', customerState = '', showState = false }) {
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [selectedTime, setSelectedTime] = useState(initialTime);
   const [noteText, setNoteText] = useState(initialNote);
-
   const handleDateChange = (e) => {
     setSelectedDate(e.target.value);
   };
@@ -24,7 +24,8 @@ export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '',
       const noteData = {
         date: selectedDate,
         time: selectedTime,
-        note: noteText.trim()
+        note: noteText.trim(),
+        ...(showState && customerState && { state: customerState })
       };
       onNoteAdd(noteData);
     }
@@ -55,6 +56,22 @@ export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '',
 
         {/* Content */}
         <div className="p-6 space-y-4">
+          {showState && customerState && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <span className="font-medium">Customer's State:</span> {customerState}
+                {customerState && (
+                  <span className="ml-2 text-xs text-blue-600">
+                    ({getTimezoneInfo(customerState)?.abbreviation || ''})
+                  </span>
+                )}
+              </p>
+              <p className="text-xs text-blue-700 mt-1">
+                Enter appointment time in customer's local timezone. Pakistan time will be shown below.
+              </p>
+            </div>
+          )}
+
           {/* Date Input */}
           <div>
             <label htmlFor="note-date" className="block text-sm font-medium text-gray-700 mb-2">
@@ -73,7 +90,12 @@ export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '',
           {/* Time Input */}
           <div>
             <label htmlFor="note-time" className="block text-sm font-medium text-gray-700 mb-2">
-              Appointment Time (Optional)
+              Customer's Local Time
+              {customerState && (
+                <span className="ml-2 text-xs text-gray-500">
+                  ({getTimezoneInfo(customerState)?.abbreviation || ''})
+                </span>
+              )}
             </label>
             <input
               type="time"
@@ -83,6 +105,18 @@ export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '',
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <p className="mt-1 text-xs text-gray-500">Required if appointment date is set</p>
+            
+            {/* Pakistan Time Display */}
+            {selectedDate && selectedTime && customerState && (
+              <div className="mt-2">
+                <div className="p-2 bg-blue-50 rounded-md">
+                  <p className="text-sm text-blue-700">
+                    <span className="font-medium">Pakistan Time (Your Time):</span> {convertToTimezone(selectedDate, selectedTime, customerState, 'Asia/Karachi')}
+                    <span className="ml-2 text-xs opacity-75">(PKT)</span>
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Note Text Input */}

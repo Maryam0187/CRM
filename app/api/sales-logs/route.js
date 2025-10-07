@@ -53,7 +53,7 @@ export async function POST(request) {
       previousSaleData,
       breakdown,
       note,
-      appointmentDateTime
+      appointment_datetime
     } = body;
 
     // Validate required fields
@@ -76,7 +76,7 @@ export async function POST(request) {
       previousSaleData: previousSaleData || null,
       breakdown: breakdown || null,
       note: note || null,
-      appointmentDateTime: appointmentDateTime || null,
+      appointment_datetime: appointment_datetime || null,
       timestamp: new Date()
     };
 
@@ -90,8 +90,10 @@ export async function POST(request) {
 
   } catch (error) {
     console.error('Error creating sales log:', error);
+    console.error('Error details:', error.message);
+    console.error('Error stack:', error.stack);
     return NextResponse.json(
-      { error: 'Failed to create sales log' },
+      { error: 'Failed to create sales log', details: error.message },
       { status: 500 }
     );
   }

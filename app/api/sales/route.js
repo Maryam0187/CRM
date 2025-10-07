@@ -185,6 +185,12 @@ export async function POST(request) {
       status: sanitizeEnumField(saleData.status)
     };
     
+    // Map appointment_datetime to appointmentDateTime for the model
+    if (saleData.appointment_datetime !== undefined) {
+      sanitizedData.appointmentDateTime = saleData.appointment_datetime;
+      delete sanitizedData.appointment_datetime;
+    }
+    
     const sale = await SaleService.create(sanitizedData);
     
     return Response.json({

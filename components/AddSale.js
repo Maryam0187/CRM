@@ -266,7 +266,9 @@ export default function AddSale() {
         
         // Populate customer data
         if (sale.customer) {
+          const customerId = sale.customerId || sale.customer.id;
           setCustomer({
+            id: customerId, // Use sale.customerId or customer.id
             firstName: sale.customer.firstName || '',
             landline: sale.customer.landline || '',
             phone: sale.customer.phone || '',
@@ -692,9 +694,11 @@ export default function AddSale() {
     }));
     
     // Update appointment_datetime if date and time are provided (like appointment action)
-    if (noteData.date && noteData.time && customer.state) {
-      const timezone = getStateTimezone(customer.state);
+    if (noteData.date && noteData.time && (noteData.state || customer.state)) {
+      const stateForTimezone = noteData.state || customer.state;
+      const timezone = getStateTimezone(stateForTimezone);
       const appointmentDateTime = convertToUTC(noteData.date, noteData.time, timezone);
+      
       
       setSaleForm(prev => ({
         ...prev,
@@ -705,17 +709,31 @@ export default function AddSale() {
     // Save notes to database if editing an existing sale
     if (isEditMode && editId) {
       try {
-        const response = await apiClient.put(`/api/sales/${editId}`, {
+        const updateData = {
           notes: newNotes,
-          status: saleForm.status
-        });
+          status: saleForm.status,
+          appointment_datetime: saleForm.appointmentDateTime || null
+        };
+        
+        
+        // If note has appointment date/time, also update the main appointment field
+        if (noteData.date && noteData.time && (noteData.state || customer.state)) {
+          const stateForTimezone = noteData.state || customer.state;
+          const timezone = getStateTimezone(stateForTimezone);
+          const appointmentDateTime = convertToUTC(noteData.date, noteData.time, timezone);
+          updateData.appointment_datetime = appointmentDateTime;
+        }
+        
+        const response = await apiClient.put(`/api/sales/${editId}`, updateData);
         const result = await response.json();
         if (result.success) {
+          // Success - appointment and notes saved
         } else {
+          console.error('Failed to update sale with notes and appointment');
         }
       } catch (error) {
+        console.error('Error updating sale:', error);
       }
-    } else {
     }
     
     // Log the note addition action to sales logs (without triggering full sale update)
@@ -735,7 +753,7 @@ export default function AddSale() {
   // Parse notes from delimiter-separated string to array
   const parseNotes = (notesString) => {
     if (!notesString) return [];
-    return notesString.split('|||').map(noteStr => {
+    const notes = notesString.split('|||').map(noteStr => {
       try {
         return JSON.parse(noteStr);
       } catch (e) {
@@ -747,6 +765,14 @@ export default function AddSale() {
           appointment: null
         };
       }
+    });
+    
+    // Sort notes by timestamp in descending order (newest first)
+    return notes.sort((a, b) => {
+      // Convert timestamps to Date objects for comparison
+      const dateA = new Date(a.timestamp);
+      const dateB = new Date(b.timestamp);
+      return dateB - dateA; // Descending order (newest first)
     });
   };
 
@@ -792,15 +818,32 @@ export default function AddSale() {
     // Save updated notes to database if editing an existing sale
     if (isEditMode && editId) {
       try {
-        const response = await apiClient.put(`/api/sales/${editId}`, {
+        const updateData = {
           notes: notesString,
-          status: saleForm.status
-        });
+          status: saleForm.status,
+          appointment_datetime: saleForm.appointmentDateTime || null
+        };
+        
+        // If the edited note has appointment date/time, also update the main appointment field
+        const editedNote = updatedNotes.find(note => note.id === noteId);
+        if (editedNote && editedNote.appointment && customer.state) {
+          const [appointmentDate, appointmentTime] = editedNote.appointment.split(' ');
+          if (appointmentDate && appointmentTime) {
+            const timezone = getStateTimezone(customer.state);
+            const appointmentDateTime = convertToUTC(appointmentDate, appointmentTime, timezone);
+            updateData.appointment_datetime = appointmentDateTime;
+          }
+        }
+        
+        const response = await apiClient.put(`/api/sales/${editId}`, updateData);
         const result = await response.json();
         if (result.success) {
+          // Success - appointment and notes updated
         } else {
+          console.error('Failed to update sale with edited notes and appointment');
         }
       } catch (error) {
+        console.error('Error updating sale:', error);
       }
     }
     
@@ -1020,8 +1063,9 @@ export default function AddSale() {
         receiversInfo: saleForm.receiversInfo || {},
         techVisitDate: saleForm.techVisitDate ? new Date(saleForm.techVisitDate).toISOString() : null,
         techVisitTime: saleForm.techVisitTime || null,
-        appointmentDateTime: saleForm.appointmentDateTime || null
+        appointment_datetime: saleForm.appointmentDateTime || null
       };
+
 
       // Create the sale
       const response = await apiClient.post('/api/sales', saleData);
@@ -1043,21 +1087,22 @@ export default function AddSale() {
   // Log note actions without triggering full sale update
   const logNoteAction = async (action, noteData) => {
     
-    // For note actions, we might not always have a saleId (for new sales)
-    // So we'll skip logging if we don't have the required data
-    if (!isEditMode || !editId) {
-      return;
-    }
-
-    if (!customer.id) {
-      return;
-    }
-
+    // Skip if we don't have required data
     if (!user?.id) {
       return;
     }
 
     if (!saleForm.status) {
+      return;
+    }
+
+    // For new sales, we need to skip logging until the sale is created
+    // because we don't have saleId and customerId yet
+    if (!isEditMode || !editId) {
+      return;
+    }
+
+    if (!customer.id) {
       return;
     }
 
@@ -1069,9 +1114,7 @@ export default function AddSale() {
         action: action,
         status: saleForm.status,
         note: noteData.noteContent || '',
-        appointmentDateTime: noteData.appointment ? 
-          (noteData.appointment.includes('T') ? noteData.appointment : 
-           `${noteData.appointment}T00:00:00Z`) : null,
+        appointment_datetime: saleForm.appointmentDateTime || null,
         currentSaleData: {
           noteId: noteData.noteId,
           noteContent: noteData.noteContent,
@@ -1081,14 +1124,47 @@ export default function AddSale() {
         }
       };
       
+      const response = await apiClient.post('/api/sales-logs', logData);
+      const responseData = await response.json();
+      
+      if (!responseData.success) {
+        console.error('Failed to log note action:', responseData.message);
+      }
+    } catch (error) {
+      console.error('Error logging note action:', error);
+    }
+  };
+
+  // Log note actions for new sales after they are created
+  const logNoteActionForNewSale = async (saleId, customerId, action, noteData) => {
+    if (!saleId || !customerId || !user?.id) return;
+    
+    try {
+      const logData = {
+        saleId: saleId,
+        customerId: customerId,
+        agentId: user.id,
+        action: action,
+        status: saleForm.status,
+        note: noteData.noteContent || '',
+        appointment_datetime: saleForm.appointmentDateTime || null,
+        currentSaleData: {
+          noteId: noteData.noteId,
+          noteContent: noteData.noteContent,
+          appointment: noteData.appointment,
+          timestamp: noteData.timestamp,
+          totalNotes: parseNotes(saleForm.notes).length
+        }
+      };
       
       const response = await apiClient.post('/api/sales-logs', logData);
       const responseData = await response.json();
       
       if (!responseData.success) {
-      } else {
+        console.error('Failed to log note action for new sale:', responseData.message);
       }
     } catch (error) {
+      console.error('Error logging note action for new sale:', error);
     }
   };
 
@@ -1131,7 +1207,7 @@ export default function AddSale() {
           },
           breakdown: saleForm.breakdown || '',
           note: saleForm.notes || '',
-          appointmentDateTime: additionalData.appointmentDateTime || saleForm.appointmentDateTime || null
+          appointment_datetime: additionalData.appointmentDateTime || saleForm.appointmentDateTime || null
         };
        
         // Log the action to sales logs
@@ -1139,9 +1215,11 @@ export default function AddSale() {
         const responseData = await response.json();
         
         if (!responseData.success) {
+          console.error('Failed to log sales action:', responseData.message);
         }
       }
     } catch (error) {
+      console.error('Error in logSalesAction:', error);
       setError('Failed to log sales action');
     } finally {
       setSaving(false);
@@ -1402,8 +1480,9 @@ export default function AddSale() {
         receiversInfo: saleForm.receiversInfo,
         techVisitDate: sanitizeValue(saleForm.techVisitDate),
         techVisitTime: sanitizeValue(saleForm.techVisitTime),
-        appointmentDateTime: additionalData.appointmentDateTime || saleForm.appointmentDateTime || null
+        appointment_datetime: additionalData.appointmentDateTime || saleForm.appointmentDateTime || null
       };
+      
       
       // Save or update sale
       let saleResult;
@@ -1423,6 +1502,19 @@ export default function AddSale() {
           throw new Error(result.message || 'Failed to create sale');
         }
         saleResult = result.data;
+        
+        // Log note actions for new sales after they are created
+        if (saleResult.id && customerId && saleForm.notes) {
+          const notes = parseNotes(saleForm.notes);
+          for (const note of notes) {
+            await logNoteActionForNewSale(saleResult.id, customerId, 'add_note', {
+              noteId: note.id,
+              noteContent: note.note,
+              appointment: note.appointment,
+              timestamp: note.timestamp
+            });
+          }
+        }
       }
       
       // Navigate back to home
@@ -2640,7 +2732,7 @@ export default function AddSale() {
                   ) : (
                     <div className="space-y-3">
                       {parseNotes(saleForm.notes).map((note, index) => {
-                        const isLastNote = index === parseNotes(saleForm.notes).length - 1;
+                        const isLastNote = index === 0; // First note is newest (descending order)
                         return (
                         <div 
                           key={note.id} 
@@ -2661,17 +2753,19 @@ export default function AddSale() {
                                 </div>
                               )}
                             </div>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                openNoteEditModal(note);
-                              }}
-                              className="ml-2 text-blue-600 hover:text-blue-800 text-xs px-2 py-1 border border-blue-300 rounded hover:bg-blue-50"
-                            >
-                              ✏️ Edit
-                            </button>
+                            {isLastNote && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  openNoteEditModal(note);
+                                }}
+                                className="ml-2 text-blue-600 hover:text-blue-800 text-xs px-2 py-1 border border-blue-300 rounded hover:bg-blue-50"
+                              >
+                                ✏️ Edit
+                              </button>
+                            )}
                           </div>
                         </div>
                         );
@@ -2721,6 +2815,8 @@ export default function AddSale() {
           initialDate=""
           initialTime=""
           initialNote=""
+          customerState={customer.state}
+          showState={true}
         />
       )}
 
@@ -2736,6 +2832,8 @@ export default function AddSale() {
           initialDate={editingNote.appointment ? editingNote.appointment.split(' ')[0] : ''}
           initialTime={editingNote.appointment ? editingNote.appointment.split(' ')[1] : ''}
           initialNote={editingNote.note}
+          customerState={customer.state}
+          showState={true}
         />
       )}
 

@@ -77,10 +77,9 @@ module.exports = (sequelize) => {
       allowNull: true,
       comment: 'Additional notes for the action'
     },
-    appointmentDateTime: {
+    appointment_datetime: {
       type: DataTypes.DATE,
       allowNull: true,
-      field: 'appointment_datetime',
       comment: 'Combined appointment date and time in UTC'
     },
     timestamp: {
