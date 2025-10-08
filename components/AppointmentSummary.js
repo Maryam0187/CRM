@@ -58,24 +58,22 @@ export default function AppointmentSummary() {
         
         setAppointments(sortedAppointments);
         
-        // Calculate today's appointments
-        const today = new Date();
-        const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-        const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
-        
-        const todayAppointments = sortedAppointments.filter(appointment => {
-          const appointmentDate = new Date(appointment.appointmentDateTime);
-          return appointmentDate >= todayStart && appointmentDate < todayEnd;
-        });
-        
-        setTodayCount(todayAppointments.length);
-        
-        // Calculate upcoming appointments (future appointments)
+        // Calculate upcoming appointments (future appointments only)
         const now = new Date();
         const futureAppointments = sortedAppointments.filter(appointment => 
           new Date(appointment.appointmentDateTime) > now
         );
         
+        // Calculate today's upcoming appointments (future appointments that are today)
+        const today = new Date();
+        const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+        
+        const todayUpcomingAppointments = futureAppointments.filter(appointment => {
+          const appointmentDate = new Date(appointment.appointmentDateTime);
+          return appointmentDate < todayEnd;
+        });
+        
+        setTodayCount(todayUpcomingAppointments.length);
         setUpcomingCount(futureAppointments.length);
         setNextAppointment(futureAppointments[0] || null);
       }
