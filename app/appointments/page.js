@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
 import apiClient from '../../lib/apiClient.js';
+import { formatAppointmentWithTimezones } from '../../components/StateSelector';
 
 export default function AppointmentsPage() {
   const router = useRouter();
@@ -202,17 +203,35 @@ export default function AppointmentsPage() {
     setFilteredAppointments(filtered);
   };
 
-  const formatAppointmentTime = (dateTime) => {
-    const date = new Date(dateTime);
-    return date.toLocaleString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
+  const formatAppointmentTime = (dateTime, customerState) => {
+    const timezones = formatAppointmentWithTimezones(dateTime, customerState);
+    if (!timezones) {
+      const date = new Date(dateTime);
+      return date.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    }
+    
+    return (
+      <div className="space-y-2">
+        {timezones.customerTime && (
+          <div>
+            <span className="text-sm font-semibold text-gray-700">Customer Time ({timezones.customerTimezone}):</span>
+            <div className="text-base text-gray-900">{timezones.customerTime}</div>
+          </div>
+        )}
+        <div>
+          <span className="text-sm font-semibold text-gray-700">Your Time ({timezones.pakistanTimezone}):</span>
+          <div className="text-base text-gray-900">{timezones.pakistanTime}</div>
+        </div>
+      </div>
+    );
   };
 
   const getAppointmentStatus = (dateTime) => {
@@ -404,12 +423,12 @@ export default function AppointmentsPage() {
                         </span>
                       </div>
                       
-                      <div className="text-sm text-gray-600 mb-2">
-                        <div className="flex items-center space-x-2">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="text-sm text-gray-600 mb-4">
+                        <div className="flex items-start space-x-2">
+                          <svg className="w-5 h-5 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                           </svg>
-                          <span className="font-medium">{formatAppointmentTime(appointment.appointmentDateTime)}</span>
+                          <div className="flex-1">{formatAppointmentTime(appointment.appointmentDateTime, appointment.customer?.state)}</div>
                         </div>
                       </div>
 

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient.js';
+import { formatAppointmentWithTimezones } from './StateSelector';
 
 export default function AppointmentSummary() {
   const router = useRouter();
@@ -85,16 +86,32 @@ export default function AppointmentSummary() {
     }
   };
 
-  const formatAppointmentTime = (dateTime) => {
-    const date = new Date(dateTime);
-    return date.toLocaleString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
+  const formatAppointmentTime = (dateTime, customerState) => {
+    const timezones = formatAppointmentWithTimezones(dateTime, customerState);
+    if (!timezones) {
+      const date = new Date(dateTime);
+      return date.toLocaleString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    }
+    
+    return (
+      <div className="space-y-1">
+        {timezones.customerTime && (
+          <div className="text-xs">
+            <span className="font-semibold">Customer ({timezones.customerTimezone}):</span> {timezones.customerTime}
+          </div>
+        )}
+        <div className="text-xs">
+          <span className="font-semibold">Pakistan ({timezones.pakistanTimezone}):</span> {timezones.pakistanTime}
+        </div>
+      </div>
+    );
   };
 
   const handleViewAllAppointments = () => {
@@ -125,7 +142,7 @@ export default function AppointmentSummary() {
       </div>
 
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Today's Appointments */}
         <div className="bg-blue-50 rounded-lg p-3">
           <div className="flex items-center justify-between">
@@ -166,9 +183,9 @@ export default function AppointmentSummary() {
                   <p className="text-sm font-semibold text-yellow-800">
                     {nextAppointment.customer?.firstName || 'Customer'}
                   </p>
-                  <p className="text-xs text-yellow-600">
-                    {formatAppointmentTime(nextAppointment.appointmentDateTime)}
-                  </p>
+                  <div className="text-xs text-yellow-600">
+                    {formatAppointmentTime(nextAppointment.appointmentDateTime, nextAppointment.customer?.state)}
+                  </div>
                 </div>
               ) : (
                 <p className="text-sm text-yellow-600">None</p>
@@ -177,21 +194,6 @@ export default function AppointmentSummary() {
             <div className="text-yellow-500">
               <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        {/* Total Appointments */}
-        <div className="bg-purple-50 rounded-lg p-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-purple-600 font-medium">Total</p>
-              <p className="text-2xl font-bold text-purple-800">{appointments.length}</p>
-            </div>
-            <div className="text-purple-500">
-              <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
           </div>

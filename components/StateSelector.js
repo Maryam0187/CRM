@@ -267,6 +267,59 @@ export const getTimezoneInfo = (stateCode, date = new Date()) => {
   }
 };
 
+// Format appointment time in both customer timezone and Pakistan timezone
+export const formatAppointmentWithTimezones = (utcDateTime, customerState) => {
+  if (!utcDateTime) return null;
+  
+  try {
+    const date = new Date(utcDateTime);
+    
+    // Format for customer's timezone (based on state)
+    let customerTime = null;
+    let customerTimezone = null;
+    
+    if (customerState) {
+      const timezone = getStateTimezone(customerState);
+      customerTime = date.toLocaleString('en-US', {
+        timeZone: timezone,
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      
+      // Get timezone abbreviation
+      const tzInfo = getTimezoneInfo(customerState, date);
+      customerTimezone = tzInfo?.abbreviation || timezone;
+    }
+    
+    // Format for Pakistan timezone (PKT - UTC+5)
+    const pakistanTime = date.toLocaleString('en-US', {
+      timeZone: 'Asia/Karachi',
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+    
+    return {
+      customerTime,
+      customerTimezone,
+      pakistanTime,
+      pakistanTimezone: 'PKT'
+    };
+  } catch (error) {
+    console.error('Error formatting appointment with timezones:', error);
+    return null;
+  }
+};
+
 export default function StateSelector({ 
   value, 
   onChange, 
