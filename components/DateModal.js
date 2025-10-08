@@ -3,10 +3,11 @@
 import { useState } from 'react';
 import StateSelector, { getStateTimezone, convertToTimezone, getTimezoneInfo } from './StateSelector';
 
-export default function DateModal({ title, onClose, onDateSelect, showTime = false, initialDate = '', initialTime = '', showState = false, initialState = '', onStateChange }) {
+export default function DateModal({ title, onClose, onDateSelect, showTime = false, initialDate = '', initialTime = '', showState = false, initialState = '', onStateChange, initialNote = '' }) {
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [selectedTime, setSelectedTime] = useState(initialTime);
   const [selectedState, setSelectedState] = useState(initialState);
+  const [noteText, setNoteText] = useState(initialNote);
 
   const handleDateChange = (e) => {
     setSelectedDate(e.target.value);
@@ -30,7 +31,8 @@ export default function DateModal({ title, onClose, onDateSelect, showTime = fal
       const result = showTime ? { 
         date: selectedDate, 
         time: selectedTime,
-        ...(showState && { state: selectedState })
+        ...(showState && { state: selectedState }),
+        ...(noteText.trim() && { note: noteText.trim() })
       } : selectedDate;
       onDateSelect(result);
     }
@@ -118,6 +120,21 @@ export default function DateModal({ title, onClose, onDateSelect, showTime = fal
                   required={true}
                 />
               )}
+              
+              {/* Notes Textarea */}
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Notes (Optional)
+                </label>
+                <textarea
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder="Add any notes about this appointment..."
+                  rows="3"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-900 resize-none"
+                />
+                <p className="mt-1 text-xs text-gray-500">Optional - Add any additional details about this appointment</p>
+              </div>
             </div>
           </div>
         </div>

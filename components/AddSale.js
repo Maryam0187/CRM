@@ -617,6 +617,22 @@ export default function AddSale() {
         }));
       }
 
+      // Prepare notes if provided in appointment
+      let notesString = saleForm.notes;
+      if (dateTimeData.note && dateTimeData.note.trim()) {
+        const appointmentNote = {
+          id: Date.now(),
+          timestamp: new Date().toLocaleString(),
+          note: dateTimeData.note.trim(),
+          appointment: `${dateTimeData.date} ${dateTimeData.time}`
+        };
+        
+        const currentNotes = parseNotes(saleForm.notes);
+        const updatedNotes = [appointmentNote, ...currentNotes];
+        notesString = updatedNotes.map(note => JSON.stringify(note)).join('|||');
+      }
+      
+
       // Combine date and time into a single datetime string with timezone conversion
       let appointmentDateTime = null;
       
@@ -632,15 +648,19 @@ export default function AddSale() {
         appointmentDateTime = convertToUTC(today, dateTimeData.time, stateForTimezone);
       }
       
-      // Update the sale form with combined appointment datetime
-      setSaleForm(prev => ({
-        ...prev,
-        appointmentDateTime: appointmentDateTime
-      }));
+      // Update the sale form with combined appointment datetime AND notes
+      setSaleForm(prev => {
+        return {
+          ...prev,
+          appointmentDateTime: appointmentDateTime,
+          notes: notesString
+        };
+      });
       
-      // Log the appointment action with the combined datetime
+      // Log the appointment action with the combined datetime AND notes
       logSalesAction('appointment', 'appointment', {
-        appointmentDateTime: appointmentDateTime
+        appointmentDateTime: appointmentDateTime,
+        notes: notesString
       });
     }
     setIsDateModalOpen(false);
@@ -1057,7 +1077,10 @@ export default function AddSale() {
         balance: sanitizeValue(saleForm.balance),
         dueOnDate: saleForm.dueOnDate ? new Date(saleForm.dueOnDate).toISOString() : null,
         breakdown: sanitizeValue(saleForm.breakdown),
-        notes: sanitizeValue(saleForm.notes),
+        notes: (() => {
+          const notesValue = saleForm.notes && saleForm.notes.trim() !== '' ? saleForm.notes : null;
+          return notesValue;
+        })(), // Only send notes if there's content
         services: saleForm.services || [],
         receivers: saleForm.receivers || {},
         receiversInfo: saleForm.receiversInfo || {},
@@ -1170,6 +1193,7 @@ export default function AddSale() {
 
   // Sales logging function
   const logSalesAction = async (action, status, additionalData = {}) => {
+    
     setSaving(true);
     setError(null);
     setSaleStatus(status);
@@ -1403,6 +1427,11 @@ export default function AddSale() {
               phone: customer.phone, // Use phone
               landline: customer.landline,
               address: customer.address,
+              state: customer.state,
+              city: customer.city,
+              country: 'USA', // Always set to USA
+              mailingAddress: customer.mailingAddress,
+              customerFeedback: customer.customerFeedback,
               status: 'prospect'
             };
             
@@ -1423,6 +1452,11 @@ export default function AddSale() {
             phone: customer.phone, // Use  phone
             landline: customer.landline,
             address: customer.address,
+            state: customer.state,
+            city: customer.city,
+            country: 'USA', // Always set to USA
+            mailingAddress: customer.mailingAddress,
+            customerFeedback: customer.customerFeedback,
             status: 'prospect'
           };
           
@@ -1474,7 +1508,12 @@ export default function AddSale() {
         balance: sanitizeValue(saleForm.balance),
         dueOnDate: sanitizeValue(saleForm.dueonDate),
         breakdown: sanitizeValue(saleForm.breakdown),
-        notes: sanitizeValue(saleForm.notes),
+        notes: (() => {
+          // Use notes from additionalData if available (from appointment modal), otherwise use saleForm.notes
+          const notesSource = additionalData.notes !== undefined ? additionalData.notes : saleForm.notes;
+          const notesValue = notesSource && notesSource.trim() !== '' ? notesSource : null;
+          return notesValue;
+        })(), // Only send notes if there's content
         services: saleForm.services,
         receivers: saleForm.receivers,
         receiversInfo: saleForm.receiversInfo,
