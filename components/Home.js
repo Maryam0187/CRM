@@ -8,6 +8,7 @@ import DateFilter from './DateFilter';
 import ProtectedRoute from './ProtectedRoute';
 import PaymentModal from './PaymentModal';
 import SalesTimeline from './SalesTimeline';
+import AppointmentSummary from './AppointmentSummary';
 import { useAuth } from '../contexts/AuthContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
 
@@ -570,6 +571,11 @@ export default function Home() {
 
         {/* Main Content */}
         <div className="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        {/* Appointment Summary */}
+        <div className="mb-8">
+          <AppointmentSummary />
+        </div>
 
         {/* Date Filter */}
         <div className="mb-8 flex justify-center">
