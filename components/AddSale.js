@@ -1301,7 +1301,19 @@ export default function AddSale() {
           return;
         }
         
-        // Note: No sales log entry for non-prospect customers since they don't have sales
+        const customerId = customerResult.data.id;
+        
+        // Log the "not a customer" event in sales_logs (without a sale)
+        await apiClient.post('/api/sales-logs', {
+          saleId: null, // No sale for non-prospect customers
+          customerId: customerId,
+          agentId: user?.id,
+          action: 'customer_marked_non_prospect',
+          status: 'non_prospect',
+          note: `Customer marked as non-prospect (not a customer). No sale created.`,
+          spokeTo: customer.firstName || null,
+          appointment_datetime: null
+        });
         
         // Redirect to dashboard
         router.push('/');
@@ -1311,6 +1323,81 @@ export default function AddSale() {
     } catch (error) {
       setError(error.message || 'Failed to mark customer as non-prospect. Please try again.');
     } finally {
+      setSaving(false);
+    }
+  };
+
+  // Handle Non-Prospect: Delete sale and update customer status
+  const handleNonProspect = async () => {
+    // Confirm action
+    const confirmed = window.confirm(
+      'Are you sure you want to mark this customer as Non-Prospect? ' + 
+      (isEditMode ? 'This will delete the current sale and cannot be undone.' : 'This customer will not have a sale record.')
+    );
+    
+    if (!confirmed) return;
+    
+    setSaving(true);
+    setError(null);
+    
+    try {
+      if (isEditMode) {
+        // Check if sale status allows non-prospect action
+        const allowedStatuses = ['appointment', 'hang-up', 'no_response', 'voicemail'];
+        if (!allowedStatuses.includes(saleForm.status)) {
+          setError('Non-Prospect can only be applied to sales with status: Appointment, Hang-Up, No Response, or Voicemail');
+          setSaving(false);
+          return;
+        }
+        
+        // For existing sale: Get the sale to find customer ID, then delete sale and update customer
+        const saleResponse = await apiClient.get(`/api/sales/${editId}`);
+        const saleResult = await saleResponse.json();
+        
+        if (!saleResult.success) {
+          throw new Error('Failed to fetch sale data');
+        }
+        
+        const customerId = saleResult.data.customerId;
+        
+        // Update customer status to non_prospect
+        const customerUpdateResponse = await apiClient.put(`/api/customers/${customerId}`, {
+          status: 'non_prospect'
+        });
+        
+        const customerUpdateResult = await customerUpdateResponse.json();
+        if (!customerUpdateResult.success) {
+          throw new Error('Failed to update customer status');
+        }
+        
+        // Log the action in sales_logs before deleting
+        await apiClient.post('/api/sales-logs', {
+          saleId: null,
+          customerId: customerId,
+          agentId: user?.id,
+          action: 'customer_marked_non_prospect',
+          status: saleForm.status || 'unknown',
+          note: `Customer marked as non-prospect. Sale deleted. Previous status: ${saleForm.status || 'unknown'}`,
+          spokeTo: saleForm.spoke_to || null,
+          appointment_datetime: null
+        });
+        
+        // Delete the sale
+        const deleteResponse = await apiClient.delete(`/api/sales/${editId}`);
+        const deleteResult = await deleteResponse.json();
+        
+        if (!deleteResult.success) {
+          throw new Error('Failed to delete sale');
+        }
+        
+        // Redirect to dashboard
+        router.push('/');
+      } else {
+        // For new sale (not yet created): Just create customer with non_prospect status
+        handleNotACustomer();
+      }
+    } catch (error) {
+      setError(error.message || 'Failed to mark customer as non-prospect. Please try again.');
       setSaving(false);
     }
   };
@@ -1709,7 +1796,7 @@ export default function AddSale() {
                 ✅ Sale Done
               </button>
               <button
-                onClick={handleNotACustomer}
+                onClick={isEditMode ? handleNonProspect : handleNotACustomer}
                 disabled={saving || loading}
                 className="bg-gray-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-gray-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >

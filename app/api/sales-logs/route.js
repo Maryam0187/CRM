@@ -56,10 +56,10 @@ export async function POST(request) {
       appointment_datetime
     } = body;
 
-    // Validate required fields
-    if (!saleId || !customerId || !action || !status) {
+    // Validate required fields (saleId can be null for non-prospect customers)
+    if (!customerId || !action || !status) {
       return NextResponse.json(
-        { error: 'Missing required fields: saleId, customerId, action, status' },
+        { error: 'Missing required fields: customerId, action, status' },
         { status: 400 }
       );
     }

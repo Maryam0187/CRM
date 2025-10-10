@@ -9,7 +9,7 @@ module.exports = (sequelize) => {
     },
     saleId: {
       type: DataTypes.INTEGER,
-      allowNull: false,
+      allowNull: true, // Allow null for non-prospect customers without sales
       references: {
         model: 'sales',
         key: 'id'
