@@ -47,7 +47,7 @@ export default function Home() {
   // Supervisor-specific state
   const [supervisedAgents, setSupervisedAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
-  const [showingSupervisorSales, setShowingSupervisorSales] = useState(false);
+  const [showingSupervisorSales, setShowingSupervisorSales] = useState(true); // Default to showing supervisor's own sales
   
   // Payment modal state
   const [isPaymentModalVisible, setIsPaymentModalVisible] = useState(false);
@@ -82,6 +82,8 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
+      console.log('fetchSalesData called with user:', user?.role, 'showingSupervisorSales:', showingSupervisorSales, 'selectedAgent:', selectedAgent?.id);
+      
       // Build URL with filters
       const params = new URLSearchParams();
       if (statusFilter) params.append('status', statusFilter);
@@ -93,16 +95,17 @@ export default function Home() {
       
       // Add user information for role-based filtering
       if (user?.role === 'supervisor') {
-        // For supervisors, show data for selected agent or supervisor's own sales
-        const targetUserId = agentId || (showingSupervisorSales ? user.id : selectedAgent?.id);
+        // For supervisors, default to their own sales, or show selected agent's sales
+        const targetUserId = agentId || (selectedAgent?.id || user.id);
         if (targetUserId) {
           params.append('userId', targetUserId);
-          if (showingSupervisorSales) {
-            params.append('userRole', 'supervisor_own');
-          } else if (selectedAgent) {
+          if (selectedAgent && !showingSupervisorSales) {
             params.append('userRole', 'agent');
+            console.log('Supervisor API: Showing agent sales for', selectedAgent.firstName);
           } else {
-            params.append('userRole', 'supervisor');
+            // Default to supervisor's own sales
+            params.append('userRole', 'supervisor_own');
+            console.log('Supervisor API: Showing supervisor own sales for', user.first_name);
           }
         }
       } else {
@@ -114,6 +117,7 @@ export default function Home() {
       }
       
       const url = `/api/sales${params.toString() ? `?${params.toString()}` : ''}`;
+      console.log('API URL:', url);
       const response = await fetch(url);
       const result = await response.json();
       
@@ -137,17 +141,24 @@ export default function Home() {
   useEffect(() => {
     if (user?.role === 'supervisor') {
       initializeSupervisedAgents();
+      // Ensure supervisor starts with their own sales view
+      setShowingSupervisorSales(true);
+      setSelectedAgent(null);
     }
   }, [user]);
 
   // Load sales data on component mount and when status, date filter, selected agent, or pagination changes
   useEffect(() => {
-    if (user?.role === 'supervisor' && (selectedAgent || showingSupervisorSales)) {
-      fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage);
-    } else if (user?.role !== 'supervisor') {
+    if (user?.role === 'supervisor') {
+      // For supervisors, always load data (default to their own sales)
+      // Only fetch if we have the proper state initialized
+      if (showingSupervisorSales !== undefined) {
+        fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage);
+      }
+    } else if (user?.role && user?.role !== 'supervisor') {
       fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage);
     }
-  }, [status, dateFilter, selectedAgent, showingSupervisorSales, currentPage, itemsPerPage]);
+  }, [user, status, dateFilter, selectedAgent, showingSupervisorSales, currentPage, itemsPerPage]);
 
   // Auto-clear payment notifications after 5 seconds
   useEffect(() => {

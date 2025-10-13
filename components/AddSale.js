@@ -166,6 +166,11 @@ export default function AddSale() {
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [customerWarning, setCustomerWarning] = useState(null);
 
+  // Comment modal state
+  const [isCommentModalOpen, setIsCommentModalOpen] = useState(false);
+  const [commentingNote, setCommentingNote] = useState(null);
+  const [commentText, setCommentText] = useState('');
+
 
   // System info for receiver modal
   const [systemInfo, setSystemInfo] = useState({
@@ -624,7 +629,9 @@ export default function AddSale() {
           id: Date.now(),
           timestamp: new Date().toLocaleString(),
           note: dateTimeData.note.trim(),
-          appointment: `${dateTimeData.date} ${dateTimeData.time}`
+          appointment: `${dateTimeData.date} ${dateTimeData.time}`,
+          userId: user?.id, // Add current user ID to track who added the note
+          userName: user ? `${user.first_name || user.firstName || ''} ${user.last_name || user.lastName || ''}`.trim() || 'Unknown User' : 'Unknown User' // Add user name for display
         };
         
         const currentNotes = parseNotes(saleForm.notes);
@@ -677,6 +684,70 @@ export default function AddSale() {
     setIsNoteEditModalOpen(true);
   };
 
+  // Open comment modal
+  const openCommentModal = (note) => {
+    setCommentingNote(note);
+    setCommentText('');
+    setIsCommentModalOpen(true);
+  };
+
+  // Handle comment submission
+  const handleCommentSubmit = async () => {
+    if (!commentText.trim() || !commentingNote) return;
+
+    const comment = {
+      id: Date.now(),
+      timestamp: new Date().toLocaleString(),
+      comment: commentText.trim(),
+      userId: user?.id,
+      userName: user ? `${user.first_name || user.firstName || ''} ${user.last_name || user.lastName || ''}`.trim() || 'Unknown User' : 'Unknown User'
+    };
+
+    // Add comment to the note
+    const notes = parseNotes(saleForm.notes);
+    const updatedNotes = notes.map(note => {
+      if (note.id === commentingNote.id) {
+        return {
+          ...note,
+          comments: [...(note.comments || []), comment]
+        };
+      }
+      return note;
+    });
+
+    // Update the notes string
+    const updatedNotesString = updatedNotes.map(note => JSON.stringify(note)).join('|||');
+    setSaleForm(prev => ({ ...prev, notes: updatedNotesString }));
+
+    // Save the updated notes to the database if in edit mode
+    if (isEditMode && editId) {
+      try {
+        const response = await apiClient.put(`/api/sales/${editId}`, {
+          notes: updatedNotesString,
+          status: saleForm.status // Include current status to prevent it from being set to null
+        });
+        
+        if (!response.ok) {
+          console.error('Failed to save notes with comments');
+        }
+      } catch (error) {
+        console.error('Error saving notes with comments:', error);
+      }
+    }
+
+    // Log the comment action
+    await logNoteAction('add_comment', {
+      noteId: commentingNote.id,
+      commentContent: comment.comment,
+      timestamp: comment.timestamp
+    });
+
+    // Close modal and reset
+    setIsCommentModalOpen(false);
+    setCommentingNote(null);
+    setCommentText('');
+  };
+
   // Handle note edit save
   const handleNoteEditSave = async (editedNoteData) => {
     await handleNoteEdit(
@@ -700,7 +771,9 @@ export default function AddSale() {
       id: Date.now(), // Unique ID for editing
       timestamp: `${currentDate} ${currentTime}`,
       note: noteData.note || 'Note added',
-      appointment: noteData.date && noteData.time ? `${noteData.date} ${noteData.time}` : null
+      appointment: noteData.date && noteData.time ? `${noteData.date} ${noteData.time}` : null,
+      userId: user?.id, // Add current user ID to track who added the note
+      userName: user ? `${user.first_name || user.firstName || ''} ${user.last_name || user.lastName || ''}`.trim() || 'Unknown User' : 'Unknown User' // Add user name for display
     };
     
     // Convert to string format with delimiter
@@ -1485,6 +1558,7 @@ export default function AddSale() {
                 customerName: checkResult.customer.firstName,
                 lastSaleDateTime: lastSaleDateTime,
                 lastSaleTimeAgo: lastSaleTimeAgo,
+                lastSaleStatus: checkResult.lastSale?.status || 'No previous sales',
                 agentName: displayAgentName,
                 isCurrentUser: isCurrentUser,
                 customerId: checkResult.customer.id
@@ -2859,6 +2933,7 @@ export default function AddSale() {
                     <div className="space-y-3">
                       {parseNotes(saleForm.notes).map((note, index) => {
                         const isLastNote = index === 0; // First note is newest (descending order)
+                        const canEdit = note.userId === user?.id && isLastNote; // Only show edit button for current user's latest note
                         return (
                         <div 
                           key={note.id} 
@@ -2867,8 +2942,13 @@ export default function AddSale() {
                         >
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
-                              <div className="text-xs text-gray-500 mb-1">
-                                {note.timestamp}
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="text-xs text-gray-500 font-medium">
+                                  {note.timestamp}
+                                </div>
+                                <div className="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded-full">
+                                  {note.userName || 'Unknown User'}
+                                </div>
                               </div>
                               <div className="text-gray-900 mb-1">
                                 {note.note}
@@ -2878,20 +2958,53 @@ export default function AddSale() {
                                   📅 Appointment: {note.appointment}
                                 </div>
                               )}
+                              
+                              {/* Comments Section */}
+                              {note.comments && note.comments.length > 0 && (
+                                <div className="mt-2 ml-4 border-l-2 border-gray-200 pl-3">
+                                  <div className="text-xs text-gray-500 mb-1">💬 Comments:</div>
+                                  {note.comments.map((comment, commentIndex) => (
+                                    <div key={comment.id} className="mb-3 p-3 bg-gray-50 rounded-lg text-xs border border-gray-200">
+                                      <div className="flex justify-between items-center mb-2">
+                                        <span className="text-gray-500 font-medium">{comment.timestamp}</span>
+                                        <span className="text-xs text-gray-600 bg-gray-200 px-2 py-1 rounded-full">{comment.userName}</span>
+                                      </div>
+                                      <div className="text-gray-700 leading-relaxed">{comment.comment}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              
+                              {/* Action Buttons */}
+                              <div className="flex gap-2 mt-3">
+                                {canEdit && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      openNoteEditModal(note);
+                                    }}
+                                    className="text-blue-600 hover:text-blue-800 text-xs px-3 py-1.5 border border-blue-300 rounded-md hover:bg-blue-50 transition-colors duration-200 font-medium"
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                )}
+                                {isLastNote && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      openCommentModal(note);
+                                    }}
+                                    className="text-green-600 hover:text-green-800 text-xs px-3 py-1.5 border border-green-300 rounded-md hover:bg-green-50 transition-colors duration-200 font-medium"
+                                  >
+                                    💬 Comment
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                            {isLastNote && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  openNoteEditModal(note);
-                                }}
-                                className="ml-2 text-blue-600 hover:text-blue-800 text-xs px-2 py-1 border border-blue-300 rounded hover:bg-blue-50"
-                              >
-                                ✏️ Edit
-                              </button>
-                            )}
                           </div>
                         </div>
                         );
@@ -3003,11 +3116,28 @@ export default function AddSale() {
                     <p className="text-sm text-gray-600 mb-2">
                       <strong>Last Sale:</strong> {customerWarning.lastSaleDateTime}
                     </p>
+                    <p className="text-sm text-gray-600 mb-2">
+                      <strong>Last Sale Status:</strong> 
+                      <span className={`ml-2 px-2 py-1 text-xs font-semibold rounded-full ${
+                        customerWarning.lastSaleStatus === 'completed' ? 'bg-green-100 text-green-800' :
+                        customerWarning.lastSaleStatus === 'active' ? 'bg-blue-100 text-blue-800' :
+                        customerWarning.lastSaleStatus === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                        customerWarning.lastSaleStatus === 'cancelled' ? 'bg-red-100 text-red-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {customerWarning.lastSaleStatus ? customerWarning.lastSaleStatus.charAt(0).toUpperCase() + customerWarning.lastSaleStatus.slice(1) : 'No previous sales'}
+                      </span>
+                    </p>
                     <p className="text-sm text-gray-500 mb-2">
                       <strong>Time Since Last Sale:</strong> {customerWarning.lastSaleTimeAgo}
                     </p>
                     <p className={`text-sm mb-2 ${customerWarning.isCurrentUser ? 'text-green-600 font-medium' : 'text-gray-600'}`}>
                       <strong>Last Sale Agent:</strong> {customerWarning.agentName}
+                      {customerWarning.isCurrentUser && (
+                        <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full font-medium">
+                          (You added this sale)
+                        </span>
+                      )}
                     </p>
                     <p className="text-sm text-blue-600 mt-3 font-medium">
                       This will add a new sale to the existing customer.
@@ -3047,6 +3177,33 @@ export default function AddSale() {
                                 <div className="text-xs text-gray-500 mt-1">
                                   ID: {customer.id} • Created: {new Date(customer.created_at).toLocaleDateString()}
                                 </div>
+                                {customer.sales && customer.sales.length > 0 && customer.sales[0].agent && 
+                                 user && (user.id === customer.sales[0].agent.id || 
+                                         (user.firstName === customer.sales[0].agent.firstName && user.lastName === customer.sales[0].agent.lastName)) && (
+                                  <div className="text-xs text-gray-600 mt-1">
+                                    <strong>Added by:</strong> {customer.sales[0].agent.firstName} {customer.sales[0].agent.lastName}
+                                    <span className="ml-1 text-xs bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full font-medium">
+                                      (You)
+                                    </span>
+                                  </div>
+                                )}
+                                {customer.sales && customer.sales.length > 0 && (
+                                  <div className="text-xs text-gray-600 mt-1">
+                                    Last Sale: 
+                                    <span className={`ml-1 px-1.5 py-0.5 text-xs font-semibold rounded-full ${
+                                      customer.sales[0].status === 'completed' ? 'bg-green-100 text-green-800' :
+                                      customer.sales[0].status === 'active' ? 'bg-blue-100 text-blue-800' :
+                                      customer.sales[0].status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                      customer.sales[0].status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                      'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {customer.sales[0].status ? customer.sales[0].status.charAt(0).toUpperCase() + customer.sales[0].status.slice(1) : 'Unknown'}
+                                    </span>
+                                    <span className="ml-2 text-gray-500">
+                                      ({new Date(customer.sales[0].created_at).toLocaleDateString()})
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                               {customerWarning.selectedCustomerId === customer.id && (
                                 <div className="ml-2">
@@ -3119,6 +3276,80 @@ export default function AddSale() {
                       ? `Add Sale to ${customerWarning.selectedCustomerName}`
                       : 'Create New Customer'
                   }
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Comment Modal */}
+      {isCommentModalOpen && commentingNote && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Add Comment
+                </h3>
+                <button
+                  onClick={() => {
+                    setIsCommentModalOpen(false);
+                    setCommentingNote(null);
+                    setCommentText('');
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                <div className="text-sm text-gray-600 mb-1">
+                  <strong>Original Note:</strong>
+                </div>
+                <div className="text-sm text-gray-800">
+                  {commentingNote.note}
+                </div>
+                {commentingNote.appointment && (
+                  <div className="text-xs text-green-600 mt-1">
+                    📅 Appointment: {commentingNote.appointment}
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Your Comment
+                </label>
+                <textarea
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  placeholder="Add your comment here..."
+                  rows="3"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-900 resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => {
+                    setIsCommentModalOpen(false);
+                    setCommentingNote(null);
+                    setCommentText('');
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCommentSubmit}
+                  disabled={!commentText.trim()}
+                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Add Comment
                 </button>
               </div>
             </div>

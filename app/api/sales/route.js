@@ -56,8 +56,10 @@ export async function GET(request) {
           allSales = await SaleService.findAll();
         }
         
-        // Filter by supervised agents
-        const filteredSales = allSales.filter(sale => agentIds.includes(sale.agentId));
+        // Filter by supervised agents and sort by updatedAt DESC
+        const filteredSales = allSales
+          .filter(sale => agentIds.includes(sale.agentId))
+          .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
         
         // Apply pagination manually
         const startIndex = (page - 1) * limit;
@@ -89,8 +91,10 @@ export async function GET(request) {
         allSales = await SaleService.findAll();
       }
       
-      // Filter by supervisor's own ID
-      const filteredSales = allSales.filter(sale => sale.agentId === parseInt(userId));
+      // Filter by supervisor's own ID and sort by updatedAt DESC
+      const filteredSales = allSales
+        .filter(sale => sale.agentId === parseInt(userId))
+        .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
       
       // Apply pagination manually
       const startIndex = (page - 1) * limit;
@@ -121,8 +125,10 @@ export async function GET(request) {
         allSales = await SaleService.findAll();
       }
       
-      // Filter by agent ID
-      const filteredSales = allSales.filter(sale => sale.agentId === parseInt(userId));
+      // Filter by agent ID and sort by updatedAt DESC
+      const filteredSales = allSales
+        .filter(sale => sale.agentId === parseInt(userId))
+        .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
       
       // Apply pagination manually
       const startIndex = (page - 1) * limit;
