@@ -21,7 +21,7 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
     setError(null);
     
     try {
-      const response = await apiClient.get(`/api/sales-logs?saleId=${saleId}`);
+      const response = await apiClient.get(`/api/sales-logs?saleId=${saleId}&getAll=true`);
       const result = await response.json();
       
       if (result.success) {

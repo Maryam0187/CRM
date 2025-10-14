@@ -13,7 +13,13 @@ export async function GET(request) {
     let result;
 
     if (saleId) {
-      result = await SalesLogService.findBySaleId(saleId, { page, limit });
+      // For timeline, get all logs without pagination
+      const getAllLogs = searchParams.get('getAll') === 'true';
+      if (getAllLogs) {
+        result = await SalesLogService.findBySaleIdAll(saleId);
+      } else {
+        result = await SalesLogService.findBySaleId(saleId, { page, limit });
+      }
     } else if (agentId) {
       result = await SalesLogService.findByAgentId(agentId, { page, limit });
     } else if (action) {

@@ -1171,6 +1171,55 @@ export default function AddSale() {
         throw new Error(result.message || 'Failed to create sale');
       }
       
+      // Log the sale creation action
+      await apiClient.post('/api/sales-logs', {
+        saleId: result.data.id,
+        customerId: existingCustomerId,
+        agentId: user?.id,
+        action: 'sale_created',
+        status: status,
+        note: (() => {
+          // Get last sale info from customerWarning if available
+          
+          // For exact match (Case 1)
+          if (customerWarning && customerWarning.lastSaleDateTime) {
+            const lastSaleDateTime = customerWarning.lastSaleDateTime;
+            const lastSaleStatus = customerWarning.lastSaleStatus || 'N/A';
+            
+            return `Sale created with existing customer; Last Sale: ${lastSaleDateTime} | Status: ${lastSaleStatus}`;
+          }
+          
+          // For landline match (Case 2) - get info from selected customer
+          if (customerWarning && customerWarning.matchType === 'landline' && customerWarning.selectedCustomerId) {
+            const selectedCustomer = customerWarning.landlineCustomers?.find(c => c.id === customerWarning.selectedCustomerId);
+            if (selectedCustomer && selectedCustomer.sales && selectedCustomer.sales.length > 0) {
+              const lastSale = selectedCustomer.sales[0]; // Most recent sale (sorted by created_at DESC)
+              const dateStr = lastSale.created_at ? new Date(lastSale.created_at).toLocaleDateString() : '';
+              const timeStr = lastSale.created_at ? new Date(lastSale.created_at).toLocaleTimeString() : '';
+              const statusStr = lastSale.status || 'N/A';
+              
+              return `Sale created with existing customer; Last Sale: ${dateStr} ${timeStr} | Status: ${statusStr}`;
+            }
+          }
+          
+          return 'Sale created with existing customer; Last Sale: No previous sale.';
+        })(),
+        appointment_datetime: saleForm.appointmentDateTime || null
+      });
+      
+      // Log notes if any exist
+      if (result.data.id && existingCustomerId && saleForm.notes) {
+        const notes = parseNotes(saleForm.notes);
+        for (const note of notes) {
+          await logNoteActionForNewSale(result.data.id, existingCustomerId, 'add_note', {
+            noteId: note.id,
+            noteContent: note.note,
+            appointment: note.appointment,
+            timestamp: note.timestamp
+          });
+        }
+      }
+      
       // Navigate back to home
       router.push('/');
     } catch (error) {
@@ -1561,7 +1610,8 @@ export default function AddSale() {
                 lastSaleStatus: checkResult.lastSale?.status || 'No previous sales',
                 agentName: displayAgentName,
                 isCurrentUser: isCurrentUser,
-                customerId: checkResult.customer.id
+                customerId: checkResult.customer.id,
+                lastSale: checkResult.lastSale // Include the full lastSale object with agent info
               });
               setShowCustomerDialog(true);
               setSaving(false);
