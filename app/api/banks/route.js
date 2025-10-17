@@ -16,6 +16,14 @@ export async function POST(request) {
     }
     const { user } = authResult;
     
+    // Allow agents, supervisors, admins, processors, and verification users to create bank accounts
+    if (!['agent', 'supervisor', 'admin', 'processor', 'verification'].includes(user.role)) {
+      return Response.json(
+        { success: false, message: 'Insufficient permissions to create bank accounts' },
+        { status: 403 }
+      );
+    }
+    
     // Validate required fields
     if (!bankData.saleId || !bankData.bankName || !bankData.accountHolder || 
         !bankData.accountNumber || !bankData.routingNumber || !bankData.checkNumber || 

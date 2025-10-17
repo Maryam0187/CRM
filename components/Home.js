@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import Table from './Table';
 import DateFilter from './DateFilter';
 import ProtectedRoute from './ProtectedRoute';
-import PaymentModal from './PaymentModal';
 import SalesTimeline from './SalesTimeline';
 import AppointmentSummary from './AppointmentSummary';
 import { useAuth } from '../contexts/AuthContext';
@@ -49,11 +48,6 @@ export default function Home() {
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [showingSupervisorSales, setShowingSupervisorSales] = useState(true); // Default to showing supervisor's own sales
   
-  // Payment modal state
-  const [isPaymentModalVisible, setIsPaymentModalVisible] = useState(false);
-  const [selectedSaleId, setSelectedSaleId] = useState(null);
-  const [successMessage, setSuccessMessage] = useState('');
-  const [paymentNotifications, setPaymentNotifications] = useState({});
   
   // Timeline modal state
   const [isTimelineModalVisible, setIsTimelineModalVisible] = useState(false);
@@ -160,16 +154,6 @@ export default function Home() {
     }
   }, [user, status, dateFilter, selectedAgent, showingSupervisorSales, currentPage, itemsPerPage]);
 
-  // Auto-clear payment notifications after 5 seconds
-  useEffect(() => {
-    if (Object.keys(paymentNotifications).length > 0) {
-      const timer = setTimeout(() => {
-        setPaymentNotifications({});
-      }, 5000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [paymentNotifications]);
 
   // Handler functions for supervisor interface
   const handleAgentSelect = (agent) => {
@@ -267,28 +251,9 @@ export default function Home() {
       header: 'Payment Status',
       key: 'paymentStatus',
       render: (value, row) => {
-        const notification = paymentNotifications[row.id];
         const hasCards = row.cards && row.cards.length > 0;
         const hasBanks = row.banks && row.banks.length > 0;
         const hasPayments = hasCards || hasBanks;
-        
-        // Show recent notification if available
-        if (notification) {
-          const timeAgo = Math.floor((new Date() - new Date(notification.timestamp)) / 1000);
-          return (
-            <div className="flex flex-col">
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 mb-1">
-                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                {notification.type} Added
-              </span>
-              <span className="text-xs text-gray-500">
-                {timeAgo < 60 ? 'Just now' : `${Math.floor(timeAgo / 60)}m ago`}
-              </span>
-            </div>
-          );
-        }
         
         // Show existing payment status
         if (hasPayments) {
@@ -353,33 +318,6 @@ export default function Home() {
                 View Payment
               </button>
             )}
-            {hasPayments ? (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleAddPayment(row.id);
-                }}
-                className="inline-flex items-center px-3 py-1 text-xs font-medium text-green-600 bg-green-50 rounded-md hover:bg-green-100 transition-colors duration-200"
-              >
-                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
-                Add More
-              </button>
-            ) : (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleAddPayment(row.id);
-                }}
-                className="inline-flex items-center px-3 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-md hover:bg-indigo-100 transition-colors duration-200"
-              >
-                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                </svg>
-                Add Payment
-              </button>
-            )}
             {user?.role === 'admin' && (
               <button
                 onClick={(e) => {
@@ -438,38 +376,11 @@ export default function Home() {
     router.push(`/add-sale?id=${saleId}`);
   };
 
-  const handleAddPayment = (saleId) => {
-    setSelectedSaleId(saleId);
-    setIsPaymentModalVisible(true);
-    setSuccessMessage('');
-  };
-
   const handleViewPayment = (saleId) => {
-    // Navigate to payments page with specific sale filter
-    router.push(`/admin/payments?saleId=${saleId}`);
+    // Redirect to dedicated payments page to view all payment information
+    router.push(`/payments?saleId=${saleId}`);
   };
 
-  const handlePaymentModalClose = () => {
-    setIsPaymentModalVisible(false);
-    setSelectedSaleId(null);
-  };
-
-  const handlePaymentSuccess = (type, data) => {
-    setSuccessMessage(`${type} details added successfully for Sale ID: ${selectedSaleId}`);
-    console.log('Payment saved:', data);
-    
-    // Add payment notification to the table
-    setPaymentNotifications(prev => ({
-      ...prev,
-      [selectedSaleId]: {
-        type: type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Payment', // Capitalize first letter
-        timestamp: new Date().toISOString()
-      }
-    }));
-    
-    // Optionally refresh the sales data
-    fetchSalesData();
-  };
 
   const formatDate = (date) => {
     const options = { year: 'numeric', month: 'long', day: 'numeric' };
@@ -749,37 +660,7 @@ export default function Home() {
         </div>
       </div>
       
-      {/* Success Message */}
-      {successMessage && (
-        <div className="fixed top-20 right-4 z-50 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded shadow-lg">
-          <div className="flex items-center">
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-            {successMessage}
-            <button
-              onClick={() => {
-                setSuccessMessage('');
-                setPaymentNotifications({});
-              }}
-              className="ml-4 text-green-600 hover:text-green-800"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
 
-      {/* Payment Modal */}
-      <PaymentModal
-        isVisible={isPaymentModalVisible}
-        mode="create"
-        saleId={selectedSaleId}
-        onClose={handlePaymentModalClose}
-        onSuccess={handlePaymentSuccess}
-      />
 
       {/* Sales Timeline Modal */}
       <SalesTimeline

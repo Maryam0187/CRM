@@ -17,8 +17,8 @@ export async function POST(request) {
 
     const { user } = authResult;
     
-    // Allow agents, admins, processors, and verification users to create cards
-    if (!['agent', 'admin', 'processor', 'verification'].includes(user.role)) {
+    // Allow agents, supervisors, admins, processors, and verification users to create cards
+    if (!['agent', 'supervisor', 'admin', 'processor', 'verification'].includes(user.role)) {
       return Response.json(
         { success: false, message: 'Insufficient permissions to create cards' },
         { status: 403 }

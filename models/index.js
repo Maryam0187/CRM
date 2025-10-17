@@ -39,6 +39,7 @@ const RoleAssignment = require('./RoleAssignment')(sequelize);
 const Carrier = require('./Carrier')(sequelize);
 const Receiver = require('./Receiver')(sequelize);
 const SalesLog = require('./SalesLog')(sequelize);
+const CallLog = require('./CallLog')(sequelize);
 
 // Define associations
 Object.keys(sequelize.models).forEach(modelName => {
@@ -84,6 +85,7 @@ module.exports = {
   Carrier,
   Receiver,
   SalesLog,
+  CallLog,
   testConnection,
   syncDatabase
 };
