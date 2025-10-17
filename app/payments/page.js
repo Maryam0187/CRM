@@ -1,9 +1,9 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { useAuth } from '../../../contexts/AuthContext';
-import { isAdmin, canProcessPayments, canViewAllSales, isAgent, isSupervisor, isProcessor, isVerification } from '../../../lib/roleUtils';
-import PaymentView from '../../../components/PaymentView';
+import { useAuth } from '../../contexts/AuthContext';
+import { isAdmin, canProcessPayments, canViewAllSales, isAgent, isSupervisor, isProcessor, isVerification } from '../../lib/roleUtils';
+import PaymentView from '../../components/PaymentView';
 
 export default function PaymentsPage() {
   const { user, loading } = useAuth();

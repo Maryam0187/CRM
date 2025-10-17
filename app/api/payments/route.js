@@ -62,7 +62,14 @@ export async function GET(request) {
       if (userRole === 'supervisor') {
         const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(userId);
         const agentIds = supervisedAgents.map(agent => agent.id);
-        if (!agentIds.includes(sale.agentId)) {
+        
+        
+        // Supervisor can view their own sales OR sales from their supervised agents
+        const canViewSale = (sale.agentId === userId) || // Own sales
+                           (agentIds.length === 0) || // No supervised agents = view all
+                           (agentIds.length > 0 && agentIds.includes(sale.agentId)); // Supervised agents' sales
+        
+        if (!canViewSale) {
           return NextResponse.json({ error: 'Unauthorized to view this sale' }, { status: 403 });
         }
       }
@@ -80,7 +87,12 @@ export async function GET(request) {
       if (userRole === 'supervisor') {
         const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(userId);
         const agentIds = supervisedAgents.map(agent => agent.id);
-        sales = agentIds.length > 0 ? sales.filter(sale => agentIds.includes(sale.agentId)) : [];
+        // Supervisor can view their own sales OR sales from their supervised agents
+        sales = sales.filter(sale => 
+          sale.agentId === userId || // Own sales
+          agentIds.length === 0 || // No supervised agents = view all
+          agentIds.includes(sale.agentId) // Supervised agents' sales
+        );
       } else if (userRole === 'agent') {
         sales = sales.filter(sale => sale.agentId === userId);
       } else if (userRole !== 'admin' && userRole !== 'processor' && userRole !== 'verification') {

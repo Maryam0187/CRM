@@ -8,6 +8,10 @@ import ReceiverModal from './ReceiverModal';
 import StateSelector, { getStateTimezone, convertToUTC, convertFromUTC } from './StateSelector';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient.js';
+import CallButton from './CallButton';
+import CallHistory from './CallHistory';
+import AddCardForm from './AddCardForm';
+import AddBankForm from './AddBankForm';
 import { 
   formatPhoneNumber, 
   formatCellNumber, 
@@ -28,26 +32,62 @@ const getTimeAgo = (dateString) => {
   
   const now = new Date();
   const pastDate = new Date(dateString);
-  const diffInMs = now - pastDate;
-  const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
   
-  if (diffInDays === 0) {
-    return 'Today';
-  } else if (diffInDays === 1) {
-    return '1 day ago';
-  } else if (diffInDays < 7) {
-    return `${diffInDays} days ago`;
-  } else if (diffInDays < 30) {
-    const weeks = Math.floor(diffInDays / 7);
+  
+  // Handle invalid dates
+  if (isNaN(pastDate.getTime())) {
+    return 'Invalid date';
+  }
+  
+  // Handle future dates
+  if (pastDate > now) {
+    return 'Future date';
+  }
+  
+  // Get date components for accurate day calculation
+  const nowYear = now.getFullYear();
+  const nowMonth = now.getMonth();
+  const nowDay = now.getDate();
+  
+  const pastYear = pastDate.getFullYear();
+  const pastMonth = pastDate.getMonth();
+  const pastDay = pastDate.getDate();
+  
+  // Check if it's the same day
+  if (nowYear === pastYear && nowMonth === pastMonth && nowDay === pastDay) {
+    const diffInMs = now - pastDate;
+    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+    const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+    
+    if (diffInHours < 1) {
+      return diffInMinutes < 1 ? 'Just now' : `${diffInMinutes} minute${diffInMinutes > 1 ? 's' : ''} ago`;
+    } else {
+      return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
+    }
+  }
+  
+  // Calculate days difference using date arithmetic
+  const nowTime = new Date(nowYear, nowMonth, nowDay).getTime();
+  const pastTime = new Date(pastYear, pastMonth, pastDay).getTime();
+  const daysDiff = Math.floor((nowTime - pastTime) / (1000 * 60 * 60 * 24));
+  
+  
+  if (daysDiff === 1) {
+    return 'Yesterday';
+  } else if (daysDiff < 7) {
+    return `${daysDiff} days ago`;
+  } else if (daysDiff < 30) {
+    const weeks = Math.floor(daysDiff / 7);
     return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`;
-  } else if (diffInDays < 365) {
-    const months = Math.floor(diffInDays / 30);
+  } else if (daysDiff < 365) {
+    const months = Math.floor(daysDiff / 30);
     return months === 1 ? '1 month ago' : `${months} months ago`;
   } else {
-    const years = Math.floor(diffInDays / 365);
+    const years = Math.floor(daysDiff / 365);
     return years === 1 ? '1 year ago' : `${years} years ago`;
   }
 };
+
 
 export default function AddSale() {
   const router = useRouter();
@@ -76,6 +116,36 @@ export default function AddSale() {
     firstName: { isValid: true, message: '' },
     landline: { isValid: true, message: '' }
   });
+
+  // Call functionality state
+  const [callData, setCallData] = useState(null);
+  const [showCallHistory, setShowCallHistory] = useState(false);
+  const [createdSale, setCreatedSale] = useState(null); // Track created sale for call button
+  const [checkedCustomer, setCheckedCustomer] = useState(null); // Track checked customer (no sale yet)
+  const [showCallInfo, setShowCallInfo] = useState(false); // Show customer/sale info before call
+  const [showCheckNumber, setShowCheckNumber] = useState(false); // Show check number button
+  const [isCheckingNumber, setIsCheckingNumber] = useState(false); // Loading state for check number
+  const [showCustomerInfoModal, setShowCustomerInfoModal] = useState(false); // Show customer info popup
+  const [lastSaleInfo, setLastSaleInfo] = useState(null); // Store last sale information
+  const [isCheckNumberMode, setIsCheckNumberMode] = useState(false); // Track if in check number mode
+  const [callJustEnded, setCallJustEnded] = useState(false); // Track if call just ended to highlight action buttons
+  
+  // Payment section state
+  const [showPaymentSection, setShowPaymentSection] = useState(false); // Show payment section after call ends
+  const [selectedPaymentType, setSelectedPaymentType] = useState('card'); // 'card' or 'bank'
+  
+  // Success message state
+  const [successMessage, setSuccessMessage] = useState('');
+  
+  // Clear success message after 5 seconds
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => {
+        setSuccessMessage('');
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
 
   // Sale form state
   const [saleForm, setSaleForm] = useState({
@@ -296,7 +366,10 @@ export default function AddSale() {
 
         // Populate sale form data
         setSaleForm({
+          id: sale.id, // Add the sale ID
           status: sale.status || 'new', // Add status field
+          created_at: sale.created_at, // Add creation date
+          agent: sale.agent, // Add agent information
           spoke_to: sale.spokeTo || '',
           pin_code: sale.pinCode || '',
           pin_code_status: sale.pinCodeStatus || '',
@@ -368,6 +441,16 @@ export default function AddSale() {
               setError('Error loading carriers. Please try again.');
             });
           }
+        }
+        
+        // Set checkedCustomer to true in edit mode so call end overlay works
+        if (isEditMode && customer.id) {
+          setCheckedCustomer({
+            id: customer.id,
+            customerId: customer.id,
+            status: 'checked',
+            customerName: customer.firstName
+          });
         }
       } else {
         setError(result.message || 'Failed to fetch sale data');
@@ -464,6 +547,380 @@ export default function AddSale() {
     });
 
     return nameValidation.isValid && landlineValidation.isValid;
+  };
+
+  // Check if we have a valid phone number for calling
+  const hasValidPhoneNumber = () => {
+    const phone = customer.phone || customer.landline;
+    if (!phone) return false;
+    
+    // Remove formatting for validation
+    const cleanPhone = phone.replace(/[^\d]/g, '');
+    return cleanPhone.length >= 10;
+  };
+
+  // Handle call completion
+
+  const handleCallCompleted = (callResult) => {
+    console.log('Call completed:', callResult);
+    setCallData(callResult);
+    
+    // Show action buttons overlay to prompt user to select status
+    if (callResult) {
+      setCallJustEnded(true);
+    }
+    
+    // Hide the customer/sale info panel after call is initiated
+    setShowCallInfo(false);
+    // Close customer info popup after call is initiated
+    setShowCustomerInfoModal(false);
+    // Reset checked customer and last sale info
+    setCheckedCustomer(null);
+    setLastSaleInfo(null);
+  };
+
+  // Reset call highlight when user interacts with action buttons
+  const resetCallHighlight = () => {
+    setCallJustEnded(false);
+  };
+
+  // Payment panel handlers
+  const handlePaymentPanelClose = () => {
+    setShowPaymentSection(false);
+    setSelectedPaymentType('card');
+  };
+
+  const handlePaymentSuccess = (type, data) => {
+    console.log('Payment saved:', data);
+    
+    // Set status to payment info when payment details are actually added
+    if (saleForm.id || editId) {
+      const saleId = saleForm.id || editId;
+      
+      // Update sale status to payment info
+      apiClient.put(`/api/sales/${saleId}`, {
+        status: SALES_STATUSES.PAYMENT_INFO
+      })
+      .then(response => {
+        console.log('Sale status updated to payment info:', response.data);
+        // Update local state
+        setSaleForm(prev => ({
+          ...prev,
+          status: SALES_STATUSES.PAYMENT_INFO
+        }));
+        
+        // Log the payment collection action to sales logs
+        logSalesAction('payment_collected', SALES_STATUSES.PAYMENT_INFO, {
+          paymentType: type,
+          paymentData: data
+        });
+        
+        // Show success message
+        setSuccessMessage(`${type === 'card' ? 'Card' : 'Bank'} payment information added successfully!`);
+        
+        // Refresh sale data to show updated information
+        if (isEditMode && editId) {
+          fetchSaleData();
+        }
+      })
+      .catch(error => {
+        console.error('Error updating sale status:', error);
+        // Still show success for payment addition, but log status update error
+        setSuccessMessage(`${type === 'card' ? 'Card' : 'Bank'} payment information added successfully!`);
+      });
+    }
+    
+    handlePaymentPanelClose();
+  };
+
+  const openPaymentPanel = (paymentType = 'card') => {
+    setSelectedPaymentType(paymentType);
+    setShowPaymentSection(true);
+  };
+
+  // Fetch customer's last sale information (excluding current sale)
+  const fetchLastSaleInfo = async (customerId, excludeSaleId = null) => {
+    try {
+      const response = await apiClient.get(`/api/sales?customerId=${customerId}&limit=5`);
+      const result = await response.json();
+      
+      if (result.success && result.data && result.data.length > 0) {
+        // Filter out the current sale and get the most recent previous sale
+        const previousSales = result.data.filter(sale => sale.id !== excludeSaleId);
+        
+        if (previousSales.length > 0) {
+          setLastSaleInfo(previousSales[0]); // Get the most recent previous sale
+          return previousSales[0];
+        } else {
+          setLastSaleInfo(null); // No previous sales (only current sale exists)
+          return null;
+        }
+      } else {
+        setLastSaleInfo(null); // No sales at all
+        return null;
+      }
+    } catch (error) {
+      console.error('Error fetching last sale info:', error);
+      setLastSaleInfo(null);
+      return null;
+    }
+  };
+
+  // Handle check number action - simplified flow
+  const handleCheckNumber = async () => {
+    if (!hasValidPhoneNumber()) {
+      setError('Please enter a valid phone number');
+      return;
+    }
+
+    // Prevent multiple calls if already checking
+    if (isCheckingNumber) {
+      return;
+    }
+
+    setIsCheckingNumber(true);
+    setError(null);
+    
+    // Reset previous states
+    setCheckedCustomer(null);
+    setShowCustomerInfoModal(false);
+    setLastSaleInfo(null);
+
+    try {
+      // Check if customer already exists with this landline
+      if (customer.landline) {
+        const checkResponse = await apiClient.post('/api/customers/check-existing', {
+          landline: customer.landline,
+          firstName: customer.firstName.trim()
+        });
+        
+        const checkResult = await checkResponse.json();
+        if (checkResult.success && checkResult.exists) {
+          // Show customer selection dialog when landline exists
+          setCustomerWarning({
+            matchType: checkResult.matchType, // 'exact' or 'landline'
+            hasExactMatch: checkResult.hasExactMatch,
+            exactMatchCustomer: checkResult.exactMatchCustomer,
+            newCustomerName: customer.firstName.trim(),
+            landlineCustomers: checkResult.landlineCustomers,
+            customerCount: checkResult.customerCount
+          });
+          setIsCheckNumberMode(true);
+          setShowCustomerDialog(true);
+        } else {
+          // No existing customer - create new one
+          const customerResult = await createCustomerOnly();
+          
+          if (customerResult?.id) {
+            setCheckedCustomer({
+              id: customerResult.id,
+              customerId: customerResult.id,
+              status: 'checked',
+              customerName: customerResult.firstName
+            });
+            
+            // Update customer state with the ID
+            setCustomer(prev => ({ ...prev, id: customerResult.id }));
+            
+            // No last sale for new customer
+            setLastSaleInfo({
+              lastSale: null,
+              customer: customerResult
+            });
+            
+            // Show call button and last sale info on page (no popup)
+            // setShowCustomerInfoModal(true);
+          }
+        }
+      } else {
+        // Check failed - don't create customer
+        setError('Failed to validate customer. Please try again.');
+      }
+    } catch (err) {
+      console.error('Error checking number:', err);
+      setError('Failed to check customer. Please try again.');
+    } finally {
+      setIsCheckingNumber(false);
+    }
+  };
+
+  // Create customer only (no sale yet) for check number flow
+  const createCustomerOnly = async () => {
+    setSaving(true);
+    setError(null);
+    
+    // Validate customer fields before proceeding
+    if (!validateAllCustomerFields()) {
+      setError('Please fix the validation errors before proceeding');
+      setSaving(false);
+      return null;
+    }
+    
+    try {
+      // Create new customer with the form data
+      const customerData = {
+        firstName: customer.firstName.trim(),
+        lastName: null,
+        email: null,
+        phone: customer.phone,
+        landline: customer.landline,
+        address: customer.address,
+        state: customer.state,
+        city: customer.city,
+        country: 'USA',
+        mailingAddress: customer.mailingAddress,
+        customerFeedback: customer.customerFeedback,
+        status: 'prospect'
+      };
+      
+      const customerResponse = await apiClient.post('/api/customers', customerData);
+      const customerResult = await customerResponse.json();
+      
+      if (customerResult.success) {
+        setSaving(false);
+        return customerResult.data; // Return customer data only
+      } else {
+        throw new Error(customerResult.message || 'Failed to create customer');
+      }
+      
+    } catch (error) {
+      setError(error.message || 'Failed to create customer');
+      setSaving(false);
+      return null;
+    }
+  };
+
+  // Create sale for check number flow (without redirecting)
+  const addSaleForCheckNumber = async (status) => {
+    setSaving(true);
+    setError(null);
+    setSaleStatus(status);
+    
+    // Validate customer fields before proceeding
+    if (!validateAllCustomerFields()) {
+      setError('Please fix the validation errors before proceeding');
+      setSaving(false);
+      return null;
+    }
+    
+    try {
+      let customerId;
+      
+      if (isEditMode) {
+        // For edit mode, get customer ID from existing sale
+        const saleResponse = await apiClient.get(`/api/sales/${editId}`);
+        const saleResult = await saleResponse.json();
+        if (saleResult.success) {
+          customerId = saleResult.data.customerId;
+        } else {
+          throw new Error('Failed to fetch sale data');
+        }
+      } else {
+        // For new sale, check if customer already exists first
+        if (customer.landline) {
+          const checkResponse = await apiClient.post('/api/customers/check-existing', {
+            landline: customer.landline,
+            firstName: customer.firstName.trim()
+          });
+          
+          const checkResult = await checkResponse.json();
+          if (checkResult.success && checkResult.exists) {
+            if (checkResult.matchType === 'exact') {
+              // Exact match found - same name and landline
+              customerId = checkResult.existingCustomer.id;
+            } else if (checkResult.matchType === 'landline') {
+              // Landline exists with different names - use first customer
+              customerId = checkResult.landlineCustomers[0].id;
+            }
+          } else {
+            // No existing customer found, create new one
+            const customerData = {
+              firstName: customer.firstName.trim(),
+              lastName: null,
+              email: null,
+              phone: customer.phone,
+              landline: customer.landline,
+              address: customer.address,
+              state: customer.state,
+              city: customer.city,
+              country: 'USA',
+              mailingAddress: customer.mailingAddress,
+              customerFeedback: customer.customerFeedback,
+              status: 'prospect'
+            };
+            
+            const customerResponse = await apiClient.post('/api/customers', customerData);
+            const customerResult = await customerResponse.json();
+            
+            if (customerResult.success) {
+              customerId = customerResult.data.id;
+              // Update local customer state with the new ID
+              setCustomer(prev => ({ ...prev, id: customerId }));
+            } else {
+              throw new Error(customerResult.message || 'Failed to create customer');
+            }
+          }
+        } else {
+          // No landline provided, create new customer
+          const customerData = {
+            firstName: customer.firstName.trim(),
+            lastName: null,
+            email: null,
+            phone: customer.phone,
+            landline: customer.landline,
+            address: customer.address,
+            state: customer.state,
+            city: customer.city,
+            country: 'USA',
+            mailingAddress: customer.mailingAddress,
+            customerFeedback: customer.customerFeedback,
+            status: 'prospect'
+          };
+          
+          const customerResponse = await apiClient.post('/api/customers', customerData);
+          const customerResult = await customerResponse.json();
+          
+          if (customerResult.success) {
+            customerId = customerResult.data.id;
+            // Update local customer state with the new ID
+            setCustomer(prev => ({ ...prev, id: customerId }));
+          } else {
+            throw new Error(customerResult.message || 'Failed to create customer');
+          }
+        }
+      }
+      
+      // Create the sale
+      const saleData = {
+        customerId: customerId,
+        agentId: user.id,
+        status: status,
+        spoke_to: saleForm.spoke_to || null,
+        sale_amount: saleForm.sale_amount || null,
+        notes: saleForm.notes || null,
+        address: customer.address || null,
+        state: customer.state || null,
+        city: customer.city || null,
+        country: customer.country || 'USA',
+        mailing_address: customer.mailingAddress || null,
+        customer_feedback: customer.customerFeedback || null
+      };
+      
+      const saleResponse = await apiClient.post('/api/sales', saleData);
+      const saleResult = await saleResponse.json();
+      
+      if (saleResult.success) {
+        setSaving(false);
+        return saleResult.data; // Return sale data without redirecting
+      } else {
+        throw new Error(saleResult.message || 'Failed to create sale');
+      }
+      
+    } catch (error) {
+      setError(error.message || 'Failed to create sale');
+      setSaving(false);
+      return null;
+    }
   };
 
   // Handle sale form changes
@@ -954,6 +1411,7 @@ export default function AddSale() {
 
   // Step-specific action handlers
   const handleFirstStepAction = (action, status) => {
+    resetCallHighlight(); // Reset highlight when action is taken
     if (action === 'appointment') {
       openAppointmentModal();
     }  else if (action === 'sale_done') {
@@ -973,6 +1431,10 @@ export default function AddSale() {
     } else if (action === 'add_appointment') {
       // Add new appointment without changing status
       openAppointmentModal();
+    } else if (action === 'add_payments') {
+      // Always show payment section regardless of call timing
+      setShowPaymentSection(true);
+      // Don't log anything yet - status will be logged when payment is actually added
     } else if (action === 'cancelled') {
       logSalesAction('cancelled', SALES_STATUSES.CANCELLED);
     } else {
@@ -993,6 +1455,7 @@ export default function AddSale() {
   };
 
   const handleLeadCallAction = (action, status) => {
+    resetCallHighlight(); // Reset highlight when action is taken
     if (action === 'sale_done') {
       logSalesAction('sale_done', SALES_STATUSES.SALE_DONE);
     } else if (action === 'cancelled') {
@@ -1004,7 +1467,9 @@ export default function AddSale() {
       // Update sale data without changing status
       logSalesAction('update_sale_data', SALES_STATUSES.LEAD_CALL);
     } else if (action === 'add_payments') {
-      logSalesAction('add_payments', SALES_STATUSES.PAYMENT_INFO);
+      // Always show payment section regardless of call timing
+      setShowPaymentSection(true);
+      // Don't log anything yet - status will be logged when payment is actually added
     } else {
       logSalesAction(action, status);
     }
@@ -1051,6 +1516,67 @@ export default function AddSale() {
         }
       }
     }
+  };
+
+  // Handle customer dialog close for Check Number flow
+  const handleCheckNumberCustomerDialogClose = async () => {
+    setShowCustomerDialog(false);
+    
+    if (customerWarning && (customerWarning.matchType === 'landline' || customerWarning.matchType === 'exact')) {
+      // Use selected customer, exact match customer, or first customer in list
+      const customerToUse = customerWarning.selectedCustomerId 
+        ? customerWarning.landlineCustomers.find(c => c.id === customerWarning.selectedCustomerId)
+        : customerWarning.exactMatchCustomer || customerWarning.landlineCustomers[0]; // Prefer exact match if no selection
+        
+      if (customerToUse) {
+        setCheckedCustomer({
+          id: customerToUse.id,
+          customerId: customerToUse.id,
+          status: 'checked',
+          customerName: customerToUse.firstName
+        });
+        
+        // Update customer state with the ID
+        setCustomer(prev => ({ ...prev, id: customerToUse.id }));
+        
+        // Use last sale info from customer data (no additional API call)
+        setLastSaleInfo({
+          lastSale: customerToUse.lastSale,
+          customer: customerToUse
+        });
+        
+        // Show call button and last sale info on page (no popup)
+        // setShowCustomerInfoModal(true);
+        
+      } else {
+        // No selection - create new customer
+        const customerResult = await createCustomerOnly();
+        
+        if (customerResult?.id) {
+          setCheckedCustomer({
+            id: customerResult.id,
+            customerId: customerResult.id,
+            status: 'checked',
+            customerName: customerResult.firstName
+          });
+          
+          // Update customer state with the ID
+          setCustomer(prev => ({ ...prev, id: customerResult.id }));
+          
+          // No last sale for new customer
+          setLastSaleInfo({
+            lastSale: null,
+            customer: customerResult
+          });
+          
+          // Show call button and last sale info on page (no popup)
+          // setShowCustomerInfoModal(true);
+        }
+      }
+    }
+    
+    setCustomerWarning(null);
+    setIsCheckNumberMode(false);
   };
 
   // Continue sale creation with new customer
@@ -1318,13 +1844,17 @@ export default function AddSale() {
     
     setSaving(true);
     setError(null);
-    setSaleStatus(status);
     
-    // Update sale form status
-    setSaleForm(prev => ({
-      ...prev,
-      status: status
-    }));
+    // Only update status if it's not null
+    if (status !== null) {
+      setSaleStatus(status);
+      
+      // Update sale form status
+      setSaleForm(prev => ({
+        ...prev,
+        status: status
+      }));
+    }
     
     // Validate customer fields before proceeding
     if (!validateAllCustomerFields()) {
@@ -1334,21 +1864,40 @@ export default function AddSale() {
     }
     
     try {
-      // First, save the sale with the new status and get the sale ID
-      const saleResult = await addSale(status, additionalData);
+      // Only save sale if status is not null
+      let saleResult = null;
+      if (status !== null) {
+        saleResult = await addSale(status, additionalData);
+        
+        // Set created sale for call button display (after any sale is created)
+        if (saleResult?.id) {
+          setCreatedSale({
+            id: saleResult.id,
+            customerId: customer.id || saleResult.customerId,
+            status: status
+          });
+          // Show call info for "Check Number" flow (status "lead")
+          if (status === 'lead') {
+            setShowCallInfo(true);
+          }
+        }
+      }
       
-      // Only log if we have valid IDs
-      if (saleResult?.id && (customer.id || saleResult.customerId)) {
+      // Log the action if we have valid IDs (either from sale result or existing sale)
+      const saleId = saleResult?.id || saleForm.id || editId;
+      const customerId = customer.id || saleResult?.customerId;
+      
+      if (saleId && customerId) {
         const logData = {
-          saleId: saleResult.id,
-          customerId: customer.id || saleResult.customerId,
+          saleId: saleId,
+          customerId: customerId,
           agentId: user?.id,
           action,
-          status,
+          status: status || saleForm.status, // Use current status if not changing
           currentSaleData: {
             ...saleForm,
             customer,
-            status,
+            status: status || saleForm.status,
             ...additionalData
           },
           breakdown: saleForm.breakdown || '',
@@ -1580,7 +2129,10 @@ export default function AddSale() {
         }
         
         // For new sale, check if customer already exists first
-        if (customer.landline) {
+        // If customer already has an ID (from Check Number flow), use it directly
+        if (customer.id) {
+          customerId = customer.id;
+        } else if (customer.landline) {
           const checkResponse = await apiClient.post('/api/customers/check-existing', {
             landline: customer.landline,
             firstName: customer.firstName.trim()
@@ -1874,9 +2426,24 @@ export default function AddSale() {
             </div>
           </div>
 
+          {/* Call End Page Overlay - Makes customer info and below uneditable */}
+          
+
           {/* Step 1: Initial Contact Actions */}
-          {getCurrentStep() === 'first' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+          {getCurrentStep() === 'first' && !showPaymentSection && (
+            <div className={`p-4 rounded-lg transition-all duration-500 ${
+              callJustEnded 
+                ? 'bg-blue-50 border-2 border-blue-400 shadow-lg ring-2 ring-blue-200 relative z-50' 
+                : 'bg-transparent'
+            }`}>
+              {callJustEnded && (
+                <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded text-center">
+                  <p className="text-blue-800 text-sm font-medium">
+                    📞 Call completed! Please select the outcome below:
+                  </p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               <button
                 onClick={() => handleFirstStepAction('hangup', SALES_STATUSES.HANG_UP)}
                 disabled={saving || loading}
@@ -1926,12 +2493,25 @@ export default function AddSale() {
               >
                 🚫 Not a Customer
               </button>
+              </div>
             </div>
           )}
 
           {/* Lead-Call Actions */}
-          {getCurrentStep() === 'lead-call' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+          {getCurrentStep() === 'lead-call' && !showPaymentSection && (
+            <div className={`p-4 rounded-lg transition-all duration-500 ${
+              callJustEnded 
+                ? 'bg-blue-50 border-2 border-blue-400 shadow-lg ring-2 ring-blue-200 relative z-50' 
+                : 'bg-transparent'
+            }`}>
+              {callJustEnded && (
+                <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded text-center">
+                  <p className="text-blue-800 text-sm font-medium">
+                    📞 Call completed! Please select the outcome below:
+                  </p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               <button
                 onClick={() => handleLeadCallAction('sale_done', SALES_STATUSES.SALE_DONE)}
                 disabled={saving || loading}
@@ -1967,13 +2547,26 @@ export default function AddSale() {
               >
                 ❌ Cancelled
               </button>
+              </div>
             </div>
           )}
 
 
           {/* Payment Info Actions */}
-          {getCurrentStep() === 'payment-info' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+          {getCurrentStep() === 'payment-info' && !showPaymentSection && (
+            <div className={`p-4 rounded-lg transition-all duration-500 ${
+              callJustEnded 
+                ? 'bg-blue-50 border-2 border-blue-400 shadow-lg ring-2 ring-blue-200 relative z-50' 
+                : 'bg-transparent'
+            }`}>
+              {callJustEnded && (
+                <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded text-center">
+                  <p className="text-blue-800 text-sm font-medium">
+                    📞 Call completed! Please select the outcome below:
+                  </p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               <button
                 onClick={() => handlePaymentInfoAction('verification', 'verification')}
                 disabled={saving || loading}
@@ -2002,12 +2595,25 @@ export default function AddSale() {
               >
                 ❌ Cancelled
               </button>
+              </div>
             </div>
           )}
 
           {/* Ready for Payment Actions - Only visible to admin users */}
-          {getCurrentStep() === 'ready-for-payment' && user?.role === 'admin' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+          {getCurrentStep() === 'ready-for-payment' && user?.role === 'admin' && !showPaymentSection && (
+            <div className={`p-4 rounded-lg transition-all duration-500 ${
+              callJustEnded 
+                ? 'bg-blue-50 border-2 border-blue-400 shadow-lg ring-2 ring-blue-200 relative z-50' 
+                : 'bg-transparent'
+            }`}>
+              {callJustEnded && (
+                <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded text-center">
+                  <p className="text-blue-800 text-sm font-medium">
+                    📞 Call completed! Please select the outcome below:
+                  </p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               <button
                 onClick={() => handleReadyForPaymentAction('charged', 'charged')}
                 disabled={saving || loading}
@@ -2036,6 +2642,7 @@ export default function AddSale() {
               >
                 ❌ Cancelled
               </button>
+              </div>
             </div>
           )}
 
@@ -2059,8 +2666,20 @@ export default function AddSale() {
           )}
 
           {/* Step 2: Active Engagement Actions */}
-          {getCurrentStep() === 'second' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+          {getCurrentStep() === 'second' && !showPaymentSection && (
+            <div className={`p-4 rounded-lg transition-all duration-500 ${
+              callJustEnded 
+                ? 'bg-blue-50 border-2 border-blue-400 shadow-lg ring-2 ring-blue-200 relative z-50' 
+                : 'bg-transparent'
+            }`}>
+              {callJustEnded && (
+                <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded text-center">
+                  <p className="text-blue-800 text-sm font-medium">
+                    📞 Call completed! Please select the outcome below:
+                  </p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               {/* Sale Done specific actions */}
               {saleForm.status === 'sale-done' && (
                 <>
@@ -2128,12 +2747,25 @@ export default function AddSale() {
                   </button>
                 </>
               )}
+              </div>
             </div>
           )}
 
           {/* Step 3: Processing Actions */}
-          {getCurrentStep() === 'third' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+          {getCurrentStep() === 'third' && !showPaymentSection && (
+            <div className={`p-4 rounded-lg transition-all duration-500 ${
+              callJustEnded 
+                ? 'bg-blue-50 border-2 border-blue-400 shadow-lg ring-2 ring-blue-200 relative z-50' 
+                : 'bg-transparent'
+            }`}>
+              {callJustEnded && (
+                <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded text-center">
+                  <p className="text-blue-800 text-sm font-medium">
+                    📞 Call completed! Please select the outcome below:
+                  </p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               <button
                 onClick={() => handleThirdStepAction('verification', 'verification')}
                 disabled={saving || loading}
@@ -2149,7 +2781,7 @@ export default function AddSale() {
                 ⚙️ Process
               </button>
               <button
-                onClick={() => handleThirdStepAction('charge_pending', 'charge_pending')}
+                onClick={() => handleThirdStepAction('charge_pending', SALES_STATUSES.READY_FOR_PAYMENT)}
                 disabled={saving || loading}
                 className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -2162,12 +2794,25 @@ export default function AddSale() {
               >
                 ❌ Cancelled
               </button>
+              </div>
             </div>
           )}
 
           {/* Admin Actions - Only visible to admin users */}
-          {getCurrentStep() === 'admin' && user?.role === 'admin' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+          {getCurrentStep() === 'admin' && user?.role === 'admin' && !showPaymentSection && (
+            <div className={`p-4 rounded-lg transition-all duration-500 ${
+              callJustEnded 
+                ? 'bg-blue-50 border-2 border-blue-400 shadow-lg ring-2 ring-blue-200 relative z-50' 
+                : 'bg-transparent'
+            }`}>
+              {callJustEnded && (
+                <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded text-center">
+                  <p className="text-blue-800 text-sm font-medium">
+                    📞 Call completed! Please select the outcome below:
+                  </p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               <button
                 onClick={() => handleAdminAction('charged', 'charged')}
                 disabled={saving || loading}
@@ -2196,6 +2841,7 @@ export default function AddSale() {
               >
                 🔄 Chargeback
               </button>
+              </div>
             </div>
           )}
 
@@ -2220,11 +2866,159 @@ export default function AddSale() {
         </div>
       </div>
 
+
+      {/* Success Message */}
+      {successMessage && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <div className="flex items-center">
+              <svg className="w-5 h-5 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <p className="text-green-800 font-medium">{successMessage}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Section - Shows when Add Payment is clicked */}
+      {showPaymentSection && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Payment Information</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Collect payment details from the customer
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowPaymentSection(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Payment Type Tabs */}
+              <div className="flex border border-gray-300 rounded-lg mb-6">
+                <button
+                  onClick={() => setSelectedPaymentType('card')}
+                  className={`px-6 py-3 text-sm font-medium rounded-l-lg transition-colors ${
+                    selectedPaymentType === 'card'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-blue-600 hover:bg-blue-50'
+                  }`}
+                >
+                  Credit/Debit Card
+                </button>
+                <button
+                  onClick={() => setSelectedPaymentType('bank')}
+                  className={`px-6 py-3 text-sm font-medium rounded-r-lg transition-colors ${
+                    selectedPaymentType === 'bank'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-blue-600 hover:bg-blue-50'
+                  }`}
+                >
+                  Bank Account
+                </button>
+              </div>
+
+              {/* Payment Form */}
+              <div className="bg-gray-50 rounded-lg p-6">
+                {selectedPaymentType === 'card' ? (
+                  <AddCardForm 
+                    mode="create" 
+                    saleId={saleForm.id || editId} 
+                    onSuccess={(data) => handlePaymentSuccess('card', data)} 
+                  />
+                ) : (
+                  <AddBankForm 
+                    mode="create" 
+                    saleId={saleForm.id || editId} 
+                    onSuccess={(data) => handlePaymentSuccess('bank', data)} 
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Customer Information Form */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
           <div className="p-6">
             <h2 className="text-2xl font-bold text-center mb-6">Customer Information</h2>
+            
+            {/* View Call History Button - Top of customer information */}
+            {customer.id && (
+              <div className="mb-4 flex justify-end">
+                <button
+                  onClick={() => setShowCallHistory(!showCallHistory)}
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 012 2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  {showCallHistory ? 'Hide Call History' : 'View Call History'}
+                </button>
+              </div>
+            )}
+            
+            {/* Call Status Indicator (not in edit mode) */}
+            {callData && !isEditMode && (
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                    </svg>
+                    <span className="text-green-800 text-sm font-medium">
+                      Call initiated successfully! Call ID: {callData.callSid}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowCallHistory(!showCallHistory)}
+                    className="text-green-600 hover:text-green-800 text-sm font-medium underline"
+                  >
+                    {showCallHistory ? 'Hide Call History' : 'View Call History'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+
+            {/* Call History Button (when no recent call and not in edit mode) */}
+            {false && (
+              <div className="mb-4 flex justify-end">
+                <button
+                  onClick={() => setShowCallHistory(!showCallHistory)}
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  {showCallHistory ? 'Hide Call History' : 'View Call History'}
+                </button>
+              </div>
+            )}
+
+            {/* Call History */}
+            {showCallHistory && customer.id && (
+              <div className="mb-6">
+                <CallHistory
+                  customerId={customer.id}
+                  limit={10}
+                  showCustomerInfo={false}
+                  showAgentInfo={true}
+                  className="bg-gray-50 rounded-lg p-4"
+                />
+              </div>
+            )}
             
             {/* Validation Summary */}
             {(!customerValidation.firstName.isValid || !customerValidation.landline.isValid) && (
@@ -2284,21 +3078,154 @@ export default function AddSale() {
                 <div>
                   <label htmlFor="landline" className="block mb-2 text-sm font-medium text-gray-900">
                     LandLine Number <span className="text-red-500">*</span>
+                    {isEditMode && (
+                      <span className="text-gray-500 text-xs ml-2">(Read-only in edit mode)</span>
+                    )}
                   </label>
                   <input
                     type="tel"
                     id="landline"
                     value={customer.landline}
                     onChange={(e) => handleCustomerChange('landline', e.target.value)}
-                    className={`bg-gray-50 border text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 ${
-                      customerValidation.landline.isValid 
-                        ? 'border-gray-300' 
-                        : 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                    disabled={isEditMode}
+                    className={`border text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 ${
+                      isEditMode 
+                        ? 'bg-gray-100 border-gray-300 cursor-not-allowed' 
+                        : customerValidation.landline.isValid 
+                          ? 'bg-gray-50 border-gray-300' 
+                          : 'bg-gray-50 border-red-500 focus:ring-red-500 focus:border-red-500'
                     }`}
                     placeholder="555-123-4567"
                   />
                   {!customerValidation.landline.isValid && (
                     <p className="mt-1 text-sm text-red-600">{customerValidation.landline.message}</p>
+                  )}
+                  
+                  {/* Check Number Button - Show when not in edit mode */}
+                  {!isEditMode && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={handleCheckNumber}
+                        disabled={isCheckingNumber || !customerValidation.landline.isValid}
+                        className={`px-4 py-2 text-sm font-medium rounded-lg ${
+                          isCheckingNumber || !customerValidation.landline.isValid
+                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            : 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-4 focus:ring-blue-300'
+                        }`}
+                      >
+                        {isCheckingNumber ? (
+                          <span className="flex items-center">
+                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Checking...
+                          </span>
+                        ) : (
+                          'Check Number'
+                        )}
+                      </button>
+                      <p className="mt-1 text-xs text-gray-500">
+                        This will validate customer and show call button
+                      </p>
+                    </div>
+                  )}
+                  
+
+                  {/* Edit Mode Call Button - Show below landline in edit mode */}
+                  {isEditMode && saleForm.id && customer.id && !checkedCustomer && (
+                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-lg font-medium text-blue-800">Ready to Call</h3>
+                        <CallButton
+                          customerId={customer.id}
+                          saleId={saleForm.id}
+                          phoneNumber={customer.phone || customer.landline}
+                          customerName={customer.firstName}
+                          callPurpose="follow_up"
+                          onCallInitiated={handleCallCompleted}
+                          size="small"
+                        />
+                      </div>
+
+                      {/* Sale Information */}
+                      <div className="bg-white rounded-lg p-3 border">
+                        <h4 className="text-sm font-medium text-gray-800 mb-2">📊 Current Sale Information</h4>
+                        <div className="space-y-1 text-xs">
+                          <div><strong>Sale ID:</strong> {saleForm.id}</div>
+                          <div><strong>Status:</strong> <span className="capitalize">{getStatusDisplayName(saleForm.status)}</span></div>
+                          <div><strong>Date:</strong> {new Date(saleForm.created_at).toLocaleDateString()}</div>
+                          <div><strong>Time:</strong> {new Date(saleForm.created_at).toLocaleTimeString()}</div>
+                          <div><strong>Period:</strong> <span className="text-blue-600 font-medium">{getTimeAgo(saleForm.created_at)}</span></div>
+                          {/* Show agent name only if sale belongs to current user */}
+                          {(() => {
+                            const isCurrentUser = user && saleForm.agent && 
+                              (user.id === saleForm.agent.id || 
+                               (user.firstName === saleForm.agent.firstName && user.lastName === saleForm.agent.lastName));
+                            return isCurrentUser && (
+                              <div><strong>Agent:</strong> {saleForm.agent.firstName} {saleForm.agent.lastName}</div>
+                            );
+                          })()}
+                          {saleForm.notes && (
+                            <div><strong>Notes:</strong> {saleForm.notes}</div>
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+                  )}
+
+
+                  {/* Call Button and Last Sale Info - Show after checking number */}
+                  {checkedCustomer && (
+                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-lg font-medium text-blue-800">Ready to Call</h3>
+                        <CallButton
+                          customerId={checkedCustomer.customerId}
+                          saleId={null} // No sale created yet
+                          phoneNumber={customer.phone || customer.landline}
+                          customerName={customer.firstName}
+                          callPurpose="follow_up"
+                          onCallInitiated={handleCallCompleted}
+                          size="small"
+                        />
+                      </div>
+                      
+                      {/* Last Sale Information */}
+                      {lastSaleInfo && (
+                        <div className="bg-white rounded-lg p-3 border">
+                          <h4 className="text-sm font-medium text-gray-800 mb-2">📊 Last Sale Information</h4>
+                          {lastSaleInfo.lastSale ? (
+                            <div className="space-y-1 text-xs">
+                              <div><strong>Sale ID:</strong> {lastSaleInfo.lastSale.id}</div>
+                              <div><strong>Status:</strong> <span className="capitalize">{lastSaleInfo.lastSale.status}</span></div>
+                                  <div><strong>Date:</strong> {new Date(lastSaleInfo.lastSale.created_at).toLocaleDateString()}</div>
+                                  <div><strong>Time:</strong> {new Date(lastSaleInfo.lastSale.created_at).toLocaleTimeString()}</div>
+                                  <div><strong>Period:</strong> <span className="text-blue-600 font-medium">{getTimeAgo(lastSaleInfo.lastSale.created_at)}</span></div>
+                              {/* Show agent name only if sale belongs to current user */}
+                              {(() => {
+                                const isCurrentUser = user && lastSaleInfo.lastSale?.agent && 
+                                  (user.id === lastSaleInfo.lastSale.agent.id || 
+                                   (user.firstName === lastSaleInfo.lastSale.agent.firstName && user.lastName === lastSaleInfo.lastSale.agent.lastName));
+                                return isCurrentUser && (
+                                  <div><strong>Agent:</strong> {lastSaleInfo.lastSale.agent.firstName} {lastSaleInfo.lastSale.agent.lastName}</div>
+                                );
+                              })()}
+                              {lastSaleInfo.lastSale.notes && (
+                                <div><strong>Notes:</strong> {lastSaleInfo.lastSale.notes}</div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-gray-600 text-xs italic">
+                              <div>No previous sales found.</div>
+                              <div>This is a new customer or first interaction.</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div>
@@ -2397,6 +3324,7 @@ export default function AddSale() {
           </div>
         </div>
       </div>
+
 
       {/* Sale Information Form */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -3136,12 +4064,15 @@ export default function AddSale() {
           onClose={() => setIsReceiverModalOpen(false)}
           onSave={saveSystemInfo}
         />
-      )}
+          )}
+
+
+
 
       {/* Customer Existence Dialog */}
       {showCustomerDialog && customerWarning && (
         <div className="fixed inset-0 bg-black flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.5)' }}>
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex items-center mb-4">
                 <div className="flex-shrink-0">
@@ -3161,36 +4092,10 @@ export default function AddSale() {
                   // Exact match - same name and landline
                   <>
                     <p className="text-sm text-gray-600 mb-2">
-                      <strong>Exact match found:</strong> {customerWarning.customerName}
+                      <strong>✓ Exact match found:</strong> {customerWarning.exactMatchCustomer?.firstName}
                     </p>
-                    <p className="text-sm text-gray-600 mb-2">
-                      <strong>Last Sale:</strong> {customerWarning.lastSaleDateTime}
-                    </p>
-                    <p className="text-sm text-gray-600 mb-2">
-                      <strong>Last Sale Status:</strong> 
-                      <span className={`ml-2 px-2 py-1 text-xs font-semibold rounded-full ${
-                        customerWarning.lastSaleStatus === 'completed' ? 'bg-green-100 text-green-800' :
-                        customerWarning.lastSaleStatus === 'active' ? 'bg-blue-100 text-blue-800' :
-                        customerWarning.lastSaleStatus === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        customerWarning.lastSaleStatus === 'cancelled' ? 'bg-red-100 text-red-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {customerWarning.lastSaleStatus ? customerWarning.lastSaleStatus.charAt(0).toUpperCase() + customerWarning.lastSaleStatus.slice(1) : 'No previous sales'}
-                      </span>
-                    </p>
-                    <p className="text-sm text-gray-500 mb-2">
-                      <strong>Time Since Last Sale:</strong> {customerWarning.lastSaleTimeAgo}
-                    </p>
-                    <p className={`text-sm mb-2 ${customerWarning.isCurrentUser ? 'text-green-600 font-medium' : 'text-gray-600'}`}>
-                      <strong>Last Sale Agent:</strong> {customerWarning.agentName}
-                      {customerWarning.isCurrentUser && (
-                        <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full font-medium">
-                          (You added this sale)
-                        </span>
-                      )}
-                    </p>
-                    <p className="text-sm text-blue-600 mt-3 font-medium">
-                      This will add a new sale to the existing customer.
+                    <p className="text-sm text-green-600 mb-3 font-medium">
+                      This customer has the same name and landline. You can select them (highlighted in green) or choose a different customer below.
                     </p>
                   </>
                 ) : (
@@ -3202,106 +4107,125 @@ export default function AddSale() {
                     <p className="text-xs text-gray-500 mb-3">
                       👆 Click on a customer below to select them, or create a new customer
                     </p>
-                    <div className="max-h-32 overflow-y-auto mb-3">
-                      {customerWarning.landlineCustomers.map((customer, index) => (
-                        <div key={customer.id} className="mb-2">
-                          <button
-                            onClick={() => {
-                              setCustomerWarning(prev => ({
-                                ...prev,
-                                selectedCustomerId: customer.id,
-                                selectedCustomerName: customer.firstName
-                              }));
-                            }}
-                            className={`w-full text-left p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer ${
-                              customerWarning.selectedCustomerId === customer.id
-                                ? 'bg-blue-100 border-blue-400 text-blue-800 shadow-md'
-                                : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:shadow-sm'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex-1">
-                                <div className="text-sm font-medium">
-                                  {customer.firstName} {customer.lastName || ''}
-                                </div>
-                                <div className="text-xs text-gray-500 mt-1">
-                                  ID: {customer.id} • Created: {new Date(customer.created_at).toLocaleDateString()}
-                                </div>
-                                {customer.sales && customer.sales.length > 0 && customer.sales[0].agent && 
-                                 user && (user.id === customer.sales[0].agent.id || 
-                                         (user.firstName === customer.sales[0].agent.firstName && user.lastName === customer.sales[0].agent.lastName)) && (
-                                  <div className="text-xs text-gray-600 mt-1">
-                                    <strong>Added by:</strong> {customer.sales[0].agent.firstName} {customer.sales[0].agent.lastName}
-                                    <span className="ml-1 text-xs bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full font-medium">
-                                      (You)
-                                    </span>
-                                  </div>
-                                )}
-                                {customer.sales && customer.sales.length > 0 && (
-                                  <div className="text-xs text-gray-600 mt-1">
-                                    Last Sale: 
-                                    <span className={`ml-1 px-1.5 py-0.5 text-xs font-semibold rounded-full ${
-                                      customer.sales[0].status === 'completed' ? 'bg-green-100 text-green-800' :
-                                      customer.sales[0].status === 'active' ? 'bg-blue-100 text-blue-800' :
-                                      customer.sales[0].status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                      customer.sales[0].status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                                      'bg-gray-100 text-gray-800'
-                                    }`}>
-                                      {customer.sales[0].status ? customer.sales[0].status.charAt(0).toUpperCase() + customer.sales[0].status.slice(1) : 'Unknown'}
-                                    </span>
-                                    <span className="ml-2 text-gray-500">
-                                      ({new Date(customer.sales[0].created_at).toLocaleDateString()})
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                              {customerWarning.selectedCustomerId === customer.id && (
-                                <div className="ml-2">
-                                  <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                  </svg>
-                                </div>
-                              )}
-                            </div>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="border-t pt-3">
+                  </>
+                )}
+                
+                {/* Customer list - shown for both exact and landline matches */}
+                <div className="max-h-64 overflow-y-auto mb-3">
+                  {customerWarning.landlineCustomers
+                    .sort((a, b) => {
+                      // Sort exact matches to the top
+                      if (a.isExactMatch && !b.isExactMatch) return -1;
+                      if (!a.isExactMatch && b.isExactMatch) return 1;
+                      return 0; // Keep original order for non-exact matches
+                    })
+                    .map((customer, index) => (
+                    <div key={customer.id} className="mb-2">
                       <button
                         onClick={() => {
                           setCustomerWarning(prev => ({
                             ...prev,
-                            selectedCustomerId: null,
-                            selectedCustomerName: null
+                            selectedCustomerId: customer.id,
+                            selectedCustomerName: customer.firstName
                           }));
                         }}
                         className={`w-full text-left p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer ${
-                          !customerWarning.selectedCustomerId
-                            ? 'bg-green-100 border-green-400 text-green-800 shadow-md'
-                            : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-green-50 hover:border-green-300 hover:shadow-sm'
+                          customerWarning.selectedCustomerId === customer.id
+                            ? 'bg-blue-100 border-blue-400 text-blue-800 shadow-md'
+                            : customer.isExactMatch
+                              ? 'bg-green-50 border-green-300 text-green-800 hover:bg-green-100 hover:border-green-400'
+                              : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:shadow-sm'
                         }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex-1">
-                            <div className="text-sm font-medium text-blue-600">
-                              Create New Customer: {customerWarning.newCustomerName}
+                            <div className="text-sm font-medium">
+                              {customer.firstName} {customer.lastName || ''}
+                              {customer.isExactMatch && (
+                                <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  ✓ Exact Match
+                                </span>
+                              )}
                             </div>
                             <div className="text-xs text-gray-500 mt-1">
-                              This will create a new customer with the entered name
+                              ID: {customer.id} • Created: {new Date(customer.created_at).toLocaleDateString()}
                             </div>
+                            {customer.lastSale && (
+                              <div className="text-xs text-gray-600 mt-1 space-y-1">
+                                <div><strong>Last Sale:</strong> ID {customer.lastSale.id} • {new Date(customer.lastSale.created_at).toLocaleDateString()} <span className="text-blue-600 font-medium">({getTimeAgo(customer.lastSale.created_at)})</span></div>
+                                <div><strong>Status:</strong> 
+                                  <span className={`ml-1 px-1 py-0.5 text-xs rounded ${
+                                    customer.lastSale.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                    customer.lastSale.status === 'active' ? 'bg-blue-100 text-blue-800' :
+                                    customer.lastSale.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                    customer.lastSale.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {customer.lastSale.status}
+                                  </span>
+                                </div>
+                                {customer.lastSale.agent && user && 
+                                 (user.id === customer.lastSale.agent.id || 
+                                  (user.firstName === customer.lastSale.agent.firstName && user.lastName === customer.lastSale.agent.lastName)) && (
+                                  <div><strong>Agent:</strong> {customer.lastSale.agent.firstName} {customer.lastSale.agent.lastName}</div>
+                                )}
+                              </div>
+                            )}
+                            {!customer.lastSale && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                No previous sales
+                              </div>
+                            )}
                           </div>
-                          {!customerWarning.selectedCustomerId && (
+                          {customerWarning.selectedCustomerId === customer.id && (
                             <div className="ml-2">
-                              <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                              <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                               </svg>
                             </div>
                           )}
                         </div>
                       </button>
                     </div>
-                  </>
+                  ))}
+                </div>
+                
+                {/* Only show "Create New Customer" button if there's no exact match */}
+                {!customerWarning.hasExactMatch && (
+                  <div className="border-t pt-3">
+                    <button
+                      onClick={() => {
+                        setCustomerWarning(prev => ({
+                          ...prev,
+                          selectedCustomerId: null,
+                          selectedCustomerName: null
+                        }));
+                      }}
+                      className={`w-full text-left p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer ${
+                        !customerWarning.selectedCustomerId
+                          ? 'bg-green-100 border-green-400 text-green-800 shadow-md'
+                          : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-green-50 hover:border-green-300 hover:shadow-sm'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-blue-600">
+                            Create New Customer: {customerWarning.newCustomerName}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            This will create a new customer with the entered name
+                          </div>
+                        </div>
+                        {!customerWarning.selectedCustomerId && (
+                          <div className="ml-2">
+                            <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  </div>
                 )}
               </div>
               
@@ -3311,21 +4235,27 @@ export default function AddSale() {
                     setShowCustomerDialog(false);
                     setCustomerWarning(null);
                     setSaving(false);
+                    setIsCheckNumberMode(false);
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => handleCustomerDialogClose(saleStatus)}
+                  onClick={() => isCheckNumberMode ? handleCheckNumberCustomerDialogClose() : handleCustomerDialogClose(saleStatus)}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  {customerWarning.matchType === 'exact' 
-                    ? 'Add Sale to Existing Customer'
-                    : customerWarning.selectedCustomerId 
+                  {isCheckNumberMode ? (
+                    customerWarning.selectedCustomerId 
+                      ? `Use ${customerWarning.selectedCustomerName} & Show Info`
+                      : customerWarning.hasExactMatch
+                        ? `Use ${customerWarning.exactMatchCustomer?.firstName} (Exact Match) & Show Info`
+                        : `Use ${customerWarning.landlineCustomers[0]?.firstName || 'Customer'} & Show Info`
+                  ) : (
+                    customerWarning.selectedCustomerId 
                       ? `Add Sale to ${customerWarning.selectedCustomerName}`
                       : 'Create New Customer'
-                  }
+                  )}
                 </button>
               </div>
             </div>
@@ -3406,6 +4336,118 @@ export default function AddSale() {
           </div>
         </div>
       )}
+
+      {/* Customer Information Popup Modal */}
+      {showCustomerInfoModal && checkedCustomer && checkedCustomer.id && checkedCustomer.customerId && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">📋 Customer History & Call Information</h3>
+                <button
+                  onClick={() => setShowCustomerInfoModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="space-y-6">
+                <p className="text-sm text-gray-600">
+                  Review customer information and previous sale history before making the call.
+                </p>
+                
+                {/* Information Grid */}
+                <div className="grid grid-cols-1 gap-6">
+                  
+                  {/* Customer Information */}
+                  <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                    <h4 className="text-lg font-semibold text-green-800 mb-3">👤 Customer Information</h4>
+                    <div className="space-y-2 text-sm">
+                      <p><span className="font-medium">Name:</span> {customer.firstName} {customer.lastName}</p>
+                      <p><span className="font-medium">Phone:</span> {customer.phone || 'N/A'}</p>
+                      <p><span className="font-medium">Landline:</span> {customer.landline || 'N/A'}</p>
+                      <p><span className="font-medium">Email:</span> {customer.email || 'N/A'}</p>
+                      <p><span className="font-medium">Address:</span> {customer.address || 'N/A'}</p>
+                      <p><span className="font-medium">Customer ID:</span> {checkedCustomer.customerId}</p>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Ready for Call Reference */}
+                <div className="bg-yellow-50 rounded-lg p-4 border border-yellow-200">
+                  <h4 className="text-lg font-semibold text-yellow-800 mb-3">📞 Ready for Call</h4>
+                  <div className="space-y-2 text-sm">
+                    <p><span className="font-medium">Customer ID:</span> {checkedCustomer.id}</p>
+                    <p><span className="font-medium">Status:</span> Customer checked - ready to call</p>
+                    <p><span className="font-medium">Agent:</span> {user?.firstName} {user?.lastName}</p>
+                    <p><span className="font-medium">Next Step:</span> Make call, then create sale based on result</p>
+                  </div>
+                </div>
+                
+                {/* Call Button */}
+                <div className="flex justify-center pt-4">
+                  <CallButton
+                    customerId={checkedCustomer.customerId}
+                    saleId={null} // No sale created yet
+                    phoneNumber={customer.phone || customer.landline}
+                    customerName={customer.firstName}
+                    callPurpose="follow_up"
+                    onCallInitiated={handleCallCompleted}
+                    size="large"
+                  />
+                </div>
+
+                {/* Last Sale Information */}
+                {lastSaleInfo && (
+                  <div className="mt-6 bg-gray-50 rounded-lg p-4 border">
+                    <h4 className="text-lg font-semibold text-gray-800 mb-3">📊 Last Sale Information</h4>
+                    {lastSaleInfo.lastSale ? (
+                      <div className="space-y-2 text-sm">
+                        <p><span className="font-medium">Sale ID:</span> {lastSaleInfo.lastSale.id}</p>
+                        <p><span className="font-medium">Status:</span> <span className="capitalize">{lastSaleInfo.lastSale.status}</span></p>
+                        <p><span className="font-medium">Date & Time:</span> {new Date(lastSaleInfo.lastSale.created_at).toLocaleString()}</p>
+                        <p><span className="font-medium">Agent:</span> {lastSaleInfo.lastSale.agent ? `${lastSaleInfo.lastSale.agent.firstName} ${lastSaleInfo.lastSale.agent.lastName}` : 'Unknown'}</p>
+                        {lastSaleInfo.lastSale.notes && (
+                          <p><span className="font-medium">Notes:</span> {lastSaleInfo.lastSale.notes}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-gray-600 text-sm">No previous sales found for this customer.</p>
+                    )}
+                    
+                    {/* View All Sales Button */}
+                    <div className="mt-4 flex justify-center">
+                      <button
+                        onClick={() => setShowCallHistory(true)}
+                        className="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        📋 View All Sales
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Close Button */}
+                <div className="flex justify-center pt-2">
+                  <button
+                    onClick={() => setShowCustomerInfoModal(false)}
+                    className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 underline"
+                  >
+                    Close Without Calling
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
     </div>
   );
 }
