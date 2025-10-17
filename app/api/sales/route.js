@@ -5,6 +5,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const dateFilter = searchParams.get('dateFilter');
+    const dateField = searchParams.get('dateField') || 'created_at'; // New parameter: 'created_at' or 'updated_at'
     const userId = searchParams.get('userId');
     const userRole = searchParams.get('userRole');
     
@@ -18,11 +19,11 @@ export async function GET(request) {
     if (userRole === 'admin') {
       // Admin can see all sales
       if (status && dateFilter) {
-        result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit);
+        result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit, dateField);
       } else if (status) {
         result = await SaleService.findByStatusPaginated(status, page, limit);
       } else if (dateFilter) {
-        result = await SaleService.findByDatePaginated(dateFilter, page, limit);
+        result = await SaleService.findByDatePaginated(dateFilter, page, limit, dateField);
       } else {
         result = await SaleService.findAllPaginated(page, limit);
       }
@@ -47,11 +48,11 @@ export async function GET(request) {
         // Get all sales first, then filter by supervised agents
         let allSales;
         if (status && dateFilter) {
-          allSales = await SaleService.findByStatusAndDate(status, dateFilter);
+          allSales = await SaleService.findByStatusAndDate(status, dateFilter, dateField);
         } else if (status) {
           allSales = await SaleService.findByStatus(status);
         } else if (dateFilter) {
-          allSales = await SaleService.findByDate(dateFilter);
+          allSales = await SaleService.findByDate(dateFilter, dateField);
         } else {
           allSales = await SaleService.findAll();
         }
@@ -82,11 +83,11 @@ export async function GET(request) {
       // Supervisor viewing their own sales (when "Me" button is clicked)
       let allSales;
       if (status && dateFilter) {
-        allSales = await SaleService.findByStatusAndDate(status, dateFilter);
+        allSales = await SaleService.findByStatusAndDate(status, dateFilter, dateField);
       } else if (status) {
         allSales = await SaleService.findByStatus(status);
       } else if (dateFilter) {
-        allSales = await SaleService.findByDate(dateFilter);
+        allSales = await SaleService.findByDate(dateFilter, dateField);
       } else {
         allSales = await SaleService.findAll();
       }
@@ -116,11 +117,11 @@ export async function GET(request) {
       // Agent can only see their own sales
       let allSales;
       if (status && dateFilter) {
-        allSales = await SaleService.findByStatusAndDate(status, dateFilter);
+        allSales = await SaleService.findByStatusAndDate(status, dateFilter, dateField);
       } else if (status) {
         allSales = await SaleService.findByStatus(status);
       } else if (dateFilter) {
-        allSales = await SaleService.findByDate(dateFilter);
+        allSales = await SaleService.findByDate(dateFilter, dateField);
       } else {
         allSales = await SaleService.findAll();
       }

@@ -18,12 +18,14 @@ export default function Home() {
   // Save filter state to localStorage
   const { filters, updateFilter } = useFilterStorage('homeFilters', {
     status: '',
-    dateFilter: 'today'
+    dateFilter: 'today',
+    dateField: 'created_at'
   });
   
   // Extract filter values
   const status = filters.status;
   const dateFilter = filters.dateFilter;
+  const dateField = filters.dateField;
   
   // Other state
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -72,7 +74,7 @@ export default function Home() {
   };
 
   // Fetch sales data from API
-  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage) => {
+  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage, dateFieldValue = dateField) => {
     setLoading(true);
     setError(null);
     try {
@@ -82,6 +84,7 @@ export default function Home() {
       const params = new URLSearchParams();
       if (statusFilter) params.append('status', statusFilter);
       if (dateFilterValue) params.append('dateFilter', dateFilterValue);
+      if (dateFieldValue) params.append('dateField', dateFieldValue);
       
       // Add pagination parameters
       params.append('page', page.toString());
@@ -141,18 +144,18 @@ export default function Home() {
     }
   }, [user]);
 
-  // Load sales data on component mount and when status, date filter, selected agent, or pagination changes
+  // Load sales data on component mount and when status, date filter, date field, selected agent, or pagination changes
   useEffect(() => {
     if (user?.role === 'supervisor') {
       // For supervisors, always load data (default to their own sales)
       // Only fetch if we have the proper state initialized
       if (showingSupervisorSales !== undefined) {
-        fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage);
+        fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField);
       }
     } else if (user?.role && user?.role !== 'supervisor') {
-      fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage);
+      fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField);
     }
-  }, [user, status, dateFilter, selectedAgent, showingSupervisorSales, currentPage, itemsPerPage]);
+  }, [user, status, dateFilter, dateField, selectedAgent, showingSupervisorSales, currentPage, itemsPerPage]);
 
 
   // Handler functions for supervisor interface
@@ -349,7 +352,7 @@ export default function Home() {
     updateFilter('dateFilter', filterValue);
     setCurrentPage(1); // Reset to first page when changing filters
     // Fetch sales data with the new date filter
-    fetchSalesData(status, filterValue, null, 1, itemsPerPage);
+    fetchSalesData(status, filterValue, null, 1, itemsPerPage, dateField);
   };
 
   const handleStatusChange = (e) => {
@@ -501,7 +504,12 @@ export default function Home() {
 
         {/* Date Filter */}
         <div className="mb-8 flex justify-center">
-          <DateFilter onFilterChange={handleFilterChange} value={dateFilter} />
+          <DateFilter 
+            onFilterChange={handleFilterChange} 
+            onDateFieldChange={(field) => updateFilter('dateField', field)}
+            value={dateFilter} 
+            dateField={dateField}
+          />
         </div>
 
         {/* Sales Data Table */}

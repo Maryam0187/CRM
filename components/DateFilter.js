@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 
-export default function DateFilter({ onFilterChange, className = "", value = 'today' }) {
+export default function DateFilter({ onFilterChange, onDateFieldChange, className = "", value = 'today', dateField = 'created_at' }) {
   const [selectedFilter, setSelectedFilter] = useState('Today');
   const [openDateRange, setOpenDateRange] = useState(false);
   const [openMonthRange, setOpenMonthRange] = useState(false);
@@ -146,14 +146,14 @@ export default function DateFilter({ onFilterChange, className = "", value = 'to
   };
 
   return (
-    <div className={`relative bg-white shadow-md flex justify-center flex-wrap flex-row gap-4 z-1 px-8 py-3 rounded-lg mx-auto w-fit ${className}`}>
+    <div className={`relative bg-white shadow-lg border border-gray-200 flex justify-center flex-wrap flex-row gap-6 z-1 px-8 py-4 rounded-xl mx-auto w-fit ${className}`}>
       {/* Date Range Picker */}
       {openDateRange && (
-        <div ref={dateRangeRef} className="absolute top-[-85px]">
+        <div ref={dateRangeRef} className="absolute top-[-95px]">
           <div 
-            className="px-10 py-5 shadow-md z-50 bg-white rounded-lg gap-3 flex"
+            className="px-8 py-6 shadow-xl z-50 bg-white rounded-xl gap-4 flex border border-gray-200"
             style={{
-              boxShadow: '0 -4px 6px -1px rgba(0, 0, 0, 0.1), 0 -2px 4px -2px rgba(0, 0, 0, 0.1)'
+              boxShadow: '0 -10px 25px -5px rgba(0, 0, 0, 0.1), 0 -4px 6px -2px rgba(0, 0, 0, 0.05)'
             }}
           >
             <div className="flex flex-col gap-3">
@@ -172,8 +172,8 @@ export default function DateFilter({ onFilterChange, className = "", value = 'to
                         setDateError('');
                       }
                     }}
-                    className={`w-40 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white ${
-                      dateError ? 'border-red-300' : 'border-gray-300'
+                    className={`w-44 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white transition-all duration-200 ${
+                      dateError ? 'border-red-300 bg-red-50' : 'border-gray-300 hover:border-gray-400'
                     }`}
                   />
                 </div>
@@ -191,8 +191,8 @@ export default function DateFilter({ onFilterChange, className = "", value = 'to
                         setDateError('');
                       }
                     }}
-                    className={`w-40 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white ${
-                      dateError ? 'border-red-300' : 'border-gray-300'
+                    className={`w-44 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white transition-all duration-200 ${
+                      dateError ? 'border-red-300 bg-red-50' : 'border-gray-300 hover:border-gray-400'
                     }`}
                   />
                 </div>
@@ -208,10 +208,10 @@ export default function DateFilter({ onFilterChange, className = "", value = 'to
             </div>
             <button
               onClick={() => setOpenDateRange(false)}
-              className="flex items-center justify-center w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors duration-200"
+              className="flex items-center justify-center w-10 h-10 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all duration-200"
               aria-label="Close"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -221,11 +221,11 @@ export default function DateFilter({ onFilterChange, className = "", value = 'to
 
       {/* Month Picker */}
       {openMonthRange && (
-        <div ref={monthRangeRef} className="absolute top-[-85px]">
+        <div ref={monthRangeRef} className="absolute top-[-95px]">
           <div 
-            className="px-10 py-5 shadow-md z-50 bg-white rounded-lg gap-3 flex"
+            className="px-8 py-6 shadow-xl z-50 bg-white rounded-xl gap-4 flex border border-gray-200"
             style={{
-              boxShadow: '0 -4px 6px -1px rgba(0, 0, 0, 0.1), 0 -2px 4px -2px rgba(0, 0, 0, 0.1)'
+              boxShadow: '0 -10px 25px -5px rgba(0, 0, 0, 0.1), 0 -4px 6px -2px rgba(0, 0, 0, 0.05)'
             }}
           >
             <div>
@@ -246,15 +246,15 @@ export default function DateFilter({ onFilterChange, className = "", value = 'to
                   const monthString = `${monthNames[parseInt(month) - 1]} ${year}`;
                   handleMonthChange(monthString);
                 }}
-                className="w-40 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
+                className="w-44 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white transition-all duration-200 hover:border-gray-400"
               />
             </div>
             <button
               onClick={() => setOpenMonthRange(false)}
-              className="flex items-center justify-center w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors duration-200"
+              className="flex items-center justify-center w-10 h-10 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all duration-200"
               aria-label="Close"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -262,23 +262,78 @@ export default function DateFilter({ onFilterChange, className = "", value = 'to
         </div>
       )}
 
+      {/* Date Field Toggle */}
+      <div className="flex items-center gap-3 mr-6">
+        <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">Filter by:</span>
+        <div className="flex bg-gray-100 rounded-lg p-1">
+          <button
+            onClick={() => onDateFieldChange && onDateFieldChange('created_at')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2 ${
+              dateField === 'created_at'
+                ? 'bg-white text-blue-600 shadow-sm border border-blue-200'
+                : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
+            }`}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+            Created
+          </button>
+          <button
+            onClick={() => onDateFieldChange && onDateFieldChange('updated_at')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2 ${
+              dateField === 'updated_at'
+                ? 'bg-white text-blue-600 shadow-sm border border-blue-200'
+                : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
+            }`}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Updated
+          </button>
+        </div>
+      </div>
+
       {/* Filter Buttons */}
-      {buttons.map((button, index) => (
-        <button
-          key={index}
-          onClick={() => filterChange(button)}
-          disabled={button.value === 'since launch'}
-          className={`px-6 py-2 rounded-full font-medium transition-all duration-200 ${
-            selectedFilter === button.label
-              ? 'bg-blue-600 text-white shadow-md'
-              : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 hover:border-gray-400'
-          } ${
-            button.value === 'since launch' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-          }`}
-        >
-          {button.label}
-        </button>
-      ))}
+      <div className="flex gap-2">
+        {buttons.map((button, index) => (
+          <button
+            key={index}
+            onClick={() => filterChange(button)}
+            disabled={button.value === 'since launch'}
+            className={`px-5 py-2.5 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 ${
+              selectedFilter === button.label
+                ? 'bg-blue-600 text-white shadow-md transform scale-105'
+                : 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100 hover:border-gray-300 hover:shadow-sm'
+            } ${
+              button.value === 'since launch' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+            }`}
+          >
+            {button.label === 'Today' && (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            )}
+            {button.label === 'Yesterday' && (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            )}
+            {button.label === 'By month' && (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            )}
+            {button.label === 'Custom' && (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            )}
+            {button.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
