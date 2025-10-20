@@ -1,52 +1,41 @@
 version: '3.8'
 
 services:
-  # Next.js Frontend
+  # Next.js Frontend (Production)
   frontend:
     build:
       context: ./
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     ports:
       - "3000:3000"
-    volumes:
-      - .:/app
-      - /app/node_modules
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - DATABASE_URL=mysql://root:password@db:3306/crm_db
       - NEXTAUTH_URL=http://localhost:3000
       - NEXTAUTH_SECRET=your-secret-key-here
       - ENCRYPTION_KEY=nxOziV0b99C65Jvdyv4INX613SWuiZBjY8sNIoOqiis=
+      - TWILIO_ACCOUNT_SID=your_twilio_account_sid
+      - TWILIO_AUTH_TOKEN=your_twilio_auth_token
+      - TWILIO_PHONE_NUMBER=your_twilio_phone_number
+      - TWILIO_WEBHOOK_BASE_URL=http://localhost:3000
     depends_on:
       - db
-    command: npm run dev
+    restart: unless-stopped
 
   # MySQL Database
   db:
     image: mysql:8.0
-    restart: always
+    restart: unless-stopped
     environment:
       - MYSQL_ROOT_PASSWORD=password
       - MYSQL_DATABASE=crm_db
       - MYSQL_USER=crm_user
       - MYSQL_PASSWORD=crm_password
     ports:
-      - "3307:3306"
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     command: --default-authentication-plugin=mysql_native_password
-
-  # Adminer - Database Management Tool
-  adminer:
-    image: adminer:4.8.1
-    restart: always
-    ports:
-      - "8080:8080"
-    depends_on:
-      - db
-    environment:
-      - ADMINER_DEFAULT_SERVER=db
-      - ADMINER_DESIGN=pepa-linha
 
 volumes:
   mysql_data:
