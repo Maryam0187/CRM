@@ -243,7 +243,7 @@ export default function SignIn() {
 
             <div className="mt-6 text-center">
               <p className="text-sm text-gray-600">
-                Don&apos;t have an account?{' '}
+                Don't have an account?{' '}
                 <a href="#" className="font-medium text-blue-600 hover:text-blue-500">
                   Contact your manager
                 </a>

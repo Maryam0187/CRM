@@ -1,11 +1,12 @@
 'use client';
 
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
 import { isAdmin, canProcessPayments, canViewAllSales, isAgent, isSupervisor, isProcessor, isVerification } from '../../lib/roleUtils';
 import PaymentView from '../../components/PaymentView';
 
-export default function PaymentsPage() {
+function PaymentsPageContent() {
   const { user, loading } = useAuth();
   const searchParams = useSearchParams();
   const saleId = searchParams.get('saleId');
@@ -76,5 +77,13 @@ export default function PaymentsPage() {
         <PaymentView />
       </div>
     </div>
+  );
+}
+
+export default function PaymentsPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <PaymentsPageContent />
+    </Suspense>
   );
 }

@@ -413,7 +413,7 @@ export default function Home() {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">My Sales Dashboard</h1>
               <p className="mt-1 text-sm text-gray-600">
-                Welcome back, {user?.first_name || 'User'}! Here&apos;s your sales performance and activities.
+                Welcome back, {user?.first_name || 'User'}! Here's your sales performance and activities.
               </p>
               {user?.role === 'agent' && user?.supervisor && (
                 <p className="mt-2 text-sm text-green-600 font-medium">

@@ -3906,7 +3906,7 @@ export default function AddSale() {
                   className="block p-2.5 w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 min-h-[200px] max-h-[400px] overflow-y-auto"
                 >
                   {parseNotes(saleForm.notes).length === 0 ? (
-                    <div className="text-gray-500 italic">No notes yet. Click "Add Note" to add your first note.</div>
+                    <div className="text-gray-500 italic">No notes yet. Click 'Add Note' to add your first note.</div>
                   ) : (
                     <div className="space-y-3">
                       {parseNotes(saleForm.notes).map((note, index) => {
