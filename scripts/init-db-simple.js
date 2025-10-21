@@ -62,7 +62,9 @@ async function initializeDatabase() {
         }
       );
     }
-    
+    // Force production environment for Railway
+    const env = process.env.DATABASE_URL ? 'production' : (process.env.NODE_ENV || 'development');
+    console.log(`🔧 Using environment: ${env}`);
     // Test connection
     console.log('🔍 Testing database connection...');
     await sequelize.authenticate();
@@ -77,7 +79,10 @@ async function initializeDatabase() {
     console.log('🔄 Running migrations as backup...');
     const { execSync } = require('child_process');
     try {
-      execSync('npx sequelize-cli db:migrate', { stdio: 'inherit' });
+      execSync(`npx sequelize-cli db:migrate --env ${env}`, { 
+        stdio: 'inherit',
+        env: { ...process.env, NODE_ENV: env }
+      });
       console.log('✅ Migrations completed');
     } catch (error) {
       console.log('⚠️  Migrations failed, but tables already exist');
@@ -86,7 +91,10 @@ async function initializeDatabase() {
     // Run seeding
     console.log('🌱 Seeding database...');
     try {
-      execSync('npx sequelize-cli db:seed:all', { stdio: 'inherit' });
+      execSync(`npx sequelize-cli db:seed:all --env ${env}`, { 
+        stdio: 'inherit',
+        env: { ...process.env, NODE_ENV: env }
+      });
       console.log('✅ Database seeded successfully');
     } catch (error) {
       console.log('⚠️  Seeding failed, but continuing...');
