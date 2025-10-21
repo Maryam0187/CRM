@@ -8,7 +8,7 @@ module.exports = {
     await queryInterface.changeColumn('sales_logs', 'saleId', {
       type: Sequelize.INTEGER,
       allowNull: true,
-      field: 'sale_id',
+      field: 'saleId',
       references: {
         model: 'sales',
         key: 'id'
@@ -21,7 +21,7 @@ module.exports = {
     await queryInterface.changeColumn('sales_logs', 'saleId', {
       type: Sequelize.INTEGER,
       allowNull: false,
-      field: 'sale_id',
+      field: 'saleId',
       references: {
         model: 'sales',
         key: 'id'

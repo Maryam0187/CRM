@@ -4,7 +4,7 @@
 module.exports = {
   async up (queryInterface, Sequelize) {
     // Import the sales statuses enum
-    const { SALES_STATUS_ARRAY, DEFAULT_SALES_STATUS } = require('../../lib/salesStatuses');
+    const { SALES_STATUS_ARRAY, DEFAULT_SALES_STATUS } = require('../lib/salesStatuses');
     
     // Ensure the sales status ENUM is up to date with our centralized enum
     await queryInterface.changeColumn('sales', 'status', {
