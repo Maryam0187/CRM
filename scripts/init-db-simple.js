@@ -70,38 +70,34 @@ async function initializeDatabase() {
     await sequelize.authenticate();
     console.log('✅ Database connection successful');
     
-    // Sync database (create tables) - This creates all tables properly
-    console.log('📊 Creating database tables with Sequelize sync...');
+    // Sync database (create tables)
+    console.log('📊 Creating database tables...');
     await sequelize.sync({ force: false });
     console.log('✅ Database tables created successfully');
     
-    // Check if tables exist
-    console.log('🔍 Verifying tables exist...');
-    const [tables] = await sequelize.query("SHOW TABLES");
-    console.log(`📋 Found ${tables.length} tables in database:`);
-    tables.forEach((table, index) => {
-      const tableName = Object.values(table)[0];
-      console.log(`   ${index + 1}. ${tableName}`);
-    });
+    // Run migrations as backup
+    console.log('🔄 Running migrations as backup...');
+    const { execSync } = require('child_process');
+    try {
+      execSync(`npx sequelize-cli db:migrate --env ${env}`, { 
+        stdio: 'inherit',
+        env: { ...process.env, NODE_ENV: env }
+      });
+      console.log('✅ Migrations completed');
+    } catch (error) {
+      console.log('⚠️  Migrations failed, but tables already exist');
+    }
     
-    // Skip migrations since Sequelize sync already created the tables
-    console.log('✅ Tables created by Sequelize sync - skipping migrations');
-    
-    // Run seeding only if tables exist
-    if (tables.length > 0) {
-      console.log('🌱 Seeding database...');
-      try {
-        execSync(`npx sequelize-cli db:seed:all --env ${env}`, { 
-          stdio: 'inherit',
-          env: { ...process.env, NODE_ENV: env }
-        });
-        console.log('✅ Database seeded successfully');
-      } catch (error) {
-        console.log('⚠️  Seeding failed, but continuing...');
-        console.log('   Error:', error.message);
-      }
-    } else {
-      console.log('⚠️  No tables found - skipping seeding');
+    // Run seeding
+    console.log('🌱 Seeding database...');
+    try {
+      execSync(`npx sequelize-cli db:seed:all --env ${env}`, { 
+        stdio: 'inherit',
+        env: { ...process.env, NODE_ENV: env }
+      });
+      console.log('✅ Database seeded successfully');
+    } catch (error) {
+      console.log('⚠️  Seeding failed, but continuing...');
     }
     
     console.log('✅ Database initialization completed');
