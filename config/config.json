@@ -23,12 +23,19 @@
     "logging": false
   },
   "production": {
-    "username": "root",
-    "password": "password",
-    "database": "crm_production",
-    "host": "db",
-    "port": 3306,
+    "use_env_variable": "DATABASE_URL",
     "dialect": "mysql",
-    "logging": false
+    "logging": false,
+    "define": {
+      "timestamps": true,
+      "underscored": false,
+      "freezeTableName": true
+    },
+    "pool": {
+      "max": 5,
+      "min": 0,
+      "acquire": 30000,
+      "idle": 10000
+    }
   }
 }
