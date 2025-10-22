@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient';
 
@@ -14,7 +14,66 @@ const CallButton = ({
 }) => {
   const { user } = useAuth();
   const [isCalling, setIsCalling] = useState(false);
+  const [callStatus, setCallStatus] = useState(null);
+  const [callDuration, setCallDuration] = useState(0);
+  const [currentCallSid, setCurrentCallSid] = useState(null);
   const [error, setError] = useState(null);
+  const durationInterval = useRef(null);
+
+  // Clean up interval on unmount
+  useEffect(() => {
+    return () => {
+      if (durationInterval.current) {
+        clearInterval(durationInterval.current);
+      }
+    };
+  }, []);
+
+  // Start duration timer when call is in progress
+  useEffect(() => {
+    if (callStatus === 'in-progress' && !durationInterval.current) {
+      setCallDuration(0);
+      durationInterval.current = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } else if (callStatus !== 'in-progress' && durationInterval.current) {
+      clearInterval(durationInterval.current);
+      durationInterval.current = null;
+    }
+  }, [callStatus]);
+
+  // Poll for call status updates
+  useEffect(() => {
+    if (!currentCallSid) return;
+
+    const pollCallStatus = async () => {
+      try {
+        const response = await fetch(`/api/calls/status/${currentCallSid}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.callLog) {
+            setCallStatus(data.callLog.status);
+            
+            // If call is completed, stop polling
+            if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(data.callLog.status)) {
+              setIsCalling(false);
+              setCallStatus(null);
+              setCurrentCallSid(null);
+              if (durationInterval.current) {
+                clearInterval(durationInterval.current);
+                durationInterval.current = null;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error polling call status:', error);
+      }
+    };
+
+    const interval = setInterval(pollCallStatus, 2000); // Poll every 2 seconds
+    return () => clearInterval(interval);
+  }, [currentCallSid]);
 
   const handleCall = async () => {
     if (!phoneNumber || !user?.id) {
@@ -23,6 +82,8 @@ const CallButton = ({
     }
 
     setIsCalling(true);
+    setCallStatus('queued');
+    setCallDuration(0);
     setError(null);
 
     try {
@@ -45,20 +106,23 @@ const CallButton = ({
 
       if (result.success) {
         // Call initiated successfully
+        setCurrentCallSid(result.data.callSid);
+        
         if (onCallInitiated) {
           onCallInitiated(result.data);
         }
         
-        // Show success message
         console.log('Call initiated:', result.data);
       } else {
         setError(result.message || 'Failed to initiate call');
+        setIsCalling(false);
+        setCallStatus(null);
       }
     } catch (err) {
       console.error('Error initiating call:', err);
       setError('Network error. Please try again.');
-    } finally {
       setIsCalling(false);
+      setCallStatus(null);
     }
   };
 
@@ -83,23 +147,44 @@ const CallButton = ({
       large: 'px-4 py-3 text-lg'
     };
     
-    const colorClasses = isCalling 
-      ? 'bg-orange-500 hover:bg-orange-600 text-white' 
-      : 'bg-green-500 hover:bg-green-600 text-white';
+    let colorClasses;
+    if (callStatus === 'ringing') {
+      colorClasses = 'bg-blue-500 hover:bg-blue-600 text-white animate-pulse';
+    } else if (callStatus === 'in-progress') {
+      colorClasses = 'bg-green-500 hover:bg-green-600 text-white';
+    } else if (isCalling) {
+      colorClasses = 'bg-orange-500 hover:bg-orange-600 text-white';
+    } else {
+      colorClasses = 'bg-green-500 hover:bg-green-600 text-white';
+    }
     
     return `${baseClasses} ${sizeClasses[size]} ${colorClasses} ${className}`;
+  };
+
+  const getButtonText = () => {
+    if (callStatus === 'ringing') {
+      return 'Ringing...';
+    } else if (callStatus === 'in-progress') {
+      const minutes = Math.floor(callDuration / 60);
+      const seconds = callDuration % 60;
+      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    } else if (isCalling) {
+      return 'Calling...';
+    } else {
+      return 'Call';
+    }
   };
 
   return (
     <div className="inline-block">
       <button
         onClick={handleCall}
-        disabled={isCalling}
+        disabled={isCalling || callStatus}
         className={getButtonClasses()}
         title={`Call ${customerName || phoneNumber}`}
       >
-        <PhoneIcon isCalling={isCalling} />
-        {isCalling ? 'Calling...' : 'Call'}
+        <PhoneIcon isCalling={isCalling || callStatus} />
+        {getButtonText()}
       </button>
       
       {error && (

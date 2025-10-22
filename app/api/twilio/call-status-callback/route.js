@@ -44,9 +44,24 @@ export async function POST(request) {
       );
     }
 
+    // Map Twilio status to database status
+    const statusMap = {
+      'initiated': 'queued',
+      'queued': 'queued',
+      'ringing': 'ringing',
+      'in-progress': 'in-progress',
+      'completed': 'completed',
+      'busy': 'busy',
+      'failed': 'failed',
+      'no-answer': 'no-answer',
+      'canceled': 'canceled'
+    };
+    
+    const mappedStatus = statusMap[callStatus] || 'queued';
+
     // Update call log with new status
     const updateData = {
-      status: callStatus,
+      status: mappedStatus,
       duration: duration ? parseInt(duration) : null,
       twilioData: {
         ...callLog.twilioData,
