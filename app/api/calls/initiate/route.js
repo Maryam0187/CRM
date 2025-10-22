@@ -61,8 +61,9 @@ export async function POST(request) {
     });
 
     // Create the call
+    const voiceUrl = getWebhookUrl('/api/twilio/voice-response');
     const call = await client.calls.create({
-      twiml,
+      url: voiceUrl,
       to: formattedNumber,
       from: twilioPhoneNumber,
       statusCallback: statusCallbackUrl,
