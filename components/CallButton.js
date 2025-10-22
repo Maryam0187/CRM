@@ -19,15 +19,62 @@ const CallButton = ({
   const [currentCallSid, setCurrentCallSid] = useState(null);
   const [error, setError] = useState(null);
   const durationInterval = useRef(null);
+  const ringingInterval = useRef(null);
 
-  // Clean up interval on unmount
+  // Clean up intervals on unmount
   useEffect(() => {
     return () => {
       if (durationInterval.current) {
         clearInterval(durationInterval.current);
       }
+      if (ringingInterval.current) {
+        clearInterval(ringingInterval.current);
+      }
     };
   }, []);
+
+  // Play ringing sound effect
+  const playRingingSound = () => {
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Create a two-tone ringing sound
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(1000, audioContext.currentTime + 0.2);
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.4);
+      oscillator.frequency.setValueAtTime(1000, audioContext.currentTime + 0.6);
+      
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.1, audioContext.currentTime + 0.1);
+      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.8);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.8);
+    } catch (error) {
+      console.log('Audio context not available:', error);
+    }
+  };
+
+  // Start ringing sound when call is ringing
+  useEffect(() => {
+    console.log('📞 Call status changed to:', callStatus);
+    if (callStatus === 'ringing' && !ringingInterval.current) {
+      console.log('📞 Starting ringing sound');
+      // Play initial ring
+      playRingingSound();
+      // Set up repeating ring every 2 seconds
+      ringingInterval.current = setInterval(playRingingSound, 2000);
+    } else if (callStatus !== 'ringing' && ringingInterval.current) {
+      console.log('📞 Stopping ringing sound');
+      clearInterval(ringingInterval.current);
+      ringingInterval.current = null;
+    }
+  }, [callStatus]);
 
   // Start duration timer when call is in progress
   useEffect(() => {
@@ -46,12 +93,17 @@ const CallButton = ({
   useEffect(() => {
     if (!currentCallSid) return;
 
+    let callStartTime = Date.now();
+    let hasTransitionedToRinging = false;
+
     const pollCallStatus = async () => {
       try {
         const response = await fetch(`/api/calls/status/${currentCallSid}`);
         if (response.ok) {
           const data = await response.json();
+          console.log('📊 Polling call status:', data);
           if (data.success && data.callLog) {
+            console.log('📊 Current status:', data.callLog.status);
             setCallStatus(data.callLog.status);
             
             // If call is completed, stop polling
@@ -63,16 +115,38 @@ const CallButton = ({
                 clearInterval(durationInterval.current);
                 durationInterval.current = null;
               }
+              if (ringingInterval.current) {
+                clearInterval(ringingInterval.current);
+                ringingInterval.current = null;
+              }
             }
           }
+        } else {
+          console.error('Failed to fetch call status:', response.status);
         }
       } catch (error) {
         console.error('Error polling call status:', error);
       }
     };
 
-    const interval = setInterval(pollCallStatus, 2000); // Poll every 2 seconds
-    return () => clearInterval(interval);
+    // Fallback mechanism: if status is still "queued" after 3 seconds, assume it's ringing
+    const fallbackTimer = setTimeout(() => {
+      if (callStatus === 'queued' || !callStatus) {
+        console.log('📞 Fallback: Assuming call is ringing after 3 seconds');
+        console.log('📞 Current callStatus before fallback:', callStatus);
+        setCallStatus('ringing');
+        hasTransitionedToRinging = true;
+      }
+    }, 3000);
+
+    // Poll immediately, then every 1 second for faster updates
+    pollCallStatus();
+    const interval = setInterval(pollCallStatus, 1000);
+    
+    return () => {
+      clearInterval(interval);
+      clearTimeout(fallbackTimer);
+    };
   }, [currentCallSid]);
 
   const handleCall = async () => {
@@ -107,12 +181,13 @@ const CallButton = ({
       if (result.success) {
         // Call initiated successfully
         setCurrentCallSid(result.data.callSid);
+        console.log('📞 Call initiated successfully:', result.data);
+        console.log('📞 Call SID:', result.data.callSid);
+        console.log('📞 Initial status:', result.data.status);
         
         if (onCallInitiated) {
           onCallInitiated(result.data);
         }
-        
-        console.log('Call initiated:', result.data);
       } else {
         setError(result.message || 'Failed to initiate call');
         setIsCalling(false);
