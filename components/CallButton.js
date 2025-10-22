@@ -20,8 +20,9 @@ const CallButton = ({
   const [error, setError] = useState(null);
   const durationInterval = useRef(null);
   const ringingInterval = useRef(null);
+  const eventSource = useRef(null);
 
-  // Clean up intervals on unmount
+  // Clean up intervals and SSE connection on unmount
   useEffect(() => {
     return () => {
       if (durationInterval.current) {
@@ -29,6 +30,9 @@ const CallButton = ({
       }
       if (ringingInterval.current) {
         clearInterval(ringingInterval.current);
+      }
+      if (eventSource.current) {
+        eventSource.current.close();
       }
     };
   }, []);
@@ -89,62 +93,83 @@ const CallButton = ({
     }
   }, [callStatus]);
 
-  // Poll for call status updates
+  // Set up SSE connection for real-time status updates
   useEffect(() => {
     if (!currentCallSid) return;
 
-    let callStartTime = Date.now();
-    let hasTransitionedToRinging = false;
+    console.log('📡 Setting up SSE connection for call:', currentCallSid);
+    
+    // Close any existing connection
+    if (eventSource.current) {
+      eventSource.current.close();
+    }
 
-    const pollCallStatus = async () => {
+    // Create new SSE connection
+    eventSource.current = new EventSource(`/api/calls/status-stream/${currentCallSid}`);
+    
+    eventSource.current.onopen = () => {
+      console.log('📡 SSE connection opened for call:', currentCallSid);
+    };
+
+    eventSource.current.onmessage = (event) => {
       try {
-        const response = await fetch(`/api/calls/status/${currentCallSid}`);
-        if (response.ok) {
-          const data = await response.json();
-          console.log('📊 Polling call status:', data);
-          if (data.success && data.callLog) {
-            console.log('📊 Current status:', data.callLog.status);
-            setCallStatus(data.callLog.status);
-            
-            // If call is completed, stop polling
-            if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(data.callLog.status)) {
-              setIsCalling(false);
-              setCallStatus(null);
-              setCurrentCallSid(null);
-              if (durationInterval.current) {
-                clearInterval(durationInterval.current);
-                durationInterval.current = null;
-              }
-              if (ringingInterval.current) {
-                clearInterval(ringingInterval.current);
-                ringingInterval.current = null;
-              }
+        const data = JSON.parse(event.data);
+        console.log('📡 SSE message received:', data);
+        
+        if (data.type === 'connected') {
+          console.log('📡 SSE connected for call:', data.callSid);
+        } else if (data.type === 'status_update') {
+          console.log('📡 Status update received:', data.status);
+          setCallStatus(data.status);
+          
+          // If call is completed, close connection
+          if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(data.status)) {
+            console.log('📡 Call ended, closing SSE connection');
+            setIsCalling(false);
+            setCallStatus(null);
+            setCurrentCallSid(null);
+            if (durationInterval.current) {
+              clearInterval(durationInterval.current);
+              durationInterval.current = null;
             }
+            if (ringingInterval.current) {
+              clearInterval(ringingInterval.current);
+              ringingInterval.current = null;
+            }
+            eventSource.current.close();
           }
-        } else {
-          console.error('Failed to fetch call status:', response.status);
+        } else if (data.type === 'error') {
+          console.error('📡 SSE error:', data.message);
         }
       } catch (error) {
-        console.error('Error polling call status:', error);
+        console.error('📡 Error parsing SSE message:', error);
       }
+    };
+
+    eventSource.current.onerror = (error) => {
+      console.error('📡 SSE connection error:', error);
+      // Try to reconnect after 3 seconds
+      setTimeout(() => {
+        if (eventSource.current && eventSource.current.readyState === EventSource.CLOSED) {
+          console.log('📡 Attempting to reconnect SSE...');
+          eventSource.current = new EventSource(`/api/calls/status-stream/${currentCallSid}`);
+        }
+      }, 3000);
     };
 
     // Fallback mechanism: if status is still "queued" after 3 seconds, assume it's ringing
     const fallbackTimer = setTimeout(() => {
       if (callStatus === 'queued' || !callStatus) {
         console.log('📞 Fallback: Assuming call is ringing after 3 seconds');
-        console.log('📞 Current callStatus before fallback:', callStatus);
         setCallStatus('ringing');
-        hasTransitionedToRinging = true;
       }
     }, 3000);
-
-    // Poll immediately, then every 1 second for faster updates
-    pollCallStatus();
-    const interval = setInterval(pollCallStatus, 1000);
     
     return () => {
-      clearInterval(interval);
+      console.log('📡 Cleaning up SSE connection for call:', currentCallSid);
+      if (eventSource.current) {
+        eventSource.current.close();
+      }
       clearTimeout(fallbackTimer);
     };
   }, [currentCallSid]);
