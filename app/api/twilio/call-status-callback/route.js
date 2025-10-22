@@ -17,7 +17,7 @@ export async function POST(request) {
     const answerTime = formData.get('AnswerTime');
     const hangupCause = formData.get('HangupCause');
 
-    console.log('Call status callback received:', {
+    console.log('📞 Call status callback received:', {
       callSid,
       callStatus,
       direction,
@@ -27,7 +27,8 @@ export async function POST(request) {
       startTime,
       endTime,
       answerTime,
-      hangupCause
+      hangupCause,
+      timestamp: new Date().toISOString()
     });
 
     // Find the call log by call SID

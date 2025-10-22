@@ -51,14 +51,31 @@ export async function POST(request) {
       recordingCallback: getWebhookUrl('/api/twilio/recording-callback')
     });
 
+    // Get webhook URLs for debugging
+    const statusCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
+    const recordingCallbackUrl = getWebhookUrl('/api/twilio/recording-callback');
+    
+    console.log('🔗 Webhook URLs:', {
+      statusCallback: statusCallbackUrl,
+      recordingCallback: recordingCallbackUrl
+    });
+
     // Create the call
     const call = await client.calls.create({
       twiml,
       to: formattedNumber,
       from: twilioPhoneNumber,
-      statusCallback: getWebhookUrl('/api/twilio/call-status-callback'),
+      statusCallback: statusCallbackUrl,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       record: recordCall
+    });
+    
+    console.log('📞 Call created:', {
+      callSid: call.sid,
+      status: call.status,
+      to: call.to,
+      from: call.from,
+      direction: call.direction
     });
 
     // Create call log entry
