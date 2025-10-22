@@ -67,8 +67,7 @@ export async function POST(request) {
       to: formattedNumber,
       from: twilioPhoneNumber,
       statusCallback: statusCallbackUrl,
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-      record: recordCall
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
     });
     
     console.log('📞 Call created:', {
