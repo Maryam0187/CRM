@@ -3,7 +3,12 @@ import sequelizeDb from '../../../../lib/sequelize-db';
 
 export async function POST(request) {
   try {
+    console.log('🎙️ Recording callback triggered');
+    
     const formData = await request.formData();
+    
+    // Log all form data for debugging
+    console.log('🎙️ All form data keys:', Array.from(formData.keys()));
     
     // Extract recording data from Twilio webhook
     const callSid = formData.get('CallSid');
@@ -19,7 +24,7 @@ export async function POST(request) {
     const transcriptionSid = formData.get('TranscriptionSid');
     const transcriptionStatus = formData.get('TranscriptionStatus');
 
-    console.log('Recording callback received:', {
+    console.log('🎙️ Recording callback received:', {
       callSid,
       recordingUrl,
       recordingSid,
