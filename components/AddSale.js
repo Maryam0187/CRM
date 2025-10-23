@@ -134,6 +134,28 @@ export default function AddSale() {
   const [showPaymentSection, setShowPaymentSection] = useState(false); // Show payment section after call ends
   const [selectedPaymentType, setSelectedPaymentType] = useState('card'); // 'card' or 'bank'
   
+  // Preserve form data when toggling between payment options
+  const [cardFormData, setCardFormData] = useState({
+    cardType: '',
+    provider: '',
+    customerName: '',
+    cardNumber: '',
+    cvv: '',
+    expiryDate: '',
+    notes: ''
+  });
+  const [bankFormData, setBankFormData] = useState({
+    bankName: '',
+    accountHolder: '',
+    accountNumber: '',
+    routingNumber: '',
+    checkNumber: '',
+    driverLicense: '',
+    nameOnLicense: '',
+    stateId: '',
+    notes: ''
+  });
+  
   // Success message state
   const [successMessage, setSuccessMessage] = useState('');
   
@@ -590,10 +612,36 @@ export default function AddSale() {
   const handlePaymentPanelClose = () => {
     setShowPaymentSection(false);
     setSelectedPaymentType('card');
+    // Don't clear form data - preserve it for next time
   };
 
   const handlePaymentSuccess = (type, data) => {
     console.log('Payment saved:', data);
+    
+    // Clear the form data for the successful payment type
+    if (type === 'card') {
+      setCardFormData({
+        cardType: '',
+        provider: '',
+        customerName: '',
+        cardNumber: '',
+        cvv: '',
+        expiryDate: '',
+        notes: ''
+      });
+    } else if (type === 'bank') {
+      setBankFormData({
+        bankName: '',
+        accountHolder: '',
+        accountNumber: '',
+        routingNumber: '',
+        checkNumber: '',
+        driverLicense: '',
+        nameOnLicense: '',
+        stateId: '',
+        notes: ''
+      });
+    }
     
     // Set status to payment info when payment details are actually added
     if (saleForm.id || editId) {
@@ -638,6 +686,15 @@ export default function AddSale() {
   const openPaymentPanel = (paymentType = 'card') => {
     setSelectedPaymentType(paymentType);
     setShowPaymentSection(true);
+  };
+
+  // Handlers for updating form data
+  const handleCardFormDataChange = (newData) => {
+    setCardFormData(newData);
+  };
+
+  const handleBankFormDataChange = (newData) => {
+    setBankFormData(newData);
   };
 
   // Fetch customer's last sale information (excluding current sale)
@@ -3075,13 +3132,17 @@ Room: `;
                   <AddCardForm 
                     mode="create" 
                     saleId={saleForm.id || editId} 
-                    onSuccess={(data) => handlePaymentSuccess('card', data)} 
+                    onSuccess={(data) => handlePaymentSuccess('card', data)}
+                    initialData={cardFormData}
+                    onDataChange={handleCardFormDataChange}
                   />
                 ) : (
                   <AddBankForm 
                     mode="create" 
                     saleId={saleForm.id || editId} 
-                    onSuccess={(data) => handlePaymentSuccess('bank', data)} 
+                    onSuccess={(data) => handlePaymentSuccess('bank', data)}
+                    initialData={bankFormData}
+                    onDataChange={handleBankFormDataChange}
                   />
                 )}
               </div>

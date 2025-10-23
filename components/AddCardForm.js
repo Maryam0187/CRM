@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   validateCardForm, 
   formatCardNumber, 
@@ -8,8 +8,8 @@ import {
 } from '../lib/validation.js';
 import apiClient from '../lib/apiClient.js';
 
-export default function AddCardForm({ mode, saleId, onSuccess }) {
-  const [formData, setFormData] = useState({
+export default function AddCardForm({ mode, saleId, onSuccess, initialData, onDataChange }) {
+  const [formData, setFormData] = useState(initialData || {
     cardType: '',
     provider: '',
     customerName: '',
@@ -22,6 +22,12 @@ export default function AddCardForm({ mode, saleId, onSuccess }) {
   const [error, setError] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
 
+  // Update form data when initialData changes
+  useEffect(() => {
+    if (initialData) {
+      setFormData(initialData);
+    }
+  }, [initialData]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -34,10 +40,17 @@ export default function AddCardForm({ mode, saleId, onSuccess }) {
       formattedValue = formatExpiryDate(value);
     }
     
-    setFormData(prev => ({
-      ...prev,
+    const newFormData = {
+      ...formData,
       [name]: formattedValue
-    }));
+    };
+    
+    setFormData(newFormData);
+    
+    // Notify parent component of data changes
+    if (onDataChange) {
+      onDataChange(newFormData);
+    }
 
     // Clear validation error for this field when user starts typing
     if (validationErrors[name]) {
