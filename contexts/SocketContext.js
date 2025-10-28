@@ -246,11 +246,13 @@ export const SocketProvider = ({ children }) => {
     // Call status update handlers
     socketInstance.on('call_status_update', (data) => {
       console.log('📞 Call status update received:', data);
+      console.log('📞 Socket.IO event data:', JSON.stringify(data, null, 2));
       
       // Update call status in state
       setCallStatusUpdates(prev => {
         const newMap = new Map(prev);
         newMap.set(data.callSid, data);
+        console.log('📞 Updated call status map:', Array.from(newMap.entries()));
         return newMap;
       });
 
@@ -258,6 +260,7 @@ export const SocketProvider = ({ children }) => {
       const callStatusEvent = new CustomEvent('callStatusUpdate', {
         detail: { callStatusData: data }
       });
+      console.log('📞 Dispatching custom event:', callStatusEvent);
       window.dispatchEvent(callStatusEvent);
 
       // Show toast notification for important status changes

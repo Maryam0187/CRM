@@ -6,6 +6,7 @@ import { useToast } from '../../../contexts/ToastContext';
 import ProtectedRoute from '../../../components/ProtectedRoute';
 import AdminRoute from '../../../components/AdminRoute';
 import UserForm from '../../../components/UserForm';
+import { apiClient } from '../../../lib/apiClient';
 
 
 export default function AdminUsersPage() {
@@ -31,12 +32,7 @@ export default function AdminUsersPage() {
 
     try {
       setLoading(true);
-      const response = await fetch('/api/users', {
-        headers: {
-          'x-user-id': user.id.toString(),
-          'x-user-role': user.role
-        }
-      });
+      const response = await apiClient.get('/api/users');
       const data = await response.json();
       
       if (data.success) {
@@ -75,16 +71,8 @@ export default function AdminUsersPage() {
     }
 
     try {
-      const response = await fetch(`/api/users/${userId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': user.id.toString(),
-          'x-user-role': user.role
-        },
-        body: JSON.stringify({
-          is_active: !currentStatus
-        }),
+      const response = await apiClient.put(`/api/users/${userId}`, {
+        is_active: !currentStatus
       });
 
       const data = await response.json();

@@ -31,6 +31,11 @@ export async function POST(request) {
       hangupCause,
       timestamp: new Date().toISOString()
     });
+    
+    // Additional debugging for ringing status
+    if (callStatus === 'ringing') {
+      console.log('🔔 RINGING STATUS DETECTED - This should trigger the ringing state!');
+    }
 
     // Find the call log by call SID
     const callLog = await sequelizeDb.CallLog.findOne({

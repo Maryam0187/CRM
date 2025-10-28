@@ -68,7 +68,8 @@ const CallButton = ({
   // Start ringing sound when call is ringing
   useEffect(() => {
     const callStatus = currentCallStatus?.status;
-    console.log('📞 Call status changed to:', callStatus);
+    console.log('📞 Call status changed to:', callStatus, 'for callSid:', currentCallSid);
+    console.log('📞 Full call status object:', currentCallStatus);
     
     if (callStatus === 'ringing' && !ringingInterval.current) {
       console.log('📞 Starting ringing sound');
@@ -81,7 +82,7 @@ const CallButton = ({
       clearInterval(ringingInterval.current);
       ringingInterval.current = null;
     }
-  }, [currentCallStatus?.status]);
+  }, [currentCallStatus?.status, currentCallSid]);
 
   // Handle call completion
   useEffect(() => {

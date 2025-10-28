@@ -5,6 +5,7 @@ import { formatDisplayDate } from '../lib/validation.js';
 import { useAuth } from '../contexts/AuthContext';
 import { isAdmin, isAgent, isSupervisor, isProcessor, isVerification } from '../lib/roleUtils';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { apiClient } from '../lib/apiClient';
 
 export default function PaymentView() {
   const { user } = useAuth();
@@ -30,12 +31,7 @@ export default function PaymentView() {
       if (isAdmin(user) && showFullDetails) params.append('showFullDetails', 'true');
       
       const url = `/api/payments?${params.toString()}`;
-      const response = await fetch(url, {
-        headers: {
-          'x-user-id': user.id.toString(),
-          'x-user-role': user.role
-        }
-      });
+      const response = await apiClient.get(url);
       const data = await response.json();
 
       if (!response.ok) {

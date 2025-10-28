@@ -345,15 +345,9 @@ export default function UserForm({ user, onClose, onSuccess }) {
         requestData.superiorId = formData.superiorId;
       }
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id.toString(),
-          'x-user-role': currentUser.role
-        },
-        body: JSON.stringify(requestData),
-      });
+      const response = method === 'POST' 
+        ? await apiClient.post(url, requestData)
+        : await apiClient.put(url, requestData);
 
       const data = await response.json();
       
