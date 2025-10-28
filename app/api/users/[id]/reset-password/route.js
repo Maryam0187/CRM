@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { User } from '../../../../../models';
-import { requireAdmin } from '../../../../../lib/serverAuth';
+import { requireJWTAdmin } from '../../../../../lib/jwtAuth';
 
 // POST /api/users/[id]/reset-password - Reset user password (admin only)
 export async function POST(request, { params }) {
   try {
     // Check authentication and admin access
-    const authResult = await requireAdmin(request);
+    const authResult = await requireJWTAdmin(request);
     if (authResult.error) {
       return NextResponse.json(
         { error: authResult.error },

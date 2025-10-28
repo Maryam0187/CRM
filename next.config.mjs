@@ -29,11 +29,6 @@ const nextConfig = {
   // External packages for server
   serverExternalPackages: ['mysql2', 'sequelize'],
   
-  // Environment variables
-  env: {
-    CUSTOM_KEY: process.env.CUSTOM_KEY,
-  },
-  
   // Headers for security
   async headers() {
     return [

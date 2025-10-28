@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '../../../lib/serverAuth';
+import { requireJWTAdmin } from '../../../lib/jwtAuth';
 import { getRoleDisplayName, getRoleDescription } from '../../../lib/roleUtils';
 
 // GET /api/roles - Get available roles (admin only)
 export async function GET(request) {
   try {
     // Check authentication and admin access
-    const authResult = await requireAdmin(request);
+    const authResult = await requireJWTAdmin(request);
     if (authResult.error) {
       return NextResponse.json(
         { error: authResult.error },

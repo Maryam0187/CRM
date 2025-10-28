@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { User } from '../../../models';
-import { requireAdmin } from '../../../lib/serverAuth';
+import { requireJWTAdmin } from '../../../lib/jwtAuth';
 import { getRoleDisplayName } from '../../../lib/roleUtils';
 
 // GET /api/users - Get all users (admin only)
 export async function GET(request) {
   try {
     // Check authentication and admin access
-    const authResult = await requireAdmin(request);
+    const authResult = await requireJWTAdmin(request);
     if (authResult.error) {
       return NextResponse.json(
         { error: authResult.error },
@@ -76,7 +76,7 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     // Check authentication and admin access
-    const authResult = await requireAdmin(request);
+    const authResult = await requireJWTAdmin(request);
     if (authResult.error) {
       return NextResponse.json(
         { error: authResult.error },
