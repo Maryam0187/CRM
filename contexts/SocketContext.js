@@ -26,6 +26,7 @@ export const SocketProvider = ({ children }) => {
   const [toastNotifications, setToastNotifications] = useState([]);
   const [typingUsers, setTypingUsers] = useState(new Map());
   const [onlineUsers, setOnlineUsers] = useState(new Set());
+  const [callStatusUpdates, setCallStatusUpdates] = useState(new Map());
   const reconnectTimeoutRef = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
@@ -43,15 +44,30 @@ export const SocketProvider = ({ children }) => {
 
     console.log('🔌 Initializing Socket.IO connection...');
     
-    const socketInstance = io(process.env.NODE_ENV === 'production' 
-      ? process.env.NEXT_PUBLIC_SOCKET_URL || 'https://your-domain.com'
-      : 'http://localhost:3000', {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const socketUrl = isProduction 
+      ? process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://your-domain.com'
+      : 'http://localhost:3000';
+    
+    const socketInstance = io(socketUrl, {
       auth: {
         token: accessToken
       },
-      transports: ['websocket', 'polling'],
-      timeout: 20000,
-      forceNew: true
+      transports: isProduction ? ['websocket'] : ['websocket', 'polling'],
+      timeout: isProduction ? 60000 : 20000,
+      forceNew: true,
+      // Production optimizations
+      ...(isProduction && {
+        upgrade: true,
+        rememberUpgrade: true,
+        autoConnect: true,
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        maxReconnectionAttempts: 5,
+        compression: true,
+        path: process.env.NEXT_PUBLIC_SOCKET_PATH || '/api/socket'
+      })
     });
 
     // Connection event handlers
@@ -202,6 +218,52 @@ export const SocketProvider = ({ children }) => {
       });
     });
 
+    // Call status update handlers
+    socketInstance.on('call_status_update', (data) => {
+      console.log('📞 Call status update received:', data);
+      
+      // Update call status in state
+      setCallStatusUpdates(prev => {
+        const newMap = new Map(prev);
+        newMap.set(data.callSid, data);
+        return newMap;
+      });
+
+      // Dispatch custom event for components to listen to
+      const callStatusEvent = new CustomEvent('callStatusUpdate', {
+        detail: { callStatusData: data }
+      });
+      window.dispatchEvent(callStatusEvent);
+
+      // Show toast notification for important status changes
+      if (['completed', 'failed', 'busy', 'no-answer'].includes(data.status)) {
+        const statusMessages = {
+          'completed': `Call completed (${data.duration ? Math.floor(data.duration / 60) + ':' + (data.duration % 60).toString().padStart(2, '0') : 'N/A'})`,
+          'failed': 'Call failed',
+          'busy': 'Call failed - Line busy',
+          'no-answer': 'Call failed - No answer'
+        };
+
+        const toastNotification = {
+          id: `call_${data.callSid}_${Date.now()}`,
+          type: 'call_status',
+          title: 'Call Status Update',
+          message: statusMessages[data.status] || `Call status: ${data.status}`,
+          timestamp: new Date().toISOString(),
+          callSid: data.callSid,
+          status: data.status
+        };
+
+        setToastNotifications(prev => {
+          const exists = prev.some(n => n.callSid === data.callSid && n.status === data.status);
+          if (exists) {
+            return prev;
+          }
+          return [toastNotification, ...prev.slice(0, 4)];
+        });
+      }
+    });
+
     setSocket(socketInstance);
 
     // Cleanup on unmount
@@ -298,6 +360,31 @@ export const SocketProvider = ({ children }) => {
     return Array.from(typingUsers.values()).filter(user => user.roomName === roomName);
   };
 
+  // Call room management
+  const joinCallRoom = (callSid) => {
+    if (socket && isConnected) {
+      socket.emit('join_call_room', callSid);
+      console.log(`📞 Joined call room: ${callSid}`);
+    }
+  };
+
+  const leaveCallRoom = (callSid) => {
+    if (socket && isConnected) {
+      socket.emit('leave_call_room', callSid);
+      console.log(`📞 Left call room: ${callSid}`);
+    }
+  };
+
+  // Get call status for a specific call
+  const getCallStatus = (callSid) => {
+    return callStatusUpdates.get(callSid);
+  };
+
+  // Get all call statuses
+  const getAllCallStatuses = () => {
+    return Array.from(callStatusUpdates.values());
+  };
+
   const value = {
     socket,
     isConnected,
@@ -306,13 +393,18 @@ export const SocketProvider = ({ children }) => {
     toastNotifications,
     typingUsers,
     onlineUsers,
+    callStatusUpdates,
     reconnect,
     joinRoom,
     leaveRoom,
     startTyping,
     stopTyping,
     getOnlineUsersCount,
-    getTypingUsers
+    getTypingUsers,
+    joinCallRoom,
+    leaveCallRoom,
+    getCallStatus,
+    getAllCallStatuses
   };
 
   return (

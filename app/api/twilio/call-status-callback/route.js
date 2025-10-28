@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../lib/sequelize-db';
+import socketManager from '../../../../lib/socket';
 
 export async function POST(request) {
   try {
@@ -107,6 +108,39 @@ export async function POST(request) {
 
     // Log the status update
     console.log(`Call ${callSid} status updated to: ${callStatus}`);
+
+    // Send Socket.IO notification for real-time updates
+    const callStatusData = {
+      callSid,
+      status: mappedStatus,
+      duration: duration ? parseInt(duration) : null,
+      direction,
+      from,
+      to,
+      startTime,
+      endTime,
+      answerTime,
+      hangupCause,
+      customerId: callLog.customerId,
+      saleId: callLog.saleId,
+      agentId: callLog.agentId,
+      callPurpose: callLog.callPurpose,
+      twilioData: updateData.twilioData
+    };
+
+    // Send to the specific agent who made the call
+    if (callLog.agentId) {
+      socketManager.sendCallStatusToAgent(callLog.agentId, callSid, callStatusData);
+    }
+
+    // Send to supervisors for monitoring
+    socketManager.sendCallStatusToSupervisors(callSid, callStatusData);
+
+    // Send to call-specific room for real-time monitoring
+    socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, callStatusData);
+
+    // Broadcast to all connected users for general call monitoring
+    socketManager.sendCallStatusUpdate(callSid, callStatusData);
 
     return NextResponse.json({
       success: true,

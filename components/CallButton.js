@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
+import { useCallStatus } from '../lib/useCallStatus';
 import apiClient from '../lib/apiClient';
 
 const CallButton = ({ 
@@ -13,26 +15,25 @@ const CallButton = ({
   size = 'default'
 }) => {
   const { user } = useAuth();
+  const { isConnected } = useSocket();
   const [isCalling, setIsCalling] = useState(false);
-  const [callStatus, setCallStatus] = useState(null);
-  const [callDuration, setCallDuration] = useState(0);
   const [currentCallSid, setCurrentCallSid] = useState(null);
   const [error, setError] = useState(null);
-  const durationInterval = useRef(null);
   const ringingInterval = useRef(null);
-  const eventSource = useRef(null);
+  
+  // Use the custom hook for call status management
+  const { 
+    currentCallStatus, 
+    isCallActive, 
+    isCallCompleted, 
+    formatDuration 
+  } = useCallStatus(currentCallSid);
 
-  // Clean up intervals and SSE connection on unmount
+  // Clean up intervals on unmount
   useEffect(() => {
     return () => {
-      if (durationInterval.current) {
-        clearInterval(durationInterval.current);
-      }
       if (ringingInterval.current) {
         clearInterval(ringingInterval.current);
-      }
-      if (eventSource.current) {
-        eventSource.current.close();
       }
     };
   }, []);
@@ -66,7 +67,9 @@ const CallButton = ({
 
   // Start ringing sound when call is ringing
   useEffect(() => {
+    const callStatus = currentCallStatus?.status;
     console.log('📞 Call status changed to:', callStatus);
+    
     if (callStatus === 'ringing' && !ringingInterval.current) {
       console.log('📞 Starting ringing sound');
       // Play initial ring
@@ -78,101 +81,20 @@ const CallButton = ({
       clearInterval(ringingInterval.current);
       ringingInterval.current = null;
     }
-  }, [callStatus]);
+  }, [currentCallStatus?.status]);
 
-  // Start duration timer when call is in progress
+  // Handle call completion
   useEffect(() => {
-    if (callStatus === 'in-progress' && !durationInterval.current) {
-      setCallDuration(0);
-      durationInterval.current = setInterval(() => {
-        setCallDuration(prev => prev + 1);
-      }, 1000);
-    } else if (callStatus !== 'in-progress' && durationInterval.current) {
-      clearInterval(durationInterval.current);
-      durationInterval.current = null;
+    if (isCallCompleted() && currentCallSid) {
+      console.log('📞 Call completed, cleaning up');
+      setIsCalling(false);
+      setCurrentCallSid(null);
+      if (ringingInterval.current) {
+        clearInterval(ringingInterval.current);
+        ringingInterval.current = null;
+      }
     }
-  }, [callStatus]);
-
-  // Set up SSE connection for real-time status updates
-  useEffect(() => {
-    if (!currentCallSid) return;
-
-    console.log('📡 Setting up SSE connection for call:', currentCallSid);
-    
-    // Close any existing connection
-    if (eventSource.current) {
-      eventSource.current.close();
-    }
-
-    // Create new SSE connection
-    eventSource.current = new EventSource(`/api/calls/status-stream/${currentCallSid}`);
-    
-    eventSource.current.onopen = () => {
-      console.log('📡 SSE connection opened for call:', currentCallSid);
-    };
-
-    eventSource.current.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log('📡 SSE message received:', data);
-        
-        if (data.type === 'connected') {
-          console.log('📡 SSE connected for call:', data.callSid);
-        } else if (data.type === 'status_update') {
-          console.log('📡 Status update received:', data.status);
-          setCallStatus(data.status);
-          
-          // If call is completed, close connection
-          if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(data.status)) {
-            console.log('📡 Call ended, closing SSE connection');
-            setIsCalling(false);
-            setCallStatus(null);
-            setCurrentCallSid(null);
-            if (durationInterval.current) {
-              clearInterval(durationInterval.current);
-              durationInterval.current = null;
-            }
-            if (ringingInterval.current) {
-              clearInterval(ringingInterval.current);
-              ringingInterval.current = null;
-            }
-            eventSource.current.close();
-          }
-        } else if (data.type === 'error') {
-          console.error('📡 SSE error:', data.message);
-        }
-      } catch (error) {
-        console.error('📡 Error parsing SSE message:', error);
-      }
-    };
-
-    eventSource.current.onerror = (error) => {
-      console.error('📡 SSE connection error:', error);
-      // Try to reconnect after 3 seconds
-      setTimeout(() => {
-        if (eventSource.current && eventSource.current.readyState === EventSource.CLOSED) {
-          console.log('📡 Attempting to reconnect SSE...');
-          eventSource.current = new EventSource(`/api/calls/status-stream/${currentCallSid}`);
-        }
-      }, 3000);
-    };
-
-    // Fallback mechanism: if status is still "queued" after 3 seconds, assume it's ringing
-    const fallbackTimer = setTimeout(() => {
-      if (callStatus === 'queued' || !callStatus) {
-        console.log('📞 Fallback: Assuming call is ringing after 3 seconds');
-        setCallStatus('ringing');
-      }
-    }, 3000);
-    
-    return () => {
-      console.log('📡 Cleaning up SSE connection for call:', currentCallSid);
-      if (eventSource.current) {
-        eventSource.current.close();
-      }
-      clearTimeout(fallbackTimer);
-    };
-  }, [currentCallSid]);
+  }, [currentCallStatus, isCallCompleted, currentCallSid]);
 
   const handleCall = async () => {
     if (!phoneNumber || !user?.id) {
@@ -181,8 +103,6 @@ const CallButton = ({
     }
 
     setIsCalling(true);
-    setCallStatus('queued');
-    setCallDuration(0);
     setError(null);
 
     try {
@@ -216,13 +136,11 @@ const CallButton = ({
       } else {
         setError(result.message || 'Failed to initiate call');
         setIsCalling(false);
-        setCallStatus(null);
       }
     } catch (err) {
       console.error('Error initiating call:', err);
       setError('Network error. Please try again.');
       setIsCalling(false);
-      setCallStatus(null);
     }
   };
 
@@ -248,6 +166,7 @@ const CallButton = ({
     };
     
     let colorClasses;
+    const callStatus = currentCallStatus?.status;
     if (callStatus === 'ringing') {
       colorClasses = 'bg-blue-500 hover:bg-blue-600 text-white animate-pulse';
     } else if (callStatus === 'in-progress') {
@@ -262,12 +181,11 @@ const CallButton = ({
   };
 
   const getButtonText = () => {
+    const callStatus = currentCallStatus?.status;
     if (callStatus === 'ringing') {
       return 'Ringing...';
     } else if (callStatus === 'in-progress') {
-      const minutes = Math.floor(callDuration / 60);
-      const seconds = callDuration % 60;
-      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      return currentCallStatus?.duration ? formatDuration(currentCallStatus.duration) : 'In Progress';
     } else if (isCalling) {
       return 'Calling...';
     } else {
@@ -279,11 +197,11 @@ const CallButton = ({
     <div className="inline-block">
       <button
         onClick={handleCall}
-        disabled={isCalling || callStatus}
+        disabled={isCalling || isCallActive()}
         className={getButtonClasses()}
         title={`Call ${customerName || phoneNumber}`}
       >
-        <PhoneIcon isCalling={isCalling || callStatus} />
+        <PhoneIcon isCalling={isCalling || isCallActive()} />
         {getButtonText()}
       </button>
       
