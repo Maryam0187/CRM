@@ -43,11 +43,24 @@ export const SocketProvider = ({ children }) => {
     }
 
     console.log('🔌 Initializing Socket.IO connection...');
+    console.log('NEXT_PUBLIC_SOCKET_URL:', process.env.NEXT_PUBLIC_SOCKET_URL);
+    console.log('NODE_ENV:', process.env.NODE_ENV);
     
     const isProduction = process.env.NODE_ENV === 'production';
-    const socketUrl = isProduction 
-      ? process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://your-domain.com'
-      : 'http://localhost:3000';
+    
+    // Determine the correct Socket.IO URL
+    let socketUrl;
+    if (isProduction) {
+      // Production: Use environment variable or fallback to Railway URL
+      socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'https://crm-production-0339.up.railway.app';
+    } else {
+      // Development: Use localhost with current port
+      const port = window.location.port || '3000';
+      socketUrl = `http://localhost:${port}`;
+    }
+    
+    console.log('Socket URL:', socketUrl);
+    console.log('Environment:', isProduction ? 'production' : 'development');
     
     const socketInstance = io(socketUrl, {
       auth: {
@@ -56,6 +69,18 @@ export const SocketProvider = ({ children }) => {
       transports: isProduction ? ['websocket'] : ['websocket', 'polling'],
       timeout: isProduction ? 60000 : 20000,
       forceNew: true,
+      // Development optimizations
+      ...(!isProduction && {
+        upgrade: true,
+        rememberUpgrade: false,
+        autoConnect: true,
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        maxReconnectionAttempts: 3,
+        compression: false,
+        path: '/api/socket'
+      }),
       // Production optimizations
       ...(isProduction && {
         upgrade: true,
