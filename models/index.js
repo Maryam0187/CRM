@@ -64,6 +64,7 @@ const Carrier = require('./Carrier')(sequelize);
 const Receiver = require('./Receiver')(sequelize);
 const SalesLog = require('./SalesLog')(sequelize);
 const CallLog = require('./CallLog')(sequelize);
+const Notification = require('./Notification')(sequelize);
 
 // Define associations
 Object.keys(sequelize.models).forEach(modelName => {
@@ -123,6 +124,7 @@ module.exports = {
   Receiver,
   SalesLog,
   CallLog,
+  Notification,
   testConnection,
   syncDatabase
 };

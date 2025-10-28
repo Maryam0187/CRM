@@ -74,11 +74,19 @@ export default function SignIn() {
       });
 
       const data = await response.json();
+      console.log('🔍 SignIn - API Response:', data);
+      console.log('🔍 SignIn - Access Token:', data.accessToken ? 'exists' : 'missing');
+      console.log('🔍 SignIn - Refresh Token:', data.refreshToken ? 'exists' : 'missing');
 
       if (response.ok) {
         // Store user session
         setUserSession(data.user);
-        login(data.user);
+        // Login with user data and tokens
+        login(data.user, data.accessToken, data.refreshToken);
+        
+        // Verify tokens are stored
+        console.log('🔍 SignIn - Stored Access Token:', localStorage.getItem('accessToken') ? 'exists' : 'missing');
+        console.log('🔍 SignIn - Stored Refresh Token:', localStorage.getItem('refreshToken') ? 'exists' : 'missing');
         
         // Redirect to dashboard
         router.push('/');

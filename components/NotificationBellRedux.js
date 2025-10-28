@@ -48,7 +48,7 @@ export default function NotificationBell() {
   const dispatch = useAppDispatch();
   
   // Redux state
-  const { notifications, unreadCount, totalCount, isLoading, error } = useAppSelector(state => state.notifications);
+  const { notifications, unreadCount, isLoading, error } = useAppSelector(state => state.notifications);
   
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -59,7 +59,6 @@ export default function NotificationBell() {
     
     dispatch(setLoading(true));
     try {
-      // Fetch latest 20 notifications for dropdown display
       const response = await authenticatedFetch(`/api/notifications?limit=20`);
       const data = await response.json();
       
@@ -80,12 +79,7 @@ export default function NotificationBell() {
           };
         });
         
-        // Store notifications with total count from API
-        dispatch(setNotifications({
-          notifications: mappedNotifications,
-          totalCount: data.data.total || mappedNotifications.length,
-          unreadCount: data.data.unreadCount || 0
-        }));
+        dispatch(setNotifications(mappedNotifications));
       } else {
         dispatch(setError(data.error || 'Failed to fetch notifications'));
       }
@@ -190,21 +184,13 @@ export default function NotificationBell() {
       }
     };
 
-    // Listen for custom event to close dropdown when new notification arrives
-    const handleCloseDropdown = () => {
-      setIsOpen(false);
-    };
-
     document.addEventListener('mousedown', handleClickOutside);
-    window.addEventListener('closeNotificationDropdown', handleCloseDropdown);
-    
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
-      window.removeEventListener('closeNotificationDropdown', handleCloseDropdown);
     };
   }, []);
 
-  // Show latest 5 notifications in dropdown
+  // Show only latest 5 notifications in dropdown
   const displayNotifications = notifications.slice(0, 5);
 
   // Get notification icon
@@ -247,22 +233,11 @@ export default function NotificationBell() {
       {/* Notification Bell Button */}
       <button
         onClick={toggleDropdown}
-        className="relative p-2 text-yellow-600 hover:text-yellow-800 hover:bg-yellow-100 rounded-full transition-colors duration-200"
+        className="relative p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors duration-200"
         title="Notifications"
       >
-        
-        {/* Bell Icon */}
-        <span className="text-xl">🔔</span>
-        
-        {/* Unread Count Badge */}
-        {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-medium z-10">
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
-        )}
-        
         {/* Connection Status Indicator */}
-        <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full ${
+        <div className={`absolute -top-1 -right-1 w-3 h-3 rounded-full ${
           connectionStatus === 'connected' ? 'bg-green-500' :
           connectionStatus === 'reconnecting' ? 'bg-yellow-500' :
           connectionStatus === 'error' || connectionStatus === 'failed' ? 'bg-red-500' :
@@ -270,6 +245,17 @@ export default function NotificationBell() {
           connectionStatus === 'not_supervisor' ? 'bg-gray-400' :
           'bg-gray-400'
         }`} title={`Connection: ${connectionStatus}`}></div>
+        
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v-5zM4.5 19.5L19.5 4.5M15 17l-5-5 5-5" />
+        </svg>
+        
+        {/* Unread Count Badge */}
+        {unreadCount > 0 && (
+          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-medium">
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
       </button>
 
       {/* Dropdown */}
@@ -369,24 +355,21 @@ export default function NotificationBell() {
 
           {/* Footer */}
           {displayNotifications.length > 0 && (
-            <div className="p-4 border-t border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100">
+            <div className="p-3 border-t border-gray-200 bg-gray-50">
               <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                  <span className="text-sm font-medium text-gray-700">
-                    {unreadCount} unread • {totalCount || notifications.length} total
-                  </span>
-                </div>
-                <div className="flex space-x-3">
+                <span className="text-xs text-gray-500">
+                  Showing {displayNotifications.length} of {notifications.length} notifications
+                </span>
+                <div className="flex space-x-2">
                   <button
                     onClick={handleMarkAllAsRead}
-                    className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 border border-blue-200"
+                    className="text-xs text-blue-600 hover:text-blue-800 underline"
                   >
                     Mark all as read
                   </button>
                   <button
                     onClick={() => router.push('/notifications')}
-                    className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md transition-colors duration-200 border border-gray-200"
+                    className="text-xs text-gray-600 hover:text-gray-800 underline"
                   >
                     View all
                   </button>

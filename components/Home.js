@@ -92,30 +92,29 @@ export default function Home() {
       
       // Add user information for role-based filtering
       if (user?.role === 'supervisor') {
-        // For supervisors, default to their own sales, or show selected agent's sales
-        const targetUserId = agentId || (selectedAgent?.id || user.id);
-        if (targetUserId) {
-          params.append('userId', targetUserId);
-          if (selectedAgent && !showingSupervisorSales) {
-            params.append('userRole', 'agent');
-            console.log('Supervisor API: Showing agent sales for', selectedAgent.firstName);
-          } else {
-            // Default to supervisor's own sales
-            params.append('userRole', 'supervisor_own');
-            console.log('Supervisor API: Showing supervisor own sales for', user.first_name);
-          }
+        // For supervisors, show selected agent's sales or all supervised agents' sales
+        if (selectedAgent && !showingSupervisorSales) {
+          params.append('agentId', selectedAgent.id);
+          console.log('Supervisor API: Showing agent sales for', selectedAgent.firstName);
+        } else {
+          // Default to all supervised agents' sales - no additional parameters needed
+          console.log('Supervisor API: Showing all supervised agents sales for', user.first_name);
         }
       } else {
-        // For other roles, show their own data
-        if (user) {
-          params.append('userId', user.id);
-          params.append('userRole', user.role);
-        }
+        // For other roles, show their own data - no additional parameters needed (JWT handles authentication)
+        console.log('API: Showing user data for', user.first_name, 'role:', user.role);
       }
       
       const url = `/api/sales${params.toString() ? `?${params.toString()}` : ''}`;
       console.log('API URL:', url);
-      const response = await fetch(url);
+      
+      // Use authenticated fetch with JWT token
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
       const result = await response.json();
       
       if (result.success) {

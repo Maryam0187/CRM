@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { User, SupervisorAgent } from '../../../../models';
+import jwt from 'jsonwebtoken';
 
 export async function POST(request) {
   try {
@@ -108,9 +109,47 @@ export async function POST(request) {
       supervisedAgents: supervisedAgents
     };
 
+    // Generate JWT tokens
+    const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+    const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key-change-in-production';
+    
+    // Access token (short-lived - 15 minutes)
+    const accessToken = jwt.sign(
+      {
+        userId: userData.id,
+        email: userData.email,
+        role: userData.role,
+        name: `${userData.first_name} ${userData.last_name}`.trim(),
+        type: 'access'
+      },
+      JWT_SECRET,
+      { expiresIn: '15m' } // 15 minutes
+    );
+
+    // Refresh token (long-lived - 1 day)
+    const refreshToken = jwt.sign(
+      {
+        userId: userData.id,
+        email: userData.email,
+        type: 'refresh'
+      },
+      JWT_REFRESH_SECRET,
+      { expiresIn: '1d' } // 1 day
+    );
+
+    console.log('🔍 SignIn API - Returning tokens:', {
+      accessToken: accessToken ? 'exists' : 'missing',
+      refreshToken: refreshToken ? 'exists' : 'missing',
+      accessTokenLength: accessToken ? accessToken.length : 0,
+      refreshTokenLength: refreshToken ? refreshToken.length : 0
+    });
+
     return NextResponse.json({
       success: true,
       user: userData,
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+      expiresIn: 15 * 60, // 15 minutes in seconds
       message: 'Sign in successful'
     });
 
