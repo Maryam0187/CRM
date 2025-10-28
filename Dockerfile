@@ -14,6 +14,10 @@ RUN npm ci
 # Copy the rest of the application
 COPY . .
 
+# Set production environment variables
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
 # Build the application for production
 RUN npm run build
 

@@ -39,8 +39,8 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy environment files
-COPY --chown=nextjs:nodejs .env.production ./
+# Environment variables will be injected at runtime by Railway
+# No need to copy .env files for security reasons
 
 USER nextjs
 
