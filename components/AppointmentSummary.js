@@ -27,18 +27,8 @@ export default function AppointmentSummary() {
       let apiUrl = '/api/sales';
       const params = new URLSearchParams();
       
-      if (user?.role === 'agent') {
-        // Agent sees only their own appointments
-        params.append('userId', user.id);
-        params.append('userRole', 'agent');
-      } else if (user?.role === 'supervisor') {
-        // Supervisor sees their own appointments in summary
-        params.append('userId', user.id);
-        params.append('userRole', 'supervisor_own');
-      } else if (user?.role === 'admin') {
-        // Admin sees all appointments in summary
-        // No additional params needed for admin
-      }
+      // JWT authentication handles user identification - no need for userId/userRole params
+      console.log('Fetching appointments for user:', user.first_name, 'role:', user.role);
       
       if (params.toString()) {
         apiUrl += `?${params.toString()}`;

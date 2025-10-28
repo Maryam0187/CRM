@@ -115,27 +115,18 @@ export default function AppointmentsPage() {
       let apiUrl = '/api/sales';
       const params = new URLSearchParams();
       
-      if (user?.role === 'agent') {
-        // Agent sees only their own appointments
-        params.append('userId', user.id);
-        params.append('userRole', 'agent');
-      } else if (user?.role === 'supervisor') {
-        // Supervisor sees their agents' appointments
-        if (agentId) {
-          params.append('userId', agentId);
-          params.append('userRole', 'agent');
-        } else {
-          // Show supervisor's own appointments if no agent selected
-          params.append('userId', user.id);
-          params.append('userRole', 'supervisor_own');
-        }
-      } else if (user?.role === 'admin') {
-        // Admin sees all appointments
-        if (agentId) {
-          params.append('userId', agentId);
-          params.append('userRole', 'agent');
-        }
-        // If no agentId, show all appointments (default behavior)
+      // JWT authentication handles user identification
+      if (user?.role === 'supervisor' && agentId) {
+        // Supervisor viewing specific agent's appointments
+        params.append('agentId', agentId);
+        console.log('Supervisor viewing agent appointments for:', agentId);
+      } else if (user?.role === 'admin' && agentId) {
+        // Admin viewing specific agent's appointments
+        params.append('agentId', agentId);
+        console.log('Admin viewing agent appointments for:', agentId);
+      } else {
+        // Default behavior - user's own appointments or all appointments (based on role)
+        console.log('Fetching appointments for user:', user.first_name, 'role:', user.role);
       }
       
       if (params.toString()) {

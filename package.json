@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "node server.js",
+    "dev:next": "next dev --turbopack",
     "build": "next build",
-    "start": "node scripts/init-db-simple.js && next start",
+    "start": "node scripts/init-db-simple.js && node server.js",
+    "start:next": "node scripts/init-db-simple.js && next start",
     "lint": "eslint",
     "db:sync": "npx sequelize-cli db:migrate",
     "db:reset": "npx sequelize-cli db:migrate:undo:all && npx sequelize-cli db:migrate",
@@ -16,14 +18,20 @@
     "railway:deploy": "npm run build && ./railway-start.sh"
   },
   "dependencies": {
+    "@reduxjs/toolkit": "^2.9.2",
     "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
+    "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.14.5",
     "next": "15.5.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "react-redux": "^9.2.0",
     "sequelize": "^6.37.7",
     "sequelize-cli": "^6.6.3",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
     "twilio": "^5.10.3"
   },
   "devDependencies": {

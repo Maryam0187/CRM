@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DateModal from './DateModal';
 import NoteModal from './NoteModal';
-import ReceiverModal from './ReceiverModal';
+// import ReceiverModal from './ReceiverModal'; // Removed - using textarea template instead
 import StateSelector, { getStateTimezone, convertToUTC, convertFromUTC } from './StateSelector';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient.js';
@@ -134,6 +134,28 @@ export default function AddSale() {
   const [showPaymentSection, setShowPaymentSection] = useState(false); // Show payment section after call ends
   const [selectedPaymentType, setSelectedPaymentType] = useState('card'); // 'card' or 'bank'
   
+  // Preserve form data when toggling between payment options
+  const [cardFormData, setCardFormData] = useState({
+    cardType: '',
+    provider: '',
+    customerName: '',
+    cardNumber: '',
+    cvv: '',
+    expiryDate: '',
+    notes: ''
+  });
+  const [bankFormData, setBankFormData] = useState({
+    bankName: '',
+    accountHolder: '',
+    accountNumber: '',
+    routingNumber: '',
+    checkNumber: '',
+    driverLicense: '',
+    nameOnLicense: '',
+    stateId: '',
+    notes: ''
+  });
+  
   // Success message state
   const [successMessage, setSuccessMessage] = useState('');
   
@@ -189,7 +211,7 @@ export default function AddSale() {
   const [editingNote, setEditingNote] = useState(null);
   const notesContainerRef = useRef(null);
   const lastNoteRef = useRef(null);
-  const [isReceiverModalOpen, setIsReceiverModalOpen] = useState(false);
+  // const [isReceiverModalOpen, setIsReceiverModalOpen] = useState(false); // Removed - using textarea template
 
   // Function to scroll notes container to bottom
   const scrollNotesToBottom = () => {
@@ -242,14 +264,11 @@ export default function AddSale() {
   const [commentText, setCommentText] = useState('');
 
 
-  // System info for receiver modal
-  const [systemInfo, setSystemInfo] = useState({
-    receiverId: '',
-    smartCardId: '',
-    secureId: '',
-    locationId: '',
-    room: ''
-  });
+  // Receiver textarea templates - simplified system info
+  const [receiverTemplates, setReceiverTemplates] = useState({});
+  
+  // Receiver collapsible state
+  const [expandedReceivers, setExpandedReceivers] = useState({});
 
   // Step detection logic
   const getCurrentStep = () => {
@@ -406,6 +425,11 @@ export default function AddSale() {
         if (sale.receivers) {
           const receiverKeys = Object.keys(sale.receivers);
           setSelectedReceiver(receiverKeys);
+        }
+
+        // Set receiver templates if they exist
+        if (sale.receiversInfo) {
+          setReceiverTemplates(sale.receiversInfo);
         }
         
         // Fetch receivers for the selected carrier
@@ -588,10 +612,36 @@ export default function AddSale() {
   const handlePaymentPanelClose = () => {
     setShowPaymentSection(false);
     setSelectedPaymentType('card');
+    // Don't clear form data - preserve it for next time
   };
 
   const handlePaymentSuccess = (type, data) => {
     console.log('Payment saved:', data);
+    
+    // Clear the form data for the successful payment type
+    if (type === 'card') {
+      setCardFormData({
+        cardType: '',
+        provider: '',
+        customerName: '',
+        cardNumber: '',
+        cvv: '',
+        expiryDate: '',
+        notes: ''
+      });
+    } else if (type === 'bank') {
+      setBankFormData({
+        bankName: '',
+        accountHolder: '',
+        accountNumber: '',
+        routingNumber: '',
+        checkNumber: '',
+        driverLicense: '',
+        nameOnLicense: '',
+        stateId: '',
+        notes: ''
+      });
+    }
     
     // Set status to payment info when payment details are actually added
     if (saleForm.id || editId) {
@@ -636,6 +686,15 @@ export default function AddSale() {
   const openPaymentPanel = (paymentType = 'card') => {
     setSelectedPaymentType(paymentType);
     setShowPaymentSection(true);
+  };
+
+  // Handlers for updating form data
+  const handleCardFormDataChange = (newData) => {
+    setCardFormData(newData);
+  };
+
+  const handleBankFormDataChange = (newData) => {
+    setBankFormData(newData);
   };
 
   // Fetch customer's last sale information (excluding current sale)
@@ -984,28 +1043,84 @@ export default function AddSale() {
       ...prev,
       receivers: newReceivers
     }));
+    
+    // Initialize templates for newly selected receivers
+    receivers.forEach(receiver => {
+      const count = newReceivers[receiver] || 1;
+      initializeReceiverTemplates(receiver, count);
+    });
   };
 
   // Increment receiver quantity
   const incrementReceiver = (key) => {
-    setSaleForm(prev => ({
-      ...prev,
-      receivers: {
-        ...prev.receivers,
-        [key]: (prev.receivers[key] || 0) + 1
-      }
-    }));
+    setSaleForm(prev => {
+      const newCount = (prev.receivers[key] || 0) + 1;
+      return {
+        ...prev,
+        receivers: {
+          ...prev.receivers,
+          [key]: newCount
+        }
+      };
+    });
+    
+    // Initialize templates for the new count
+    const newCount = (saleForm.receivers[key] || 0) + 1;
+    initializeReceiverTemplates(key, newCount);
   };
 
   // Decrement receiver quantity
   const decrementReceiver = (key) => {
     setSaleForm(prev => {
       const newReceivers = { ...prev.receivers };
-      newReceivers[key] = (newReceivers[key] || 1) - 1;
+      const currentCount = newReceivers[key] || 1;
+      const newCount = currentCount - 1;
       
-      if (newReceivers[key] <= 0) {
+      if (newCount <= 0) {
         delete newReceivers[key];
         setSelectedReceiver(prev => prev.filter(r => r !== key));
+        
+        // Clean up templates for removed receiver
+        setReceiverTemplates(prev => {
+          const newTemplates = { ...prev };
+          Object.keys(newTemplates).forEach(templateKey => {
+            if (templateKey.startsWith(`${key}_`)) {
+              delete newTemplates[templateKey];
+            }
+          });
+          return newTemplates;
+        });
+        
+        setSaleForm(prev => ({
+          ...prev,
+          receiversInfo: Object.fromEntries(
+            Object.entries(prev.receiversInfo).filter(([templateKey]) => !templateKey.startsWith(`${key}_`))
+          )
+        }));
+      } else {
+        newReceivers[key] = newCount;
+        
+        // Clean up excess templates
+        setReceiverTemplates(prev => {
+          const newTemplates = { ...prev };
+          for (let i = newCount + 1; i <= currentCount; i++) {
+            delete newTemplates[`${key}_${i}`];
+          }
+          return newTemplates;
+        });
+        
+        setSaleForm(prev => ({
+          ...prev,
+          receiversInfo: Object.fromEntries(
+            Object.entries(prev.receiversInfo).filter(([templateKey]) => {
+              if (templateKey.startsWith(`${key}_`)) {
+                const index = parseInt(templateKey.split('_')[1]);
+                return index <= newCount;
+              }
+              return true;
+            })
+          )
+        }));
       }
       
       return {
@@ -1015,29 +1130,113 @@ export default function AddSale() {
     });
   };
 
-  // Open receiver modal
-  const openReceiverModal = (index) => {
-    setModalId(index);
-    setIsReceiverModalOpen(true);
-  };
-
-  // Save system information
-  const saveSystemInfo = () => {
+  // Receiver template functions
+  const updateReceiverTemplate = (receiverName, template) => {
+    setReceiverTemplates(prev => ({
+      ...prev,
+      [receiverName]: template
+    }));
+    
+    // Also update receiversInfo in saleForm
     setSaleForm(prev => ({
       ...prev,
       receiversInfo: {
         ...prev.receiversInfo,
-        [modalId]: systemInfo
+        [receiverName]: template
       }
     }));
-    setIsReceiverModalOpen(false);
-    setSystemInfo({
-      receiverId: '',
-      smartCardId: '',
-      secureId: '',
-      locationId: '',
-      room: ''
+  };
+
+  // Get receiver template
+  const getReceiverTemplate = (receiverName) => {
+    return receiverTemplates[receiverName] || getDefaultReceiverTemplate();
+  };
+
+  // Initialize receiver templates when count changes
+  const initializeReceiverTemplates = (receiverName, count) => {
+    for (let i = 1; i <= count; i++) {
+      const templateKey = `${receiverName}_${i}`;
+      if (!receiverTemplates[templateKey]) {
+        updateReceiverTemplate(templateKey, getDefaultReceiverTemplate());
+      }
+    }
+  };
+
+  // Toggle receiver expansion
+  const toggleReceiverExpansion = (receiverName) => {
+    setExpandedReceivers(prev => ({
+      ...prev,
+      [receiverName]: !prev[receiverName]
+    }));
+  };
+
+  // Remove specific system information textarea
+  const removeSystemInformation = (receiverName, index) => {
+    const currentCount = saleForm.receivers[receiverName] || 0;
+    
+    if (currentCount <= 1) {
+      // If only one textarea, remove the entire receiver
+      handleReceiverChange(selectedReceiver.filter(r => r !== receiverName));
+      return;
+    }
+    
+    // Decrease count
+    setSaleForm(prev => ({
+      ...prev,
+      receivers: {
+        ...prev.receivers,
+        [receiverName]: currentCount - 1
+      }
+    }));
+    
+    // Remove the specific template
+    const templateKey = `${receiverName}_${index + 1}`;
+    setReceiverTemplates(prev => {
+      const newTemplates = { ...prev };
+      delete newTemplates[templateKey];
+      
+      // Shift remaining templates down
+      for (let i = index + 2; i <= currentCount; i++) {
+        const oldKey = `${receiverName}_${i}`;
+        const newKey = `${receiverName}_${i - 1}`;
+        if (newTemplates[oldKey]) {
+          newTemplates[newKey] = newTemplates[oldKey];
+          delete newTemplates[oldKey];
+        }
+      }
+      
+      return newTemplates;
     });
+    
+    // Update receiversInfo in saleForm
+    setSaleForm(prev => {
+      const newReceiversInfo = { ...prev.receiversInfo };
+      delete newReceiversInfo[templateKey];
+      
+      // Shift remaining info down
+      for (let i = index + 2; i <= currentCount; i++) {
+        const oldKey = `${receiverName}_${i}`;
+        const newKey = `${receiverName}_${i - 1}`;
+        if (newReceiversInfo[oldKey]) {
+          newReceiversInfo[newKey] = newReceiversInfo[oldKey];
+          delete newReceiversInfo[oldKey];
+        }
+      }
+      
+      return {
+        ...prev,
+        receiversInfo: newReceiversInfo
+      };
+    });
+  };
+
+  // Default receiver template
+  const getDefaultReceiverTemplate = () => {
+    return `Receiver ID: 
+Smart Card ID: 
+Secure ID: 
+Location ID: 
+Room: `;
   };
 
   // Open date modal
@@ -2933,13 +3132,17 @@ export default function AddSale() {
                   <AddCardForm 
                     mode="create" 
                     saleId={saleForm.id || editId} 
-                    onSuccess={(data) => handlePaymentSuccess('card', data)} 
+                    onSuccess={(data) => handlePaymentSuccess('card', data)}
+                    initialData={cardFormData}
+                    onDataChange={handleCardFormDataChange}
                   />
                 ) : (
                   <AddBankForm 
                     mode="create" 
                     saleId={saleForm.id || editId} 
-                    onSuccess={(data) => handlePaymentSuccess('bank', data)} 
+                    onSuccess={(data) => handlePaymentSuccess('bank', data)}
+                    initialData={bankFormData}
+                    onDataChange={handleBankFormDataChange}
                   />
                 )}
               </div>
@@ -3568,50 +3771,104 @@ export default function AddSale() {
                   )}
                 </div>
 
-                {/* Receiver Quantity Controls */}
+                {/* Receiver Details with Collapsible Textarea Template */}
                 {selectedReceiver.length > 0 && (
                   <div>
                     <label className="block mb-2 text-sm font-medium text-gray-900">
-                      Choose Quantity
+                      Receiver Details
                     </label>
                     <div className="space-y-3">
-                      {Object.keys(saleForm.receivers).map((receiver) => (
-                        <div key={receiver} className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => openReceiverModal(receiver)}
-                            className="bg-blue-600 text-white font-medium rounded-lg text-sm px-3 py-2 hover:bg-blue-700 transition-colors duration-200"
-                          >
-                            Add System info ({receiver})
-                          </button>
-                          <div className="flex max-w-[8rem]">
-                            <button
-                              type="button"
-                              onClick={() => decrementReceiver(receiver)}
-                              className="bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-s-lg p-3 h-11 focus:ring-gray-100 focus:ring-2 focus:outline-none"
+                      {Object.keys(saleForm.receivers).map((receiver) => {
+                        const isExpanded = expandedReceivers[receiver] || false;
+                        const count = saleForm.receivers[receiver] || 0;
+                        
+                        return (
+                          <div key={receiver} className="border border-gray-200 rounded-lg bg-gray-50">
+                            {/* Collapsible Header */}
+                            <div 
+                              className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-100 transition-colors"
+                              onClick={() => toggleReceiverExpansion(receiver)}
                             >
-                              <svg className="w-3 h-3 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-                              </svg>
-                            </button>
-                            <input
-                              type="text"
-                              value={saleForm.receivers[receiver] || 0}
-                              disabled
-                              className="bg-gray-50 border-x-0 border-gray-300 h-11 text-center text-gray-900 text-sm focus:ring-blue-500 focus:border-blue-500 block w-full py-2.5"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => incrementReceiver(receiver)}
-                              className="bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-e-lg p-3 h-11 focus:ring-gray-100 focus:ring-2 focus:outline-none"
-                            >
-                              <svg className="w-3 h-3 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                              </svg>
-                            </button>
+                              <div className="flex items-center gap-3">
+                                <svg 
+                                  className={`w-4 h-4 text-gray-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                                  fill="none" 
+                                  stroke="currentColor" 
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                                <h4 className="text-sm font-medium text-gray-900">{receiver}</h4>
+                                <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">
+                                  Count: {count}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    decrementReceiver(receiver);
+                                  }}
+                                  className="bg-gray-200 hover:bg-gray-300 border border-gray-300 rounded-s-lg p-2 h-8 focus:ring-gray-100 focus:ring-2 focus:outline-none"
+                                >
+                                  <svg className="w-3 h-3 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                                  </svg>
+                                </button>
+                                <span className="bg-white border-t border-b border-gray-300 px-3 py-1 h-8 text-center text-gray-900 text-sm font-medium min-w-[2rem] flex items-center justify-center">
+                                  {count}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    incrementReceiver(receiver);
+                                  }}
+                                  className="bg-gray-200 hover:bg-gray-300 border border-gray-300 rounded-e-lg p-2 h-8 focus:ring-gray-100 focus:ring-2 focus:outline-none"
+                                >
+                                  <svg className="w-3 h-3 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                            
+                            {/* Collapsible Content */}
+                            {isExpanded && (
+                              <div className="px-4 pb-4 border-t border-gray-200 bg-white">
+                                <div className="pt-4 space-y-3">
+                                  {Array.from({ length: count }, (_, index) => (
+                                    <div key={index} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <label className="block text-sm font-medium text-gray-700">
+                                          System Information {index + 1}
+                                        </label>
+                                        <button
+                                          type="button"
+                                          onClick={() => removeSystemInformation(receiver, index)}
+                                          className="text-red-600 hover:text-red-800 hover:bg-red-100 p-1 rounded transition-colors"
+                                          title="Remove this system information"
+                                        >
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                          </svg>
+                                        </button>
+                                      </div>
+                                      <textarea
+                                        value={getReceiverTemplate(`${receiver}_${index + 1}`)}
+                                        onChange={(e) => updateReceiverTemplate(`${receiver}_${index + 1}`, e.target.value)}
+                                        className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm"
+                                        placeholder="Enter system information..."
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -4054,17 +4311,7 @@ export default function AddSale() {
         />
       )}
 
-      {/* Receiver Modal */}
-      {isReceiverModalOpen && (
-        <ReceiverModal
-          title="Add System Information"
-          modalId={modalId}
-          systemInfo={systemInfo}
-          setSystemInfo={setSystemInfo}
-          onClose={() => setIsReceiverModalOpen(false)}
-          onSave={saveSystemInfo}
-        />
-          )}
+      {/* Receiver Modal - Removed, using textarea template instead */}
 
 
 
