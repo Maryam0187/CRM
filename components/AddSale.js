@@ -603,6 +603,18 @@ export default function AddSale() {
     setLastSaleInfo(null);
   };
 
+  // Handle call initiation (not completion)
+  const handleCallInitiated = (callResult) => {
+    console.log('Call initiated:', callResult);
+    setCallData(callResult);
+    
+    // Hide the customer/sale info panel after call is initiated
+    setShowCallInfo(false);
+    // Close customer info popup after call is initiated
+    setShowCustomerInfoModal(false);
+    // Don't reset checked customer - keep it for status updates
+  };
+
   // Reset call highlight when user interacts with action buttons
   const resetCallHighlight = () => {
     setCallJustEnded(false);
@@ -1747,33 +1759,30 @@ Room: `;
     setShowCustomerDialog(false);
     
     if (customerWarning && (customerWarning.matchType === 'landline' || customerWarning.matchType === 'exact')) {
-      // Use selected customer, exact match customer, or first customer in list
-      const customerToUse = customerWarning.selectedCustomerId 
-        ? customerWarning.landlineCustomers.find(c => c.id === customerWarning.selectedCustomerId)
-        : customerWarning.exactMatchCustomer || customerWarning.landlineCustomers[0]; // Prefer exact match if no selection
+      // Check if user explicitly selected "Create New Customer" (selectedCustomerId is explicitly null)
+      // We need to distinguish between:
+      // - selectedCustomerId === null: User clicked "Create New Customer"
+      // - selectedCustomerId === undefined: No selection made yet (should use exact match or first customer)
+      // - selectedCustomerId === <number>: User selected an existing customer
+      
+      if (customerWarning.selectedCustomerId === null) {
+        // User explicitly selected "Create New Customer" - restore original name and create new customer
+        const originalName = customerWarning.newCustomerName || customer.firstName;
         
-      if (customerToUse) {
-        setCheckedCustomer({
-          id: customerToUse.id,
-          customerId: customerToUse.id,
-          status: 'checked',
-          customerName: customerToUse.firstName
-        });
+        // Restore the original name in the form
+        setCustomer(prev => ({
+          ...prev,
+          firstName: originalName,
+          lastName: '',
+          email: '',
+          phone: prev.phone || '',
+          landline: prev.landline,
+          address: '',
+          state: prev.state || '',
+          city: prev.city || '',
+          id: undefined
+        }));
         
-        // Update customer state with the ID
-        setCustomer(prev => ({ ...prev, id: customerToUse.id }));
-        
-        // Use last sale info from customer data (no additional API call)
-        setLastSaleInfo({
-          lastSale: customerToUse.lastSale,
-          customer: customerToUse
-        });
-        
-        // Show call button and last sale info on page (no popup)
-        // setShowCustomerInfoModal(true);
-        
-      } else {
-        // No selection - create new customer
         const customerResult = await createCustomerOnly();
         
         if (customerResult?.id) {
@@ -1792,9 +1801,59 @@ Room: `;
             lastSale: null,
             customer: customerResult
           });
+        }
+      } else if (customerWarning.selectedCustomerId) {
+        // User selected an existing customer
+        const customerToUse = customerWarning.landlineCustomers.find(c => c.id === customerWarning.selectedCustomerId);
+        
+        if (customerToUse) {
+          setCheckedCustomer({
+            id: customerToUse.id,
+            customerId: customerToUse.id,
+            status: 'checked',
+            customerName: customerToUse.firstName
+          });
           
-          // Show call button and last sale info on page (no popup)
-          // setShowCustomerInfoModal(true);
+          // Update customer state with the selected customer's data
+          setCustomer(prev => ({
+            ...prev,
+            firstName: customerToUse.firstName,
+            lastName: customerToUse.lastName || '',
+            email: customerToUse.email || '',
+            phone: customerToUse.phone || '',
+            landline: customerToUse.landline || prev.landline,
+            address: customerToUse.address || '',
+            state: customerToUse.state || '',
+            city: customerToUse.city || '',
+            id: customerToUse.id
+          }));
+          
+          // Use last sale info from customer data (no additional API call)
+          setLastSaleInfo({
+            lastSale: customerToUse.lastSale,
+            customer: customerToUse
+          });
+        }
+      } else {
+        // No explicit selection - use exact match or first customer (fallback behavior)
+        const customerToUse = customerWarning.exactMatchCustomer || customerWarning.landlineCustomers[0];
+          
+        if (customerToUse) {
+          setCheckedCustomer({
+            id: customerToUse.id,
+            customerId: customerToUse.id,
+            status: 'checked',
+            customerName: customerToUse.firstName
+          });
+          
+          // Update customer state with the ID
+          setCustomer(prev => ({ ...prev, id: customerToUse.id }));
+          
+          // Use last sale info from customer data (no additional API call)
+          setLastSaleInfo({
+            lastSale: customerToUse.lastSale,
+            customer: customerToUse
+          });
         }
       }
     }
@@ -3372,7 +3431,7 @@ Room: `;
                           phoneNumber={customer.phone || customer.landline}
                           customerName={customer.firstName}
                           callPurpose="follow_up"
-                          onCallInitiated={handleCallCompleted}
+                          onCallInitiated={handleCallInitiated}
                           size="small"
                         />
                       </div>
@@ -3416,7 +3475,7 @@ Room: `;
                           phoneNumber={customer.phone || customer.landline}
                           customerName={customer.firstName}
                           callPurpose="follow_up"
-                          onCallInitiated={handleCallCompleted}
+                          onCallInitiated={handleCallInitiated}
                           size="small"
                         />
                       </div>
@@ -4400,19 +4459,6 @@ Room: `;
                             selectedCustomerId: customer.id,
                             selectedCustomerName: customer.firstName
                           }));
-                          // Update the customer form state with selected customer's name
-                          setCustomer(prev => ({
-                            ...prev,
-                            firstName: customer.firstName,
-                            lastName: customer.lastName || '',
-                            email: customer.email || '',
-                            phone: customer.phone || '',
-                            landline: customer.landline || prev.landline, // Keep landline as it's already set
-                            address: customer.address || '',
-                            state: customer.state || '',
-                            city: customer.city || '',
-                            id: customer.id // Set the customer ID
-                          }));
                         }}
                         className={`w-full text-left p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer ${
                           customerWarning.selectedCustomerId === customer.id
@@ -4480,6 +4526,7 @@ Room: `;
                   <div className="border-t pt-3">
                     <button
                       onClick={() => {
+                        // Update the warning state to indicate "Create New Customer" is selected
                         setCustomerWarning(prev => ({
                           ...prev,
                           selectedCustomerId: null,
@@ -4517,6 +4564,22 @@ Room: `;
               <div className="flex justify-end space-x-3">
                 <button
                   onClick={() => {
+                    // Reset the customer form to its original state before dialog was opened
+                    if (customerWarning?.newCustomerName) {
+                      setCustomer(prev => ({
+                        ...prev,
+                        firstName: customerWarning.newCustomerName,
+                        lastName: '',
+                        email: '',
+                        phone: prev.phone || '',
+                        landline: prev.landline,
+                        address: '',
+                        state: prev.state || '',
+                        city: prev.city || '',
+                        id: undefined
+                      }));
+                    }
+                    
                     setShowCustomerDialog(false);
                     setCustomerWarning(null);
                     setSaving(false);
@@ -4533,9 +4596,11 @@ Room: `;
                   {isCheckNumberMode ? (
                     customerWarning.selectedCustomerId 
                       ? `Use ${customerWarning.selectedCustomerName} & Show Info`
-                      : customerWarning.hasExactMatch
-                        ? `Use ${customerWarning.exactMatchCustomer?.firstName} (Exact Match) & Show Info`
-                        : `Use ${customerWarning.landlineCustomers[0]?.firstName || 'Customer'} & Show Info`
+                      : customerWarning.selectedCustomerId === null
+                        ? `Create New Customer: ${customerWarning.newCustomerName}`
+                        : customerWarning.hasExactMatch
+                          ? `Use ${customerWarning.exactMatchCustomer?.firstName} (Exact Match) & Show Info`
+                          : `Use ${customerWarning.landlineCustomers[0]?.firstName || 'Customer'} & Show Info`
                   ) : (
                     customerWarning.selectedCustomerId 
                       ? `Add Sale to ${customerWarning.selectedCustomerName}`
@@ -4682,7 +4747,7 @@ Room: `;
                     phoneNumber={customer.phone || customer.landline}
                     customerName={customer.firstName}
                     callPurpose="follow_up"
-                    onCallInitiated={handleCallCompleted}
+                    onCallInitiated={handleCallInitiated}
                     size="large"
                   />
                 </div>
