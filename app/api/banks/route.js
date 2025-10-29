@@ -3,17 +3,20 @@ import {
   validateBankForm, 
   cleanBankData 
 } from '../../../lib/validation.js';
-import { requireAuth } from '../../../lib/serverAuth.js';
-
+import { requireJWTAuth } from '../../../lib/jwtAuth.js';
 export async function POST(request) {
   try {
-    const bankData = await request.json();
     
-    // Get user info from authentication (like in cards)
-    const authResult = await requireAuth(request);
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
     if (authResult.error) {
-      return Response.json({ error: authResult.error }, { status: authResult.status });
+      return Response.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
     }
+
+    const bankData = await request.json();
     const { user } = authResult;
     
     // Allow agents, supervisors, admins, processors, and verification users to create bank accounts
@@ -89,7 +92,17 @@ export async function POST(request) {
 
 export async function GET(request) {
   try {
-    const { searchParams } = new URL(request.url);
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return Response.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
+const { searchParams } = new URL(request.url);
     const saleId = searchParams.get('saleId');
     
     let whereClause = {};

@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { Sale, Card, Bank, Customer, User } from '../../../models/index.js';
 import { SaleService, SupervisorAgentService } from '../../../lib/sequelize-db.js';
-import { requireAuth } from '../../../lib/serverAuth.js';
+import { requireJWTAuth } from '../../../lib/jwtAuth.js';
 import { getCardExpirationStatus, formatDisplayDate } from '../../../lib/validation.js';
 
 export async function GET(request) {
   try {
-    // Verify authentication
-    const authResult = await requireAuth(request);
+    // Verify JWT authentication
+    const authResult = await requireJWTAuth(request);
     if (authResult.error) {
       return NextResponse.json({ error: authResult.error }, { status: authResult.status });
     }

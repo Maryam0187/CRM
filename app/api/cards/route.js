@@ -5,14 +5,17 @@ import {
   getCardExpirationStatus,
   formatDisplayDate
 } from '../../../lib/validation.js';
-import { requireAuth } from '../../../lib/serverAuth.js';
-
+import { requireJWTAuth } from '../../../lib/jwtAuth.js';
 export async function POST(request) {
   try {
-    // Verify authentication - users should be logged in to add cards
-    const authResult = await requireAuth(request);
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
     if (authResult.error) {
-      return Response.json({ error: authResult.error }, { status: authResult.status });
+      return Response.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
     }
 
     const { user } = authResult;
@@ -91,10 +94,14 @@ export async function POST(request) {
 
 export async function GET(request) {
   try {
-    // Verify authentication
-    const authResult = await requireAuth(request);
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
     if (authResult.error) {
-      return Response.json({ error: authResult.error }, { status: authResult.status });
+      return Response.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
     }
 
     const { user } = authResult;

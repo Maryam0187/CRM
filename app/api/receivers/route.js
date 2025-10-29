@@ -1,8 +1,20 @@
 import { ReceiverService } from '../../../lib/sequelize-db.js';
 
+
+import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 export async function GET(request) {
   try {
-    const { searchParams } = new URL(request.url);
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return Response.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
+const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page')) || 1;
     const limit = parseInt(searchParams.get('limit')) || 10;
     const carrierId = searchParams.get('carrierId');
@@ -32,7 +44,17 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const receiverData = await request.json();
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return Response.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
+const receiverData = await request.json();
     
     const receiver = await ReceiverService.create(receiverData);
     

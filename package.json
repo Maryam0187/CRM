@@ -15,7 +15,8 @@
     "db:seed": "npx sequelize-cli db:seed:all",
     "db:seed:undo": "npx sequelize-cli db:seed:undo:all",
     "postbuild": "echo 'Build completed successfully'",
-    "railway:deploy": "npm run build && ./railway-start.sh"
+    "railway:deploy": "npm run build && ./railway-start.sh",
+    "add-jwt-validation": "node scripts/add-jwt-validation.js"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.9.2",

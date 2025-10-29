@@ -1,8 +1,20 @@
 import { CustomerService } from '../../../../lib/sequelize-db.js';
 
+
+import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 export async function POST(request) {
   try {
-    const { landline, firstName } = await request.json();
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return Response.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
+const { landline, firstName } = await request.json();
     
     if (!landline || !firstName) {
       return Response.json(

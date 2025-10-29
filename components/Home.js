@@ -10,6 +10,7 @@ import SalesTimeline from './SalesTimeline';
 import AppointmentSummary from './AppointmentSummary';
 import { useAuth } from '../contexts/AuthContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
+import apiClient from '../lib/apiClient';
 
 export default function Home() {
   const router = useRouter();
@@ -108,13 +109,8 @@ export default function Home() {
       const url = `/api/sales${params.toString() ? `?${params.toString()}` : ''}`;
       console.log('API URL:', url);
       
-      // Use authenticated fetch with JWT token
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      // Use authenticated fetch with JWT token and automatic refresh
+      const response = await apiClient.get(url);
       const result = await response.json();
       
       if (result.success) {

@@ -1,9 +1,21 @@
 import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../lib/sequelize-db';
 
+
+import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 export async function POST(request) {
   try {
-    const body = await request.json();
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
+const body = await request.json();
     const { callSid, notes, callPurpose } = body;
 
     if (!callSid) {
@@ -64,7 +76,17 @@ export async function POST(request) {
 
 export async function GET(request) {
   try {
-    const { searchParams } = new URL(request.url);
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
+const { searchParams } = new URL(request.url);
     const callSid = searchParams.get('callSid');
 
     if (!callSid) {

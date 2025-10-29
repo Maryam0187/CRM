@@ -1,8 +1,20 @@
 import { RoleAssignmentService } from '../../../lib/sequelize-db.js';
 
+
+import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 export async function GET(request) {
   try {
-    const { searchParams } = new URL(request.url);
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return Response.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
+const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     const assignedRole = searchParams.get('assignedRole');
     
@@ -33,7 +45,17 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const { userId, assignedRole, assignedBy, expiresAt } = await request.json();
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return Response.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
+const { userId, assignedRole, assignedBy, expiresAt } = await request.json();
     
     if (!userId || !assignedRole) {
       return Response.json(
@@ -68,7 +90,17 @@ export async function POST(request) {
 
 export async function PUT(request) {
   try {
-    const { userId, assignedRole } = await request.json();
+    
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return Response.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
+const { userId, assignedRole } = await request.json();
     
     if (!userId || !assignedRole) {
       return Response.json(

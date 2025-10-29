@@ -112,8 +112,10 @@ export async function POST(request) {
     // Generate JWT tokens
     const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
     const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key-change-in-production';
+    const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m'; // Default to 15 minutes if not set
+    const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '1d'; // Default to 1 day if not set
     
-    // Access token (short-lived - 15 minutes)
+    // Access token (configurable via JWT_EXPIRES_IN)
     const accessToken = jwt.sign(
       {
         userId: userData.id,
@@ -123,10 +125,10 @@ export async function POST(request) {
         type: 'access'
       },
       JWT_SECRET,
-      { expiresIn: '15m' } // 15 minutes
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
-    // Refresh token (long-lived - 1 day)
+    // Refresh token (configurable via JWT_REFRESH_EXPIRES_IN)
     const refreshToken = jwt.sign(
       {
         userId: userData.id,
@@ -134,7 +136,7 @@ export async function POST(request) {
         type: 'refresh'
       },
       JWT_REFRESH_SECRET,
-      { expiresIn: '1d' } // 1 day
+      { expiresIn: JWT_REFRESH_EXPIRES_IN }
     );
 
     console.log('🔍 SignIn API - Returning tokens:', {
@@ -149,7 +151,7 @@ export async function POST(request) {
       user: userData,
       accessToken: accessToken,
       refreshToken: refreshToken,
-      expiresIn: 15 * 60, // 15 minutes in seconds
+      expiresIn: JWT_EXPIRES_IN, // Token expiration from environment variable
       message: 'Sign in successful'
     });
 

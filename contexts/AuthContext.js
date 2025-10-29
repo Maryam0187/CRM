@@ -92,12 +92,13 @@ export function AuthProvider({ children }) {
         if (typeof window !== 'undefined') {
           localStorage.setItem('accessToken', data.accessToken);
         }
+        console.log('✅ AuthContext - Access token refreshed successfully');
         return data.accessToken;
       } else {
         throw new Error(data.error || 'Token refresh failed');
       }
     } catch (error) {
-      console.error('Token refresh error:', error);
+      console.error('❌ AuthContext - Token refresh error:', error);
       // If refresh fails, logout user
       logout();
       throw error;
