@@ -755,6 +755,28 @@ export default function AddSale() {
         
         const checkResult = await checkResponse.json();
         if (checkResult.success && checkResult.exists) {
+          // If exact match found, auto-populate the form with that customer's data
+          let selectedCustomerId = null;
+          let selectedCustomerName = null;
+          
+          if (checkResult.matchType === 'exact' && checkResult.exactMatchCustomer) {
+            const exactMatch = checkResult.exactMatchCustomer;
+            setCustomer(prev => ({
+              ...prev,
+              firstName: exactMatch.firstName,
+              lastName: exactMatch.lastName || '',
+              email: exactMatch.email || '',
+              phone: exactMatch.phone || '',
+              landline: exactMatch.landline || prev.landline,
+              address: exactMatch.address || '',
+              state: exactMatch.state || '',
+              city: exactMatch.city || '',
+              id: exactMatch.id
+            }));
+            selectedCustomerId = exactMatch.id;
+            selectedCustomerName = exactMatch.firstName;
+          }
+          
           // Show customer selection dialog when landline exists
           setCustomerWarning({
             matchType: checkResult.matchType, // 'exact' or 'landline'
@@ -762,8 +784,11 @@ export default function AddSale() {
             exactMatchCustomer: checkResult.exactMatchCustomer,
             newCustomerName: customer.firstName.trim(),
             landlineCustomers: checkResult.landlineCustomers,
-            customerCount: checkResult.customerCount
+            customerCount: checkResult.customerCount,
+            selectedCustomerId: selectedCustomerId,
+            selectedCustomerName: selectedCustomerName
           });
+          
           setIsCheckNumberMode(true);
           setShowCustomerDialog(true);
         } else {
@@ -4374,6 +4399,19 @@ Room: `;
                             ...prev,
                             selectedCustomerId: customer.id,
                             selectedCustomerName: customer.firstName
+                          }));
+                          // Update the customer form state with selected customer's name
+                          setCustomer(prev => ({
+                            ...prev,
+                            firstName: customer.firstName,
+                            lastName: customer.lastName || '',
+                            email: customer.email || '',
+                            phone: customer.phone || '',
+                            landline: customer.landline || prev.landline, // Keep landline as it's already set
+                            address: customer.address || '',
+                            state: customer.state || '',
+                            city: customer.city || '',
+                            id: customer.id // Set the customer ID
                           }));
                         }}
                         className={`w-full text-left p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer ${

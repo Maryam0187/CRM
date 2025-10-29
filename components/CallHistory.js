@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { isAdmin } from '../lib/roleUtils';
 
 // Utility functions (moved from twilio.js to avoid client-side import)
 const formatCallDuration = (seconds) => {
@@ -47,6 +49,7 @@ const CallHistory = ({
   showAgentInfo = true,
   className = ''
 }) => {
+  const { user } = useAuth();
   const [calls, setCalls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

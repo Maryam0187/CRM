@@ -135,7 +135,16 @@ export async function POST(request) {
 
     // Send to the specific agent who made the call
     if (callLog.agentId) {
+      console.log('📞 Sending call status to agent:', {
+        agentId: callLog.agentId,
+        callSid,
+        status: mappedStatus,
+        customerId: callLog.customerId,
+        saleId: callLog.saleId
+      });
       socketManager.sendCallStatusToAgent(callLog.agentId, callSid, callStatusData);
+    } else {
+      console.log('❌ No agentId found in call log, cannot send status to agent');
     }
 
     // Send to supervisors for monitoring

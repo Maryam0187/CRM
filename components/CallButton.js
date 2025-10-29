@@ -19,7 +19,10 @@ const CallButton = ({
   const [isCalling, setIsCalling] = useState(false);
   const [currentCallSid, setCurrentCallSid] = useState(null);
   const [error, setError] = useState(null);
+  const [callStartTime, setCallStartTime] = useState(null);
+  const [callTimer, setCallTimer] = useState(0);
   const ringingInterval = useRef(null);
+  const timerInterval = useRef(null);
   
   // Use the custom hook for call status management
   const { 
@@ -34,6 +37,9 @@ const CallButton = ({
     return () => {
       if (ringingInterval.current) {
         clearInterval(ringingInterval.current);
+      }
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
       }
     };
   }, []);
@@ -70,6 +76,8 @@ const CallButton = ({
     const callStatus = currentCallStatus?.status;
     console.log('📞 Call status changed to:', callStatus, 'for callSid:', currentCallSid);
     console.log('📞 Full call status object:', currentCallStatus);
+    console.log('📞 Current callSid state:', currentCallSid);
+    console.log('📞 Call status callSid:', currentCallStatus?.callSid);
     
     if (callStatus === 'ringing' && !ringingInterval.current) {
       console.log('📞 Starting ringing sound');
@@ -84,15 +92,45 @@ const CallButton = ({
     }
   }, [currentCallStatus?.status, currentCallSid]);
 
+  // Handle call timer for in-progress calls
+  useEffect(() => {
+    const callStatus = currentCallStatus?.status;
+    
+    if (callStatus === 'in-progress' && !callStartTime) {
+      // Call just started, set start time
+      setCallStartTime(Date.now());
+      setCallTimer(0);
+      
+      // Start timer interval
+      if (!timerInterval.current) {
+        timerInterval.current = setInterval(() => {
+          setCallTimer(prev => prev + 1);
+        }, 1000);
+      }
+    } else if (callStatus !== 'in-progress' && timerInterval.current) {
+      // Call ended, stop timer
+      clearInterval(timerInterval.current);
+      timerInterval.current = null;
+      setCallStartTime(null);
+      setCallTimer(0);
+    }
+  }, [currentCallStatus?.status, callStartTime]);
+
   // Handle call completion
   useEffect(() => {
     if (isCallCompleted() && currentCallSid) {
       console.log('📞 Call completed, cleaning up');
       setIsCalling(false);
       setCurrentCallSid(null);
+      setCallStartTime(null);
+      setCallTimer(0);
       if (ringingInterval.current) {
         clearInterval(ringingInterval.current);
         ringingInterval.current = null;
+      }
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
+        timerInterval.current = null;
       }
     }
   }, [currentCallStatus, isCallCompleted, currentCallSid]);
@@ -130,6 +168,9 @@ const CallButton = ({
         console.log('📞 Call initiated successfully:', result.data);
         console.log('📞 Call SID:', result.data.callSid);
         console.log('📞 Initial status:', result.data.status);
+        console.log('📞 Customer ID:', customerId);
+        console.log('📞 Sale ID:', saleId);
+        console.log('📞 Agent ID:', user.id);
         
         if (onCallInitiated) {
           onCallInitiated(result.data);
@@ -181,12 +222,19 @@ const CallButton = ({
     return `${baseClasses} ${sizeClasses[size]} ${colorClasses} ${className}`;
   };
 
+  // Format timer display
+  const formatTimer = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
   const getButtonText = () => {
     const callStatus = currentCallStatus?.status;
     if (callStatus === 'ringing') {
       return 'Ringing...';
     } else if (callStatus === 'in-progress') {
-      return currentCallStatus?.duration ? formatDuration(currentCallStatus.duration) : 'In Progress';
+      return formatTimer(callTimer);
     } else if (isCalling) {
       return 'Calling...';
     } else {
@@ -194,8 +242,45 @@ const CallButton = ({
     }
   };
 
+  const getStatusText = () => {
+    const callStatus = currentCallStatus?.status;
+    if (callStatus === 'ringing') {
+      return 'Ringing';
+    } else if (callStatus === 'in-progress') {
+      return 'In Progress';
+    } else if (callStatus === 'completed') {
+      return 'Completed';
+    } else if (callStatus === 'failed') {
+      return 'Failed';
+    } else if (callStatus === 'busy') {
+      return 'Busy';
+    } else if (callStatus === 'no-answer') {
+      return 'No Answer';
+    } else if (isCalling) {
+      return 'Calling';
+    }
+    return null;
+  };
+
   return (
-    <div className="inline-block">
+    <div className="inline-flex items-center gap-2">
+      {/* Status indicator */}
+      {getStatusText() && (
+        <div className={`px-2 py-1 rounded text-xs font-medium ${
+          currentCallStatus?.status === 'ringing' ? 'bg-blue-100 text-blue-800' :
+          currentCallStatus?.status === 'in-progress' ? 'bg-green-100 text-green-800' :
+          currentCallStatus?.status === 'completed' ? 'bg-gray-100 text-gray-800' :
+          currentCallStatus?.status === 'failed' ? 'bg-red-100 text-red-800' :
+          currentCallStatus?.status === 'busy' ? 'bg-yellow-100 text-yellow-800' :
+          currentCallStatus?.status === 'no-answer' ? 'bg-orange-100 text-orange-800' :
+          isCalling ? 'bg-orange-100 text-orange-800' :
+          'bg-gray-100 text-gray-800'
+        }`}>
+          {getStatusText()}
+        </div>
+      )}
+      
+      {/* Call button */}
       <button
         onClick={handleCall}
         disabled={isCalling || isCallActive()}

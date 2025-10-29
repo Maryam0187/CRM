@@ -247,6 +247,9 @@ export const SocketProvider = ({ children }) => {
     socketInstance.on('call_status_update', (data) => {
       console.log('📞 Call status update received:', data);
       console.log('📞 Socket.IO event data:', JSON.stringify(data, null, 2));
+      console.log('📞 Current user ID:', user?.id);
+      console.log('📞 Call agent ID:', data.agentId);
+      console.log('📞 Is this call for current user?', user?.id === data.agentId);
       
       // Update call status in state
       setCallStatusUpdates(prev => {
@@ -262,34 +265,6 @@ export const SocketProvider = ({ children }) => {
       });
       console.log('📞 Dispatching custom event:', callStatusEvent);
       window.dispatchEvent(callStatusEvent);
-
-      // Show toast notification for important status changes
-      if (['completed', 'failed', 'busy', 'no-answer'].includes(data.status)) {
-        const statusMessages = {
-          'completed': `Call completed (${data.duration ? Math.floor(data.duration / 60) + ':' + (data.duration % 60).toString().padStart(2, '0') : 'N/A'})`,
-          'failed': 'Call failed',
-          'busy': 'Call failed - Line busy',
-          'no-answer': 'Call failed - No answer'
-        };
-
-        const toastNotification = {
-          id: `call_${data.callSid}_${Date.now()}`,
-          type: 'call_status',
-          title: 'Call Status Update',
-          message: statusMessages[data.status] || `Call status: ${data.status}`,
-          timestamp: new Date().toISOString(),
-          callSid: data.callSid,
-          status: data.status
-        };
-
-        setToastNotifications(prev => {
-          const exists = prev.some(n => n.callSid === data.callSid && n.status === data.status);
-          if (exists) {
-            return prev;
-          }
-          return [toastNotification, ...prev.slice(0, 4)];
-        });
-      }
     });
 
     setSocket(socketInstance);
