@@ -58,100 +58,48 @@ export async function GET(request) {
           result = await SaleService.findByAgentPaginated(parseInt(agentId), page, limit);
         }
       } else {
-        // Show all supervised agents' sales
-        const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(user.id);
-        const agentIds = supervisedAgents.map(agent => agent.id);
-      
-      if (agentIds.length === 0) {
-        result = {
-          data: [],
-          pagination: {
-            currentPage: page,
-            totalPages: 0,
-            totalItems: 0,
-            itemsPerPage: limit,
-            hasNextPage: false,
-            hasPrevPage: false
-          }
-        };
-      } else {
-        // Get all sales first, then filter by supervised agents
-        let allSales;
+        // Show only supervisor's own sales when no agentId is provided
+        console.log('🔍 Supervisor API - Showing supervisor\'s own sales only. Supervisor ID:', user.id);
+        
+        // Get supervisor's own sales
         if (status && dateFilter) {
-          allSales = await SaleService.findByStatusAndDate(status, dateFilter, dateField);
+          result = await SaleService.findByAgentStatusAndDatePaginated(user.id, status, dateFilter, page, limit, dateField);
         } else if (status) {
-          allSales = await SaleService.findByStatus(status);
+          result = await SaleService.findByAgentStatusPaginated(user.id, status, page, limit);
         } else if (dateFilter) {
-          allSales = await SaleService.findByDate(dateFilter, dateField);
+          result = await SaleService.findByAgentDatePaginated(user.id, dateFilter, page, limit, dateField);
         } else {
-          allSales = await SaleService.findAll();
+          result = await SaleService.findByAgentPaginated(user.id, page, limit);
         }
-        
-        // Filter by supervised agents and sort by updatedAt DESC
-        const filteredSales = allSales
-          .filter(sale => agentIds.includes(sale.agentId))
-          .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
-        
-        // Apply pagination manually
-        const startIndex = (page - 1) * limit;
-        const endIndex = startIndex + limit;
-        const paginatedData = filteredSales.slice(startIndex, endIndex);
-        
-        result = {
-          data: paginatedData,
-          pagination: {
-            currentPage: page,
-            totalPages: Math.ceil(filteredSales.length / limit),
-            totalItems: filteredSales.length,
-            itemsPerPage: limit,
-            hasNextPage: page < Math.ceil(filteredSales.length / limit),
-            hasPrevPage: page > 1
-          }
-        };
-      }
       }
     } else if (user.role === 'agent') {
-      // Agent can only see their own sales
-      let allSales;
-      if (status && dateFilter) {
-        allSales = await SaleService.findByStatusAndDate(status, dateFilter, dateField);
+      // SECURITY: Agent can only see their own sales
+      // Always require dateFilter for agents to prevent fetching all sales
+      // If no dateFilter provided, default to 'today' for security
+      const effectiveDateFilter = dateFilter || 'today';
+      const effectiveDateField = dateField || 'created_at';
+      
+      // Use agent-specific methods that directly query only this agent's sales
+      // This is more secure and efficient than fetching all sales and filtering
+      // These methods ensure the agent can NEVER access other agents' sales
+      if (status && effectiveDateFilter) {
+        result = await SaleService.findByAgentStatusAndDatePaginated(user.id, status, effectiveDateFilter, page, limit, effectiveDateField);
       } else if (status) {
-        allSales = await SaleService.findByStatus(status);
-      } else if (dateFilter) {
-        allSales = await SaleService.findByDate(dateFilter, dateField);
+        result = await SaleService.findByAgentStatusPaginated(user.id, status, page, limit);
+      } else if (effectiveDateFilter) {
+        result = await SaleService.findByAgentDatePaginated(user.id, effectiveDateFilter, page, limit, effectiveDateField);
       } else {
-        allSales = await SaleService.findAll();
+        // Fallback: use agent-specific method without date filter (should not happen with effectiveDateFilter default)
+        result = await SaleService.findByAgentPaginated(user.id, page, limit);
       }
-      
-      // Filter by agent ID and sort by updatedAt DESC
-      const filteredSales = allSales
-        .filter(sale => sale.agentId === user.id)
-        .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
-      
-      // Apply pagination manually
-      const startIndex = (page - 1) * limit;
-      const endIndex = startIndex + limit;
-      const paginatedData = filteredSales.slice(startIndex, endIndex);
-      
-      result = {
-        data: paginatedData,
-        pagination: {
-          currentPage: page,
-          totalPages: Math.ceil(filteredSales.length / limit),
-          totalItems: filteredSales.length,
-          itemsPerPage: limit,
-          hasNextPage: page < Math.ceil(filteredSales.length / limit),
-          hasPrevPage: page > 1
-        }
-      };
     } else {
       // Default behavior for other roles or no role specified
       if (status && dateFilter) {
-        result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit);
+        result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit, dateField);
       } else if (status) {
         result = await SaleService.findByStatusPaginated(status, page, limit);
       } else if (dateFilter) {
-        result = await SaleService.findByDatePaginated(dateFilter, page, limit);
+        result = await SaleService.findByDatePaginated(dateFilter, page, limit, dateField);
       } else {
         result = await SaleService.findAllPaginated(page, limit);
       }

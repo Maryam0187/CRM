@@ -23,49 +23,35 @@ export default function AppointmentSummary() {
     try {
       setLoading(true);
       
-      // Build API URL based on user role
-      let apiUrl = '/api/sales';
+      // Use lightweight dashboard appointments API - optimized for counts only
       const params = new URLSearchParams();
       
-      // JWT authentication handles user identification - no need for userId/userRole params
-      console.log('Fetching appointments for user:', user.first_name, 'role:', user.role);
+      // Filter by appointmentDateTime from today onwards (greater than today)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayStr = today.toISOString().split('T')[0];
       
-      if (params.toString()) {
-        apiUrl += `?${params.toString()}`;
-      }
+      // Use "greater than today" filter for future appointments
+      params.append('dateFilter', `>${todayStr}`);
+      params.append('dateField', 'appointmentDateTime');
+      
+      const apiUrl = `/api/appointments/dashboard?${params.toString()}`;
+      console.log('Fetching appointment summary for dashboard:', user.first_name, 'role:', user.role);
       
       const response = await apiClient.get(apiUrl);
       const data = await response.json();
       
       if (data.success) {
-        const sales = data.data || [];
-        const appointmentsWithDates = sales.filter(sale => sale.appointmentDateTime);
+        const dashboardData = data.data;
         
-        // Sort by appointment date
-        const sortedAppointments = appointmentsWithDates.sort((a, b) => 
-          new Date(a.appointmentDateTime) - new Date(b.appointmentDateTime)
-        );
+        // Set counts and next appointment directly from API
+        setTodayCount(dashboardData.todayCount);
+        setUpcomingCount(dashboardData.upcomingCount);
+        setNextAppointment(dashboardData.nextAppointment);
         
-        setAppointments(sortedAppointments);
-        
-        // Calculate upcoming appointments (future appointments only)
-        const now = new Date();
-        const futureAppointments = sortedAppointments.filter(appointment => 
-          new Date(appointment.appointmentDateTime) > now
-        );
-        
-        // Calculate today's upcoming appointments (future appointments that are today)
-        const today = new Date();
-        const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
-        
-        const todayUpcomingAppointments = futureAppointments.filter(appointment => {
-          const appointmentDate = new Date(appointment.appointmentDateTime);
-          return appointmentDate < todayEnd;
-        });
-        
-        setTodayCount(todayUpcomingAppointments.length);
-        setUpcomingCount(futureAppointments.length);
-        setNextAppointment(futureAppointments[0] || null);
+        // For display purposes, create a minimal appointments array
+        // This is only used for the appointments state, not for heavy processing
+        setAppointments(dashboardData.nextAppointment ? [dashboardData.nextAppointment] : []);
       }
     } catch (error) {
       console.error('Error fetching appointments:', error);

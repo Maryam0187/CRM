@@ -49,7 +49,7 @@ export default function Home() {
   // Supervisor-specific state
   const [supervisedAgents, setSupervisedAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
-  const [showingSupervisorSales, setShowingSupervisorSales] = useState(true); // Default to showing supervisor's own sales
+  const [showingSupervisorSales, setShowingSupervisorSales] = useState(undefined); // Only set for supervisors
   
   
   // Timeline modal state
@@ -81,11 +81,15 @@ export default function Home() {
     try {
       console.log('fetchSalesData called with user:', user?.role, 'showingSupervisorSales:', showingSupervisorSales, 'selectedAgent:', selectedAgent?.id);
       
+      // Ensure we always have a date filter - default to 'today' if none provided
+      const effectiveDateFilter = dateFilterValue || 'today';
+      const effectiveDateField = dateFieldValue || 'created_at';
+      
       // Build URL with filters
       const params = new URLSearchParams();
       if (statusFilter) params.append('status', statusFilter);
-      if (dateFilterValue) params.append('dateFilter', dateFilterValue);
-      if (dateFieldValue) params.append('dateField', dateFieldValue);
+      params.append('dateFilter', effectiveDateFilter);
+      params.append('dateField', effectiveDateField);
       
       // Add pagination parameters
       params.append('page', page.toString());
@@ -129,7 +133,7 @@ export default function Home() {
     }
   };
 
-  // Initialize supervised agents for supervisors from session data
+  // Initialize supervised agents for supervisors
   useEffect(() => {
     if (user?.role === 'supervisor') {
       initializeSupervisedAgents();
@@ -139,18 +143,24 @@ export default function Home() {
     }
   }, [user]);
 
-  // Load sales data on component mount and when status, date filter, date field, selected agent, or pagination changes
+  // Load sales data when user, filters, pagination, or supervisor view changes
   useEffect(() => {
-    if (user?.role === 'supervisor') {
-      // For supervisors, always load data (default to their own sales)
-      // Only fetch if we have the proper state initialized
+    // Only fetch data if user is loaded and we have valid filters
+    if (!user?.role) return;
+    
+    if (user.role === 'supervisor') {
+      // Only fetch for supervisors if showingSupervisorSales is set (initialized)
       if (showingSupervisorSales !== undefined) {
         fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField);
       }
-    } else if (user?.role && user?.role !== 'supervisor') {
+    } else {
+      // For agents and admins, fetch data directly (no supervisor dependencies)
       fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField);
     }
-  }, [user, status, dateFilter, dateField, selectedAgent, showingSupervisorSales, currentPage, itemsPerPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, status, dateFilter, dateField, currentPage, itemsPerPage, 
+      // Supervisor-specific dependencies only trigger for supervisors due to conditional logic above
+      selectedAgent, showingSupervisorSales]);
 
 
   // Handler functions for supervisor interface
