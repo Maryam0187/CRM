@@ -52,6 +52,39 @@ export default function Home() {
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [showingSupervisorSales, setShowingSupervisorSales] = useState(undefined); // Only set for supervisors
   
+  // Load supervisor view state from localStorage
+  const loadSupervisorViewState = () => {
+    try {
+      const savedState = localStorage.getItem('supervisorViewState');
+      if (savedState) {
+        const parsed = JSON.parse(savedState);
+        return {
+          showingSupervisorSales: parsed.showingSupervisorSales ?? true,
+          selectedAgentId: parsed.selectedAgentId ?? null
+        };
+      }
+    } catch (error) {
+      console.error('Error loading supervisor view state from localStorage:', error);
+    }
+    
+    return {
+      showingSupervisorSales: true,
+      selectedAgentId: null
+    };
+  };
+  
+  // Save supervisor view state to localStorage
+  const saveSupervisorViewState = (showingOwnSales, agentId) => {
+    try {
+      localStorage.setItem('supervisorViewState', JSON.stringify({
+        showingSupervisorSales: showingOwnSales,
+        selectedAgentId: agentId
+      }));
+    } catch (error) {
+      console.error('Error saving supervisor view state to localStorage:', error);
+    }
+  };
+  
   // Admin-specific state
   const [allUsers, setAllUsers] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState(null);
@@ -73,9 +106,21 @@ export default function Home() {
     
     setSupervisedAgents(agentsData);
     
-    // Set first agent as default selected if available
-    if (agentsData.length > 0) {
-      setSelectedAgent(agentsData[0].agent);
+    // Load saved view state from localStorage
+    const savedState = loadSupervisorViewState();
+    setShowingSupervisorSales(savedState.showingSupervisorSales);
+    
+    // Restore selected agent if one was saved and it still exists in supervised agents
+    if (savedState.selectedAgentId && !savedState.showingSupervisorSales) {
+      const savedAgent = agentsData.find(item => item.agent.id === savedState.selectedAgentId);
+      if (savedAgent) {
+        setSelectedAgent(savedAgent.agent);
+      } else {
+        // Saved agent no longer exists, fall back to first agent or null
+        setSelectedAgent(agentsData.length > 0 ? agentsData[0].agent : null);
+      }
+    } else {
+      setSelectedAgent(null);
     }
   };
 
@@ -170,9 +215,6 @@ export default function Home() {
   useEffect(() => {
     if (user?.role === 'supervisor') {
       initializeSupervisedAgents();
-      // Ensure supervisor starts with their own sales view
-      setShowingSupervisorSales(true);
-      setSelectedAgent(null);
     }
   }, [user]);
 
@@ -182,6 +224,13 @@ export default function Home() {
       fetchAllUsers();
     }
   }, [user]);
+
+  // Save supervisor view state to localStorage whenever it changes
+  useEffect(() => {
+    if (user?.role === 'supervisor' && showingSupervisorSales !== undefined) {
+      saveSupervisorViewState(showingSupervisorSales, selectedAgent?.id || null);
+    }
+  }, [user, showingSupervisorSales, selectedAgent]);
 
   // Load sales data when user, filters, pagination, or supervisor view changes
   useEffect(() => {
@@ -211,12 +260,16 @@ export default function Home() {
     setSelectedAgent(agent);
     setShowingSupervisorSales(false);
     setCurrentPage(1); // Reset to first page when switching agents
+    // Save to localStorage
+    saveSupervisorViewState(false, agent?.id || null);
   };
 
   const handleShowSupervisorSales = () => {
     setShowingSupervisorSales(true);
     setSelectedAgent(null);
     setCurrentPage(1); // Reset to first page when switching views
+    // Save to localStorage
+    saveSupervisorViewState(true, null);
   };
 
   // Handler functions for admin interface
@@ -488,11 +541,28 @@ export default function Home() {
       </div>
       </div>
 
-      {/* Supervisor Agent Selection Interface */}
-      {user?.role === 'supervisor' && (
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div className="flex flex-wrap items-center gap-3">
+        {/* Main Content */}
+        <div className="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        {/* Appointment Summary */}
+        <div className="mb-8">
+          <AppointmentSummary />
+        </div>
+
+        {/* Date Filter */}
+        <div className="mb-8 flex justify-center">
+          <DateFilter 
+            onFilterChange={handleFilterChange} 
+            onDateFieldChange={(field) => updateFilter('dateField', field)}
+            value={dateFilter} 
+            dateField={dateField}
+          />
+        </div>
+
+        {/* Supervisor Agent Selection Interface */}
+        {user?.role === 'supervisor' && (
+          <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div className="flex flex-wrap items-center gap-3 mb-3">
               <span className="text-sm font-medium text-gray-700">View sales for:</span>
               
               {/* Me Button */}
@@ -507,7 +577,7 @@ export default function Home() {
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                Me ({user?.first_name})
+                Me (supervisor)
               </button>
               
               {/* Agent Buttons */}
@@ -534,7 +604,7 @@ export default function Home() {
             </div>
             
             {/* Current View Indicator */}
-            <div className="mt-3 text-sm text-gray-600">
+            <div className="text-sm text-gray-600">
               {showingSupervisorSales ? (
                 <span>Showing your sales data</span>
               ) : selectedAgent ? (
@@ -546,26 +616,7 @@ export default function Home() {
               )}
             </div>
           </div>
-        </div>
-      )}
-
-        {/* Main Content */}
-        <div className="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
-        {/* Appointment Summary */}
-        <div className="mb-8">
-          <AppointmentSummary />
-        </div>
-
-        {/* Date Filter */}
-        <div className="mb-8 flex justify-center">
-          <DateFilter 
-            onFilterChange={handleFilterChange} 
-            onDateFieldChange={(field) => updateFilter('dateField', field)}
-            value={dateFilter} 
-            dateField={dateField}
-          />
-        </div>
+        )}
 
         {/* Sales Data Table */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
