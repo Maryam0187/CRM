@@ -723,33 +723,35 @@ export default function Home() {
                 />
                 
                 {/* Pagination Controls */}
-                {paginationInfo.totalPages > 1 && (
-                  <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    {/* Items per page selector */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-700">Show:</span>
-                      <select
-                        value={itemsPerPage}
-                        onChange={(e) => handleItemsPerPageChange(parseInt(e.target.value))}
-                        disabled={loading}
-                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <option value={5}>5</option>
-                        <option value={10}>10</option>
-                        <option value={20}>20</option>
-                        <option value={50}>50</option>
-                      </select>
-                      <span className="text-sm text-gray-700">per page</span>
-                    </div>
+                <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  {/* Items per page selector - Always visible */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-700">Show:</span>
+                    <select
+                      value={itemsPerPage}
+                      onChange={(e) => handleItemsPerPageChange(parseInt(e.target.value))}
+                      disabled={loading}
+                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value={5}>5</option>
+                      <option value={10}>10</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                    </select>
+                    <span className="text-sm text-gray-700">per page</span>
+                  </div>
 
-                    {/* Pagination info */}
+                  {/* Pagination info - Always visible if there are results */}
+                  {paginationInfo.totalItems > 0 && (
                     <div className="text-sm text-gray-700">
                       Showing {((paginationInfo.currentPage - 1) * paginationInfo.itemsPerPage) + 1} to{' '}
                       {Math.min(paginationInfo.currentPage * paginationInfo.itemsPerPage, paginationInfo.totalItems)} of{' '}
                       {paginationInfo.totalItems} results
                     </div>
+                  )}
 
-                    {/* Pagination buttons */}
+                  {/* Pagination buttons - Only show when there's more than 1 page */}
+                  {paginationInfo.totalPages > 1 && (
                     <div className="flex items-center gap-2">
                       <button
                         onClick={handlePreviousPage}
@@ -798,8 +800,8 @@ export default function Home() {
                         Next
                       </button>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </>
             )}
           </div>
