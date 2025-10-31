@@ -11,6 +11,7 @@ import AppointmentSummary from './AppointmentSummary';
 import { useAuth } from '../contexts/AuthContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
 import apiClient from '../lib/apiClient';
+import { SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName } from '../lib/salesStatuses';
 
 export default function Home() {
   const router = useRouter();
@@ -209,13 +210,8 @@ export default function Home() {
       header: 'Status',
       key: 'status',
       render: (value) => (
-        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-          value === 'active' ? 'bg-green-100 text-green-800' :
-          value === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-          value === 'completed' ? 'bg-blue-100 text-blue-800' :
-          'bg-red-100 text-red-800'
-        }`}>
-          {value ? value.charAt(0).toUpperCase() + value.slice(1) : 'N/A'}
+        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeClasses(value || '')}`}>
+          {getStatusDisplayName(value) || 'N/A'}
         </span>
       )
     },
@@ -548,10 +544,11 @@ export default function Home() {
                   className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <option value="">All Statuses</option>
-                  <option value="active">Active</option>
-                  <option value="pending">Pending</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
+                  {SALES_STATUS_ARRAY.map((statusValue) => (
+                    <option key={statusValue} value={statusValue}>
+                      {getStatusDisplayName(statusValue)}
+                    </option>
+                  ))}
                 </select>
                 <button
                   onClick={clearStatus}

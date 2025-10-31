@@ -25,7 +25,7 @@ import {
   validateCurrency 
 } from '../lib/validation.js';
 import { useToast } from '../contexts/ToastContext';
-import { SALES_STATUSES, getStepForStatus, getStatusDisplayName, getStatusColorClass } from '../lib/salesStatuses.js';
+import { SALES_STATUSES, getStepForStatus, getStatusDisplayName, getStatusColorClass, getStatusBadgeClasses } from '../lib/salesStatuses.js';
 
 // Helper function to calculate time ago
 const getTimeAgo = (dateString) => {
@@ -4417,14 +4417,8 @@ Room: `;
                               <div className="text-xs text-gray-600 mt-1 space-y-1">
                                 <div><strong>Last Sale:</strong> ID {customer.lastSale.id} • {new Date(customer.lastSale.created_at).toLocaleDateString()} <span className="text-blue-600 font-medium">({getTimeAgo(customer.lastSale.created_at)})</span></div>
                                 <div><strong>Status:</strong> 
-                                  <span className={`ml-1 px-1 py-0.5 text-xs rounded ${
-                                    customer.lastSale.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                    customer.lastSale.status === 'active' ? 'bg-blue-100 text-blue-800' :
-                                    customer.lastSale.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                    customer.lastSale.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                                    'bg-gray-100 text-gray-800'
-                                  }`}>
-                                    {customer.lastSale.status}
+                                  <span className={`ml-1 px-1 py-0.5 text-xs rounded ${getStatusBadgeClasses(customer.lastSale.status || '')}`}>
+                                    {getStatusDisplayName(customer.lastSale.status) || customer.lastSale.status}
                                   </span>
                                 </div>
                                 {customer.lastSale.agent && user && 
