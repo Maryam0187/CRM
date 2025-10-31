@@ -63,6 +63,14 @@ export default function Navbar() {
               >
                 My Dashboard
               </Link>
+              {isAuthenticated && (user?.role === 'agent' || user?.role === 'supervisor') && (
+                <Link
+                  href="/customers"
+                  className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                >
+                  Customers
+                </Link>
+              )}
               {isAuthenticated && isAdmin(user) && (
                 <>
                   <Link
@@ -202,6 +210,15 @@ export default function Navbar() {
             >
               My Dashboard
             </Link>
+            {isAuthenticated && (user?.role === 'agent' || user?.role === 'supervisor') && (
+              <Link
+                href="/customers"
+                className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                Customers
+              </Link>
+            )}
             {isAuthenticated && isAdmin(user) && (
               <>
                 <Link
