@@ -26,15 +26,29 @@ export async function GET(request) {
     
     // Role-based data filtering with pagination
     if (user.role === 'admin') {
-      // Admin can see all sales
-      if (status && dateFilter) {
-        result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit, dateField);
-      } else if (status) {
-        result = await SaleService.findByStatusPaginated(status, page, limit);
-      } else if (dateFilter) {
-        result = await SaleService.findByDatePaginated(dateFilter, page, limit, dateField);
+      // Admin can see all sales or filter by specific agent
+      if (agentId) {
+        // Show specific agent's sales
+        if (status && dateFilter) {
+          result = await SaleService.findByAgentStatusAndDatePaginated(parseInt(agentId), status, dateFilter, page, limit, dateField);
+        } else if (status) {
+          result = await SaleService.findByAgentStatusPaginated(parseInt(agentId), status, page, limit);
+        } else if (dateFilter) {
+          result = await SaleService.findByAgentDatePaginated(parseInt(agentId), dateFilter, page, limit, dateField);
+        } else {
+          result = await SaleService.findByAgentPaginated(parseInt(agentId), page, limit);
+        }
       } else {
-        result = await SaleService.findAllPaginated(page, limit);
+        // Show all sales when no agentId provided
+        if (status && dateFilter) {
+          result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit, dateField);
+        } else if (status) {
+          result = await SaleService.findByStatusPaginated(status, page, limit);
+        } else if (dateFilter) {
+          result = await SaleService.findByDatePaginated(dateFilter, page, limit, dateField);
+        } else {
+          result = await SaleService.findAllPaginated(page, limit);
+        }
       }
     } else if (user.role === 'supervisor') {
       // Supervisor can see their agents' sales or specific agent's sales

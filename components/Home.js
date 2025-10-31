@@ -52,6 +52,10 @@ export default function Home() {
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [showingSupervisorSales, setShowingSupervisorSales] = useState(undefined); // Only set for supervisors
   
+  // Admin-specific state
+  const [allUsers, setAllUsers] = useState([]);
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  
   
   // Timeline modal state
   const [isTimelineModalVisible, setIsTimelineModalVisible] = useState(false);
@@ -72,6 +76,29 @@ export default function Home() {
     // Set first agent as default selected if available
     if (agentsData.length > 0) {
       setSelectedAgent(agentsData[0].agent);
+    }
+  };
+
+  // Fetch all users for admin filter
+  const fetchAllUsers = async () => {
+    if (user?.role !== 'admin') return;
+    
+    try {
+      const response = await apiClient.get('/api/users');
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        const users = result.data.map(u => ({
+          id: u.id,
+          firstName: u.firstName || u.first_name || '',
+          lastName: u.lastName || u.last_name || '',
+          email: u.email,
+          role: u.role
+        }));
+        setAllUsers(users);
+      }
+    } catch (error) {
+      console.error('Error fetching users for admin filter:', error);
     }
   };
 
@@ -106,8 +133,13 @@ export default function Home() {
           // Default to all supervised agents' sales - no additional parameters needed
           console.log('Supervisor API: Showing all supervised agents sales for', user.first_name);
         }
+      } else if (user?.role === 'admin') {
+        // For admins, show selected user's sales or all sales
+        if (selectedUserId) {
+          params.append('agentId', selectedUserId);
+        }
       } else {
-        // For other roles, show their own data - no additional parameters needed (JWT handles authentication)
+        // For agents, show their own data - no additional parameters needed (JWT handles authentication)
         console.log('API: Showing user data for', user.first_name, 'role:', user.role);
       }
       
@@ -144,6 +176,13 @@ export default function Home() {
     }
   }, [user]);
 
+  // Fetch all users for admin filter
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      fetchAllUsers();
+    }
+  }, [user]);
+
   // Load sales data when user, filters, pagination, or supervisor view changes
   useEffect(() => {
     // Only fetch data if user is loaded and we have valid filters
@@ -154,14 +193,17 @@ export default function Home() {
       if (showingSupervisorSales !== undefined) {
         fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField);
       }
+    } else if (user.role === 'admin') {
+      // For admins, pass selectedUserId as agentId parameter
+      fetchSalesData(status, dateFilter, selectedUserId, currentPage, itemsPerPage, dateField);
     } else {
-      // For agents and admins, fetch data directly (no supervisor dependencies)
+      // For agents, fetch data directly (no supervisor dependencies)
       fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, status, dateFilter, dateField, currentPage, itemsPerPage, 
       // Supervisor-specific dependencies only trigger for supervisors due to conditional logic above
-      selectedAgent, showingSupervisorSales]);
+      selectedAgent, showingSupervisorSales, selectedUserId]);
 
 
   // Handler functions for supervisor interface
@@ -175,6 +217,18 @@ export default function Home() {
     setShowingSupervisorSales(true);
     setSelectedAgent(null);
     setCurrentPage(1); // Reset to first page when switching views
+  };
+
+  // Handler functions for admin interface
+  const handleUserSelect = (e) => {
+    const userId = e.target.value ? parseInt(e.target.value) : null;
+    setSelectedUserId(userId);
+    setCurrentPage(1); // Reset to first page when switching users
+  };
+
+  const clearUserFilter = () => {
+    setSelectedUserId(null);
+    setCurrentPage(1); // Reset to first page when clearing filter
   };
 
   // Pagination control functions
@@ -523,7 +577,7 @@ export default function Home() {
                   {loading ? 'Loading sales data...' : `Showing ${salesData.length} sales`}
                 </p>
               </div>
-               {/* Status Filter */}
+               {/* Status Filter and User Filter (for Admin) */}
             <div className="flex gap-2 justify-end mb-6">
             <button
                   onClick={handleRefresh}
@@ -535,27 +589,58 @@ export default function Home() {
                   </svg>
                   Refresh
                 </button>
-              <div className="min-w-[250px] flex gap-2">
-                <select
-                  id="status"
-                  value={status}
-                  onChange={handleStatusChange}
-                  disabled={loading}
-                  className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <option value="">All Statuses</option>
-                  {SALES_STATUS_ARRAY.map((statusValue) => (
-                    <option key={statusValue} value={statusValue}>
-                      {getStatusDisplayName(statusValue)}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={clearStatus}
-                  className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
-                >
-                  Clear
-                </button>
+              <div className="flex gap-2">
+                {/* User Filter (Admin only) */}
+                {user?.role === 'admin' && (
+                  <div className="min-w-[200px] flex gap-2">
+                    <select
+                      id="user"
+                      value={selectedUserId || ''}
+                      onChange={handleUserSelect}
+                      disabled={loading}
+                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">All Users</option>
+                      {allUsers.map((userItem) => (
+                        <option key={userItem.id} value={userItem.id}>
+                          {userItem.firstName} {userItem.lastName} ({userItem.role})
+                        </option>
+                      ))}
+                    </select>
+                    {selectedUserId && (
+                      <button
+                        onClick={clearUserFilter}
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
+                        title="Clear user filter"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                )}
+                {/* Status Filter */}
+                <div className="min-w-[250px] flex gap-2">
+                  <select
+                    id="status"
+                    value={status}
+                    onChange={handleStatusChange}
+                    disabled={loading}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <option value="">All Statuses</option>
+                    {SALES_STATUS_ARRAY.map((statusValue) => (
+                      <option key={statusValue} value={statusValue}>
+                        {getStatusDisplayName(statusValue)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={clearStatus}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
             </div>
             </div>
