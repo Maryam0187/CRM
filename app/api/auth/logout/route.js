@@ -6,6 +6,9 @@ const UserTimeTracker = require('../../../../lib/userTimeTracker');
 
 export async function POST(request) {
   try {
+    // Get location from request body if provided
+    const { location } = await request.json().catch(() => ({}));
+    
     // Get authorization header
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -40,21 +43,43 @@ export async function POST(request) {
           const logoutTime = new Date();
           const oldStatus = user.status || 'online';
           
-          // Always update lastLogoutTime on logout - this is a new logout event
-          // Only update if logout time is after login time (to prevent incorrect ordering)
+          // Prepare update data
           const shouldUpdateLogout = !user.lastLoginTime || logoutTime >= new Date(user.lastLoginTime);
-          
-          await user.update({
+          const updateData = {
             status: 'offline',
             lastLogoutTime: shouldUpdateLogout ? logoutTime : user.lastLogoutTime
-          });
+          };
+
+          // Add location data if provided
+          if (location && location.latitude && location.longitude) {
+            updateData.latitude = location.latitude;
+            updateData.longitude = location.longitude;
+            updateData.locationAccuracy = location.accuracy || null;
+            updateData.locationTimestamp = logoutTime;
+          }
+          
+          await user.update(updateData);
           
           console.log(`User ${decoded.userId} logged out at ${logoutTime}`);
           
           // Log logout activity
           const ipAddress = UserActivityLogger.getIpAddress(request);
           const userAgent = UserActivityLogger.getUserAgent(request);
-          await UserActivityLogger.logLogout(user.id, ipAddress, userAgent);
+          const logoutMetadata = location ? {
+            location: {
+              latitude: location.latitude,
+              longitude: location.longitude,
+              accuracy: location.accuracy
+            }
+          } : null;
+          await UserActivityLogger.logActivity({
+            userId: user.id,
+            activityType: 'logout',
+            description: 'User logged out',
+            ipAddress,
+            userAgent,
+            metadata: logoutMetadata
+          });
           
           // Log status change if status changed
           if (oldStatus !== 'offline') {

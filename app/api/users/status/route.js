@@ -3,6 +3,7 @@ import { User } from '../../../../models';
 import jwt from 'jsonwebtoken';
 const UserActivityLogger = require('../../../../lib/userActivityLogger');
 const UserTimeTracker = require('../../../../lib/userTimeTracker');
+const socketManager = require('../../../../lib/socket');
 
 /**
  * Update user status
@@ -69,6 +70,9 @@ export async function PUT(request) {
       const statusChangeTime = new Date();
       await UserTimeTracker.endOngoingSessions(user.id, statusChangeTime);
       await UserTimeTracker.startSession(user.id, status, statusChangeTime);
+
+      // Broadcast status change via socket
+      socketManager.broadcastUserStatusChange(user.id, status);
 
       return NextResponse.json({
         success: true,

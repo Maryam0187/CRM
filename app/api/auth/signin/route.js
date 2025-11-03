@@ -6,7 +6,7 @@ const UserTimeTracker = require('../../../../lib/userTimeTracker');
 
 export async function POST(request) {
   try {
-    const { email, password } = await request.json();
+    const { email, password, location } = await request.json();
 
     // Validate input
     if (!email || !password) {
@@ -75,11 +75,22 @@ export async function POST(request) {
     const loginTime = new Date();
     const oldStatus = user.status || 'offline';
     
-    // Always update lastLoginTime on login - this is a new login event
-    await user.update({
+    // Prepare update data
+    const updateData = {
       status: 'online',
       lastLoginTime: loginTime
-    });
+    };
+
+    // Add location data if provided
+    if (location && location.latitude && location.longitude) {
+      updateData.latitude = location.latitude;
+      updateData.longitude = location.longitude;
+      updateData.locationAccuracy = location.accuracy || null;
+      updateData.locationTimestamp = loginTime;
+    }
+
+    // Always update lastLoginTime on login - this is a new login event
+    await user.update(updateData);
 
     // Refresh user data to get updated values
     await user.reload();
@@ -87,7 +98,21 @@ export async function POST(request) {
     // Log login activity
     const ipAddress = UserActivityLogger.getIpAddress(request);
     const userAgent = UserActivityLogger.getUserAgent(request);
-    await UserActivityLogger.logLogin(user.id, ipAddress, userAgent);
+    const loginMetadata = location ? {
+      location: {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy
+      }
+    } : null;
+    await UserActivityLogger.logActivity({
+      userId: user.id,
+      activityType: 'login',
+      description: 'User logged in',
+      ipAddress,
+      userAgent,
+      metadata: loginMetadata
+    });
     
     // Log status change if status changed
     if (oldStatus !== 'online') {
@@ -137,6 +162,11 @@ export async function POST(request) {
       last_login_time: user.lastLoginTime || loginTime,
       last_logout_time: user.lastLogoutTime,
       created_at: userDataValues.created_at,
+      latitude: user.latitude,
+      longitude: user.longitude,
+      location_accuracy: user.locationAccuracy,
+      location_timestamp: user.locationTimestamp,
+      location_permission: user.locationPermission,
       supervisor: supervisorInfo,
       supervisedAgents: supervisedAgents
     };

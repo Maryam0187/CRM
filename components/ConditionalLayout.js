@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import Navbar from './Navbar';
 import Footer from './Footer';
 import ActivityTracker from './ActivityTracker';
+import LocationPermissionPrompt from './LocationPermissionPrompt';
 
 export default function ConditionalLayout({ children }) {
   const pathname = usePathname();
@@ -26,6 +27,7 @@ export default function ConditionalLayout({ children }) {
         {children}
       </main>
       <Footer />
+      <LocationPermissionPrompt />
     </div>
   );
 }

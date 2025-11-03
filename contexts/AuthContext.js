@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { getUserSession, clearUserSession, isAuthenticated } from '../lib/auth';
+import { getUserLocation } from '../lib/geolocation';
 
 const AuthContext = createContext();
 
@@ -64,12 +65,27 @@ export function AuthProvider({ children }) {
     try {
       const token = accessToken || (typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null);
       if (token) {
+        // Try to get location (non-blocking)
+        let location = null;
+        try {
+          location = await getUserLocation({ timeout: 3000 });
+        } catch (locationError) {
+          console.warn('Could not get location for logout:', locationError.message);
+        }
+
         await fetch('/api/auth/logout', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
-          }
+          },
+          body: JSON.stringify({
+            location: location ? {
+              latitude: location.latitude,
+              longitude: location.longitude,
+              accuracy: location.accuracy
+            } : null
+          })
         }).catch(error => {
           // Don't block logout if API call fails
           console.error('Logout API call failed:', error);
@@ -126,6 +142,17 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const updateUser = (updatedData) => {
+    if (user) {
+      const newUserData = { ...user, ...updatedData };
+      setUser(newUserData);
+      // Update localStorage as well
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('user', JSON.stringify(newUserData));
+      }
+    }
+  };
+
   const value = {
     user,
     accessToken,
@@ -133,6 +160,7 @@ export function AuthProvider({ children }) {
     login,
     logout,
     refreshAccessToken,
+    updateUser,
     loading,
     isAuthenticated: !!user
   };

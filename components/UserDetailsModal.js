@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { apiClient } from '../lib/apiClient';
+import { useSocket } from '../contexts/SocketContext';
 
 export default function UserDetailsModal({ user, onClose }) {
+  const { socket, isConnected } = useSocket();
   const [activeTab, setActiveTab] = useState('activities');
   const [activities, setActivities] = useState([]);
   const [timeLogs, setTimeLogs] = useState([]);
@@ -47,6 +49,41 @@ export default function UserDetailsModal({ user, onClose }) {
   // Track if sales and call logs have been loaded
   const [salesLoaded, setSalesLoaded] = useState(false);
   const [callLogsLoaded, setCallLogsLoaded] = useState(false);
+  
+  // State for displaying current user status and permission
+  const [displayedUser, setDisplayedUser] = useState(user);
+
+  // Update displayed user when prop changes
+  useEffect(() => {
+    setDisplayedUser(user);
+  }, [user]);
+
+  // Listen for real-time status updates via socket
+  useEffect(() => {
+    if (!socket || !isConnected || !user) return;
+
+    const handleStatusChange = (data) => {
+      // Only update if this status change is for the displayed user
+      if (data.userId === user.id) {
+        setDisplayedUser(prev => ({ ...prev, status: data.status }));
+      }
+    };
+
+    const handlePermissionChange = (data) => {
+      // Only update if this permission change is for the displayed user
+      if (data.userId === user.id) {
+        setDisplayedUser(prev => ({ ...prev, location_permission: data.permission }));
+      }
+    };
+
+    socket.on('user_status_change', handleStatusChange);
+    socket.on('user_location_permission_changed', handlePermissionChange);
+
+    return () => {
+      socket.off('user_status_change', handleStatusChange);
+      socket.off('user_location_permission_changed', handlePermissionChange);
+    };
+  }, [socket, isConnected, user]);
 
   useEffect(() => {
     if (user) {
@@ -65,6 +102,7 @@ export default function UserDetailsModal({ user, onClose }) {
       fetchCallLogs();
     }
   }, [user, dateRange, callLogsPagination.offset, activeTab]);
+
 
   const fetchUserData = async () => {
     try {
@@ -249,6 +287,22 @@ export default function UserDetailsModal({ user, onClose }) {
     return labels[type] || type;
   };
 
+  const getLocationPermissionBadge = (permission) => {
+    const config = {
+      granted: { bg: 'bg-green-100', text: 'text-green-800', label: 'Granted' },
+      denied: { bg: 'bg-red-100', text: 'text-red-800', label: 'Denied' },
+      prompt: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Prompt' },
+      not_set: { bg: 'bg-gray-100', text: 'text-gray-800', label: 'Not Set' }
+    };
+    
+    const statusConfig = config[permission] || config.not_set;
+    return (
+      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusConfig.bg} ${statusConfig.text}`}>
+        {statusConfig.label}
+      </span>
+    );
+  };
+
 
   if (!user) return null;
 
@@ -394,7 +448,35 @@ export default function UserDetailsModal({ user, onClose }) {
                                   {activity.activityDescription}
                                 </p>
                               )}
-                              {activity.metadata && Object.keys(activity.metadata).length > 0 && (
+                              {activity.metadata && activity.metadata.location && (
+                                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                  <div className="flex items-start">
+                                    <svg className="w-4 h-4 mr-1 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                    <span className="text-xs text-gray-500">
+                                      {Number(activity.metadata.location.latitude)?.toFixed(4)}, {Number(activity.metadata.location.longitude)?.toFixed(4)}
+                                      {activity.metadata.location.accuracy && ` (±${activity.metadata.location.accuracy}m)`}
+                                    </span>
+                                  </div>
+                                  <a
+                                    href={`https://www.google.com/maps/search/?api=1&query=${Number(activity.metadata.location.latitude)},${Number(activity.metadata.location.longitude)}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                    </svg>
+                                    View on Map
+                                  </a>
+                                </div>
+                              )}
+                              {activity.metadata && Object.keys(activity.metadata).length > 0 && 
+                               !activity.metadata.location && 
+                               !(activity.metadata.oldStatus && activity.metadata.newStatus) && (
                                 <details className="mt-2">
                                   <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
                                     Show details
@@ -760,7 +842,7 @@ export default function UserDetailsModal({ user, onClose }) {
                     </div>
                     <div>
                       <p className="text-sm text-gray-500 mb-1">Current Status</p>
-                      {getStatusBadge(user.status)}
+                      {getStatusBadge(displayedUser.status)}
                     </div>
                     {user.phone && (
                       <div>
@@ -772,7 +854,61 @@ export default function UserDetailsModal({ user, onClose }) {
                       <p className="text-sm text-gray-500 mb-1">Created</p>
                       <p className="font-medium">{formatDate(user.created_at)}</p>
                     </div>
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1">Location Permission</p>
+                      {getLocationPermissionBadge(displayedUser.location_permission)}
+                    </div>
                   </div>
+
+                  {/* Location Information */}
+                  {user.latitude && user.longitude && (
+                    <div className="mt-6 border-t border-gray-200 pt-4">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                        <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        Location Information
+                      </h3>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <p className="text-sm text-gray-500 mb-1">Latitude</p>
+                          <p className="font-medium font-mono">{Number(user.latitude)?.toFixed(6)}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-500 mb-1">Longitude</p>
+                          <p className="font-medium font-mono">{Number(user.longitude)?.toFixed(6)}</p>
+                        </div>
+                        {user.location_accuracy && (
+                          <div>
+                            <p className="text-sm text-gray-500 mb-1">Accuracy</p>
+                            <p className="font-medium">{user.location_accuracy}m radius</p>
+                          </div>
+                        )}
+                        {user.location_timestamp && (
+                          <div>
+                            <p className="text-sm text-gray-500 mb-1">Last Updated</p>
+                            <p className="font-medium">{formatDate(user.location_timestamp)}</p>
+                          </div>
+                        )}
+                      </div>
+                      {user.latitude && user.longitude && (
+                        <div className="mt-4">
+                          <a
+                            href={`https://www.google.com/maps/search/?api=1&query=${Number(user.latitude)},${Number(user.longitude)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                          >
+                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                            View on Google Maps
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </>

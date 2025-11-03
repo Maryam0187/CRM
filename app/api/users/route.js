@@ -16,7 +16,7 @@ export async function GET(request) {
     }
 
     const users = await User.findAll({
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'cnic', 'phone', 'address', 'created_at', 'updated_at'],
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'cnic', 'phone', 'address', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'created_at', 'updated_at'],
       include: [
         {
           model: require('../../../models').SupervisorAgent,
@@ -54,6 +54,11 @@ export async function GET(request) {
         cnic: user.cnic,
         phone: user.phone,
         address: user.address,
+        latitude: user.latitude,
+        longitude: user.longitude,
+        location_accuracy: user.locationAccuracy,
+        location_timestamp: user.locationTimestamp,
+        location_permission: user.locationPermission,
         superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
         supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
         created_at: user.created_at,
