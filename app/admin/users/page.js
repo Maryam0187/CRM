@@ -3,9 +3,11 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
+import { useSocket } from '../../../contexts/SocketContext';
 import ProtectedRoute from '../../../components/ProtectedRoute';
 import AdminRoute from '../../../components/AdminRoute';
 import UserForm from '../../../components/UserForm';
+import UserDetailsModal from '../../../components/UserDetailsModal';
 import { apiClient } from '../../../lib/apiClient';
 
 
@@ -17,12 +19,35 @@ export default function AdminUsersPage() {
   const [error, setError] = useState('');
   const [showUserForm, setShowUserForm] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const { socket, isConnected } = useSocket();
 
   useEffect(() => {
     if (user) {
       fetchUsers();
     }
   }, [user]);
+
+  // Listen for real-time status updates
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+
+    const handleStatusChange = (data) => {
+      setUsers(prevUsers => 
+        prevUsers.map(u => 
+          u.id === data.userId 
+            ? { ...u, status: data.status }
+            : u
+        )
+      );
+    };
+
+    socket.on('user_status_change', handleStatusChange);
+
+    return () => {
+      socket.off('user_status_change', handleStatusChange);
+    };
+  }, [socket, isConnected]);
 
   const fetchUsers = async () => {
     if (!user) {
@@ -148,7 +173,10 @@ export default function AdminUsersPage() {
                       Supervisor
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
+                      Account Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Online Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Created
@@ -161,13 +189,17 @@ export default function AdminUsersPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {users.length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="px-6 py-4 text-center text-gray-500">
+                      <td colSpan="8" className="px-6 py-4 text-center text-gray-500">
                         No users found
                       </td>
                     </tr>
                   ) : (
                     users.map((userItem) => (
-                      <tr key={userItem.id} className="hover:bg-gray-50">
+                      <tr 
+                        key={userItem.id} 
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={() => setSelectedUser(userItem)}
+                      >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
                             <div className="flex-shrink-0 h-10 w-10">
@@ -208,11 +240,22 @@ export default function AdminUsersPage() {
                             {userItem.is_active ? 'Active' : 'Inactive'}
                           </span>
                         </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            userItem.status === 'online' ? 'bg-green-100 text-green-800' :
+                            userItem.status === 'away' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {userItem.status === 'online' ? '🟢 Online' :
+                             userItem.status === 'away' ? '🟡 Away' :
+                             '⚫ Offline'}
+                          </span>
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {new Date(userItem.created_at).toLocaleDateString()}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <div className="flex space-x-2">
+                          <div className="flex space-x-2" onClick={(e) => e.stopPropagation()}>
                             <button
                               onClick={() => handleEditUser(userItem)}
                               className="text-blue-600 hover:text-blue-900"
@@ -245,6 +288,14 @@ export default function AdminUsersPage() {
             user={editingUser}
             onClose={handleUserFormClose}
             onSuccess={handleUserFormClose}
+          />
+        )}
+
+        {/* User Details Modal */}
+        {selectedUser && (
+          <UserDetailsModal
+            user={selectedUser}
+            onClose={() => setSelectedUser(null)}
           />
         )}
 

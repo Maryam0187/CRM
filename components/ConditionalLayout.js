@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import Navbar from './Navbar';
 import Footer from './Footer';
+import ActivityTracker from './ActivityTracker';
 
 export default function ConditionalLayout({ children }) {
   const pathname = usePathname();
@@ -19,6 +20,7 @@ export default function ConditionalLayout({ children }) {
   // For all other pages, render with navbar and footer
   return (
     <div className="min-h-screen flex flex-col">
+      <ActivityTracker />
       <Navbar />
       <main className="flex-1 pt-16">
         {children}

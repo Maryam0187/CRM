@@ -59,7 +59,28 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // Call logout API to update server-side status and log activity
+    try {
+      const token = accessToken || (typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null);
+      if (token) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }).catch(error => {
+          // Don't block logout if API call fails
+          console.error('Logout API call failed:', error);
+        });
+      }
+    } catch (error) {
+      // Don't block logout if API call fails
+      console.error('Error calling logout API:', error);
+    }
+
+    // Clear local state
     clearUserSession();
     setUser(null);
     setAccessToken(null);

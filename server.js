@@ -13,10 +13,20 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   // Create HTTP server
+  // Trust proxy - this allows the server to correctly identify client IPs
+  // when behind a proxy/load balancer (Docker, nginx, etc.)
   const server = createServer((req, res) => {
+    // Ensure proxy headers are preserved for IP extraction
+    // Next.js API routes will read these headers via request.headers
     const parsedUrl = parse(req.url, true);
     handle(req, res, parsedUrl);
   });
+  
+  // Note: For proper proxy trust in production, ensure your reverse proxy
+  // (nginx, Docker, etc.) sets these headers:
+  // - X-Forwarded-For: Original client IP
+  // - X-Real-IP: Real client IP (nginx)
+  // - CF-Connecting-IP: Cloudflare client IP
 
   // Initialize Socket.IO
   const io = socketManager.initialize(server);

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { User, SupervisorAgent } from '../../../../models';
 import jwt from 'jsonwebtoken';
+const UserActivityLogger = require('../../../../lib/userActivityLogger');
+const UserTimeTracker = require('../../../../lib/userTimeTracker');
 
 export async function POST(request) {
   try {
@@ -69,6 +71,33 @@ export async function POST(request) {
       );
     }
 
+    // Update user status to online and record login time
+    const loginTime = new Date();
+    const oldStatus = user.status || 'offline';
+    
+    // Always update lastLoginTime on login - this is a new login event
+    await user.update({
+      status: 'online',
+      lastLoginTime: loginTime
+    });
+
+    // Refresh user data to get updated values
+    await user.reload();
+
+    // Log login activity
+    const ipAddress = UserActivityLogger.getIpAddress(request);
+    const userAgent = UserActivityLogger.getUserAgent(request);
+    await UserActivityLogger.logLogin(user.id, ipAddress, userAgent);
+    
+    // Log status change if status changed
+    if (oldStatus !== 'online') {
+      await UserActivityLogger.logStatusChange(user.id, oldStatus, 'online', ipAddress, userAgent);
+    }
+
+    // Start active time session and increment login count
+    await UserTimeTracker.startSession(user.id, 'online', loginTime);
+    await UserTimeTracker.incrementLoginCount(user.id, loginTime);
+
     // Get supervisor information if user is an agent
     let supervisorInfo = null;
     if (userDataValues.role === 'agent' && userDataValues.supervisorRelationships && userDataValues.supervisorRelationships.length > 0) {
@@ -104,6 +133,9 @@ export async function POST(request) {
       last_name: userDataValues.lastName,
       role: userDataValues.role,
       is_active: userDataValues.isActive,
+      status: user.status || 'online',
+      last_login_time: user.lastLoginTime || loginTime,
+      last_logout_time: user.lastLogoutTime,
       created_at: userDataValues.created_at,
       supervisor: supervisorInfo,
       supervisedAgents: supervisedAgents
