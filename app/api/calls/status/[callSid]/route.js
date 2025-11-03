@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../../lib/sequelize-db';
 
 
-import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 export async function GET(request, { params }) {
   try {
     const { callSid } = params;
