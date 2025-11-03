@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { User, SupervisorAgent } from '../../../../models';
 import jwt from 'jsonwebtoken';
+const UserActivityLogger = require('../../../../lib/userActivityLogger');
+const UserTimeTracker = require('../../../../lib/userTimeTracker');
 
 export async function POST(request) {
   try {
-    const { email, password } = await request.json();
+    const { email, password, location } = await request.json();
 
     // Validate input
     if (!email || !password) {
@@ -69,6 +71,58 @@ export async function POST(request) {
       );
     }
 
+    // Update user status to online and record login time
+    const loginTime = new Date();
+    const oldStatus = user.status || 'offline';
+    
+    // Prepare update data
+    const updateData = {
+      status: 'online',
+      lastLoginTime: loginTime
+    };
+
+    // Add location data if provided
+    if (location && location.latitude && location.longitude) {
+      updateData.latitude = location.latitude;
+      updateData.longitude = location.longitude;
+      updateData.locationAccuracy = location.accuracy || null;
+      updateData.locationTimestamp = loginTime;
+    }
+
+    // Always update lastLoginTime on login - this is a new login event
+    await user.update(updateData);
+
+    // Refresh user data to get updated values
+    await user.reload();
+
+    // Log login activity
+    const ipAddress = UserActivityLogger.getIpAddress(request);
+    const userAgent = UserActivityLogger.getUserAgent(request);
+    const loginMetadata = location ? {
+      location: {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy
+      }
+    } : null;
+    await UserActivityLogger.logActivity({
+      userId: user.id,
+      activityType: 'login',
+      description: 'User logged in',
+      ipAddress,
+      userAgent,
+      metadata: loginMetadata
+    });
+    
+    // Log status change if status changed
+    if (oldStatus !== 'online') {
+      await UserActivityLogger.logStatusChange(user.id, oldStatus, 'online', ipAddress, userAgent);
+    }
+
+    // Start active time session and increment login count
+    await UserTimeTracker.startSession(user.id, 'online', loginTime);
+    await UserTimeTracker.incrementLoginCount(user.id, loginTime);
+
     // Get supervisor information if user is an agent
     let supervisorInfo = null;
     if (userDataValues.role === 'agent' && userDataValues.supervisorRelationships && userDataValues.supervisorRelationships.length > 0) {
@@ -104,7 +158,15 @@ export async function POST(request) {
       last_name: userDataValues.lastName,
       role: userDataValues.role,
       is_active: userDataValues.isActive,
+      status: user.status || 'online',
+      last_login_time: user.lastLoginTime || loginTime,
+      last_logout_time: user.lastLogoutTime,
       created_at: userDataValues.created_at,
+      latitude: user.latitude,
+      longitude: user.longitude,
+      location_accuracy: user.locationAccuracy,
+      location_timestamp: user.locationTimestamp,
+      location_permission: user.locationPermission,
       supervisor: supervisorInfo,
       supervisedAgents: supervisedAgents
     };
@@ -112,8 +174,10 @@ export async function POST(request) {
     // Generate JWT tokens
     const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
     const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key-change-in-production';
+    const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m'; // Default to 15 minutes if not set
+    const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '1d'; // Default to 1 day if not set
     
-    // Access token (short-lived - 15 minutes)
+    // Access token (configurable via JWT_EXPIRES_IN)
     const accessToken = jwt.sign(
       {
         userId: userData.id,
@@ -123,10 +187,10 @@ export async function POST(request) {
         type: 'access'
       },
       JWT_SECRET,
-      { expiresIn: '15m' } // 15 minutes
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
-    // Refresh token (long-lived - 1 day)
+    // Refresh token (configurable via JWT_REFRESH_EXPIRES_IN)
     const refreshToken = jwt.sign(
       {
         userId: userData.id,
@@ -134,7 +198,7 @@ export async function POST(request) {
         type: 'refresh'
       },
       JWT_REFRESH_SECRET,
-      { expiresIn: '1d' } // 1 day
+      { expiresIn: JWT_REFRESH_EXPIRES_IN }
     );
 
     console.log('🔍 SignIn API - Returning tokens:', {
@@ -149,7 +213,7 @@ export async function POST(request) {
       user: userData,
       accessToken: accessToken,
       refreshToken: refreshToken,
-      expiresIn: 15 * 60, // 15 minutes in seconds
+      expiresIn: JWT_EXPIRES_IN, // Token expiration from environment variable
       message: 'Sign in successful'
     });
 

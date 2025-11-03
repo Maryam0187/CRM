@@ -1,8 +1,18 @@
 import { NextResponse } from 'next/server';
 import { SalesLogService } from '../../../lib/sequelize-db.js';
+import { requireJWTAuth } from '../../../lib/jwtAuth.js';
 
 export async function GET(request) {
   try {
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page')) || 1;
     const limit = parseInt(searchParams.get('limit')) || 10;
@@ -45,6 +55,15 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
     const body = await request.json();
     
     const {

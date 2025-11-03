@@ -55,6 +55,46 @@ module.exports = (sequelize) => {
     address: {
       type: DataTypes.TEXT,
       allowNull: true
+    },
+    status: {
+      type: DataTypes.ENUM('online', 'offline', 'away'),
+      defaultValue: 'offline',
+      allowNull: false,
+      field: 'status'
+    },
+    lastLoginTime: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'last_login_time'
+    },
+    lastLogoutTime: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'last_logout_time'
+    },
+    latitude: {
+      type: DataTypes.DECIMAL(10, 8),
+      allowNull: true
+    },
+    longitude: {
+      type: DataTypes.DECIMAL(11, 8),
+      allowNull: true
+    },
+    locationAccuracy: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: 'location_accuracy'
+    },
+    locationTimestamp: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'location_timestamp'
+    },
+    locationPermission: {
+      type: DataTypes.ENUM('granted', 'denied', 'prompt', 'not_set'),
+      allowNull: true,
+      defaultValue: 'not_set',
+      field: 'location_permission'
     }
   }, {
     tableName: 'users',
@@ -136,6 +176,12 @@ module.exports = (sequelize) => {
     User.hasMany(models.SalesLog, {
       foreignKey: 'agentId',
       as: 'salesLogs'
+    });
+
+    // User has many activity logs
+    User.hasMany(models.UserActivityLog, {
+      foreignKey: 'userId',
+      as: 'activityLogs'
     });
   };
 

@@ -24,7 +24,8 @@ import {
   validateSSN,
   validateCurrency 
 } from '../lib/validation.js';
-import { SALES_STATUSES, getStepForStatus, getStatusDisplayName, getStatusColorClass } from '../lib/salesStatuses.js';
+import { useToast } from '../contexts/ToastContext';
+import { SALES_STATUSES, getStepForStatus, getStatusDisplayName, getStatusColorClass, getStatusBadgeClasses } from '../lib/salesStatuses.js';
 
 // Helper function to calculate time ago
 const getTimeAgo = (dateString) => {
@@ -93,6 +94,7 @@ export default function AddSale() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
+  const { showSuccess, showError } = useToast();
   
   // Check if we're in edit mode
   const editId = searchParams.get('id');
@@ -540,11 +542,23 @@ export default function AddSale() {
     } else if (field === 'phone') {
       formattedValue = formatCellNumber(value);
     }
-    
+    console.log('Formatted value:', customer);
     setCustomer(prev => ({
       ...prev,
       [field]: formattedValue
     }));
+
+    // If customer already exists in DB, sync critical field updates immediately
+    if (field === 'state') {
+      const targetCustomerId = customer?.id || checkedCustomer?.customerId;
+      if (targetCustomerId && formattedValue) {
+        try {
+          apiClient.put(`/api/customers/${targetCustomerId}`, { state: formattedValue });
+        } catch (e) {
+          console.warn('Failed to sync state update to server', e);
+        }
+      }
+    }
 
     // Validate the field
     let validation = { isValid: true, message: '' };
@@ -868,152 +882,30 @@ export default function AddSale() {
         customerFeedback: customer.customerFeedback,
         status: 'prospect'
       };
+
+      console.log('Creating customer:', customerData);
       
       const customerResponse = await apiClient.post('/api/customers', customerData);
       const customerResult = await customerResponse.json();
       
       if (customerResult.success) {
         setSaving(false);
+        // Persist created customer id into form state so later edits (like state) can sync
+        try {
+          const created = customerResult.data;
+          if (created?.id) {
+            setCustomer(prev => ({ ...prev, id: created.id }));
+          }
+        } catch (e) {}
+        showSuccess('Customer created successfully');
         return customerResult.data; // Return customer data only
+        
       } else {
         throw new Error(customerResult.message || 'Failed to create customer');
       }
       
     } catch (error) {
       setError(error.message || 'Failed to create customer');
-      setSaving(false);
-      return null;
-    }
-  };
-
-  // Create sale for check number flow (without redirecting)
-  const addSaleForCheckNumber = async (status) => {
-    setSaving(true);
-    setError(null);
-    setSaleStatus(status);
-    
-    // Validate customer fields before proceeding
-    if (!validateAllCustomerFields()) {
-      setError('Please fix the validation errors before proceeding');
-      setSaving(false);
-      return null;
-    }
-    
-    try {
-      let customerId;
-      
-      if (isEditMode) {
-        // For edit mode, get customer ID from existing sale
-        const saleResponse = await apiClient.get(`/api/sales/${editId}`);
-        const saleResult = await saleResponse.json();
-        if (saleResult.success) {
-          customerId = saleResult.data.customerId;
-        } else {
-          throw new Error('Failed to fetch sale data');
-        }
-      } else {
-        // For new sale, check if customer already exists first
-        if (customer.landline) {
-          const checkResponse = await apiClient.post('/api/customers/check-existing', {
-            landline: customer.landline,
-            firstName: customer.firstName.trim()
-          });
-          
-          const checkResult = await checkResponse.json();
-          if (checkResult.success && checkResult.exists) {
-            if (checkResult.matchType === 'exact') {
-              // Exact match found - same name and landline
-              customerId = checkResult.existingCustomer.id;
-            } else if (checkResult.matchType === 'landline') {
-              // Landline exists with different names - use first customer
-              customerId = checkResult.landlineCustomers[0].id;
-            }
-          } else {
-            // No existing customer found, create new one
-            const customerData = {
-              firstName: customer.firstName.trim(),
-              lastName: null,
-              email: null,
-              phone: customer.phone,
-              landline: customer.landline,
-              address: customer.address,
-              state: customer.state,
-              city: customer.city,
-              country: 'USA',
-              mailingAddress: customer.mailingAddress,
-              customerFeedback: customer.customerFeedback,
-              status: 'prospect'
-            };
-            
-            const customerResponse = await apiClient.post('/api/customers', customerData);
-            const customerResult = await customerResponse.json();
-            
-            if (customerResult.success) {
-              customerId = customerResult.data.id;
-              // Update local customer state with the new ID
-              setCustomer(prev => ({ ...prev, id: customerId }));
-            } else {
-              throw new Error(customerResult.message || 'Failed to create customer');
-            }
-          }
-        } else {
-          // No landline provided, create new customer
-          const customerData = {
-            firstName: customer.firstName.trim(),
-            lastName: null,
-            email: null,
-            phone: customer.phone,
-            landline: customer.landline,
-            address: customer.address,
-            state: customer.state,
-            city: customer.city,
-            country: 'USA',
-            mailingAddress: customer.mailingAddress,
-            customerFeedback: customer.customerFeedback,
-            status: 'prospect'
-          };
-          
-          const customerResponse = await apiClient.post('/api/customers', customerData);
-          const customerResult = await customerResponse.json();
-          
-          if (customerResult.success) {
-            customerId = customerResult.data.id;
-            // Update local customer state with the new ID
-            setCustomer(prev => ({ ...prev, id: customerId }));
-          } else {
-            throw new Error(customerResult.message || 'Failed to create customer');
-          }
-        }
-      }
-      
-      // Create the sale
-      const saleData = {
-        customerId: customerId,
-        agentId: user.id,
-        status: status,
-        spoke_to: saleForm.spoke_to || null,
-        sale_amount: saleForm.sale_amount || null,
-        notes: saleForm.notes || null,
-        address: customer.address || null,
-        state: customer.state || null,
-        city: customer.city || null,
-        country: customer.country || 'USA',
-        mailing_address: customer.mailingAddress || null,
-        customer_feedback: customer.customerFeedback || null
-      };
-      
-      const saleResponse = await apiClient.post('/api/sales', saleData);
-      const saleResult = await saleResponse.json();
-      
-      if (saleResult.success) {
-        setSaving(false);
-        return saleResult.data; // Return sale data without redirecting
-      } else {
-        throw new Error(saleResult.message || 'Failed to create sale');
-      }
-      
-    } catch (error) {
-      setError(error.message || 'Failed to create sale');
       setSaving(false);
       return null;
     }
@@ -1972,6 +1864,26 @@ Room: `;
       };
 
 
+      // Sync latest customer form fields to backend before creating sale
+      try {
+        if (existingCustomerId) {
+          const customerUpdate = {
+            firstName: customer.firstName || undefined,
+            landline: customer.landline || undefined,
+            phone: customer.phone || undefined,
+            address: customer.address || undefined,
+            state: customer.state || undefined,
+            city: customer.city || undefined,
+            country: customer.country || undefined,
+            mailingAddress: customer.mailingAddress || undefined,
+            customerFeedback: customer.customerFeedback || undefined
+          };
+          await apiClient.put(`/api/customers/${existingCustomerId}`, customerUpdate);
+        }
+      } catch (e) {
+        console.warn('Customer sync before sale failed', e);
+      }
+
       // Create the sale
       const response = await apiClient.post('/api/sales', saleData);
       
@@ -2580,6 +2492,26 @@ Room: `;
         }
         saleResult = result.data;
       } else {
+        // Sync latest customer form fields to backend before creating sale
+        try {
+          if (customerId) {
+            const customerUpdate = {
+              firstName: customer.firstName || undefined,
+              landline: customer.landline || undefined,
+              phone: customer.phone || undefined,
+              address: customer.address || undefined,
+              state: customer.state || undefined,
+              city: customer.city || undefined,
+              country: customer.country || undefined,
+              mailingAddress: customer.mailingAddress || undefined,
+              customerFeedback: customer.customerFeedback || undefined
+            };
+            await apiClient.put(`/api/customers/${customerId}`, customerUpdate);
+          }
+        } catch (e) {
+          console.warn('Customer sync before sale failed', e);
+        }
+
         const response = await apiClient.post('/api/sales', saleData);
         
         const result = await response.json();
@@ -4485,14 +4417,8 @@ Room: `;
                               <div className="text-xs text-gray-600 mt-1 space-y-1">
                                 <div><strong>Last Sale:</strong> ID {customer.lastSale.id} • {new Date(customer.lastSale.created_at).toLocaleDateString()} <span className="text-blue-600 font-medium">({getTimeAgo(customer.lastSale.created_at)})</span></div>
                                 <div><strong>Status:</strong> 
-                                  <span className={`ml-1 px-1 py-0.5 text-xs rounded ${
-                                    customer.lastSale.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                    customer.lastSale.status === 'active' ? 'bg-blue-100 text-blue-800' :
-                                    customer.lastSale.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                    customer.lastSale.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                                    'bg-gray-100 text-gray-800'
-                                  }`}>
-                                    {customer.lastSale.status}
+                                  <span className={`ml-1 px-1 py-0.5 text-xs rounded ${getStatusBadgeClasses(customer.lastSale.status || '')}`}>
+                                    {getStatusDisplayName(customer.lastSale.status) || customer.lastSale.status}
                                   </span>
                                 </div>
                                 {customer.lastSale.agent && user && 

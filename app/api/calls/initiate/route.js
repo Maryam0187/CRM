@@ -1,9 +1,19 @@
 import { NextResponse } from 'next/server';
 import { getClient, validatePhoneNumber, generateCallTwiML, getWebhookUrl } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
+import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 
 export async function POST(request) {
   try {
+    // Validate JWT token
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
     const body = await request.json();
     const { 
       customerId, 

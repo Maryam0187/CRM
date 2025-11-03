@@ -1,5 +1,7 @@
 import { CustomerService } from '../../../../lib/sequelize-db.js';
 
+
+import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 export async function GET(request, { params }) {
   try {
     const { id } = await params;

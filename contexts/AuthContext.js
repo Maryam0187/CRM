@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { getUserSession, clearUserSession, isAuthenticated } from '../lib/auth';
+import { getUserLocation } from '../lib/geolocation';
 
 const AuthContext = createContext();
 
@@ -59,7 +60,43 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // Call logout API to update server-side status and log activity
+    try {
+      const token = accessToken || (typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null);
+      if (token) {
+        // Try to get location (non-blocking)
+        let location = null;
+        try {
+          location = await getUserLocation({ timeout: 3000 });
+        } catch (locationError) {
+          console.warn('Could not get location for logout:', locationError.message);
+        }
+
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            location: location ? {
+              latitude: location.latitude,
+              longitude: location.longitude,
+              accuracy: location.accuracy
+            } : null
+          })
+        }).catch(error => {
+          // Don't block logout if API call fails
+          console.error('Logout API call failed:', error);
+        });
+      }
+    } catch (error) {
+      // Don't block logout if API call fails
+      console.error('Error calling logout API:', error);
+    }
+
+    // Clear local state
     clearUserSession();
     setUser(null);
     setAccessToken(null);
@@ -92,15 +129,27 @@ export function AuthProvider({ children }) {
         if (typeof window !== 'undefined') {
           localStorage.setItem('accessToken', data.accessToken);
         }
+        console.log('✅ AuthContext - Access token refreshed successfully');
         return data.accessToken;
       } else {
         throw new Error(data.error || 'Token refresh failed');
       }
     } catch (error) {
-      console.error('Token refresh error:', error);
+      console.error('❌ AuthContext - Token refresh error:', error);
       // If refresh fails, logout user
       logout();
       throw error;
+    }
+  };
+
+  const updateUser = (updatedData) => {
+    if (user) {
+      const newUserData = { ...user, ...updatedData };
+      setUser(newUserData);
+      // Update localStorage as well
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('user', JSON.stringify(newUserData));
+      }
     }
   };
 
@@ -111,6 +160,7 @@ export function AuthProvider({ children }) {
     login,
     logout,
     refreshAccessToken,
+    updateUser,
     loading,
     isAuthenticated: !!user
   };

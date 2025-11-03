@@ -10,6 +10,8 @@ import SalesTimeline from './SalesTimeline';
 import AppointmentSummary from './AppointmentSummary';
 import { useAuth } from '../contexts/AuthContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
+import apiClient from '../lib/apiClient';
+import { SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName } from '../lib/salesStatuses';
 
 export default function Home() {
   const router = useRouter();
@@ -48,7 +50,44 @@ export default function Home() {
   // Supervisor-specific state
   const [supervisedAgents, setSupervisedAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
-  const [showingSupervisorSales, setShowingSupervisorSales] = useState(true); // Default to showing supervisor's own sales
+  const [showingSupervisorSales, setShowingSupervisorSales] = useState(undefined); // Only set for supervisors
+  
+  // Load supervisor view state from localStorage
+  const loadSupervisorViewState = () => {
+    try {
+      const savedState = localStorage.getItem('supervisorViewState');
+      if (savedState) {
+        const parsed = JSON.parse(savedState);
+        return {
+          showingSupervisorSales: parsed.showingSupervisorSales ?? true,
+          selectedAgentId: parsed.selectedAgentId ?? null
+        };
+      }
+    } catch (error) {
+      console.error('Error loading supervisor view state from localStorage:', error);
+    }
+    
+    return {
+      showingSupervisorSales: true,
+      selectedAgentId: null
+    };
+  };
+  
+  // Save supervisor view state to localStorage
+  const saveSupervisorViewState = (showingOwnSales, agentId) => {
+    try {
+      localStorage.setItem('supervisorViewState', JSON.stringify({
+        showingSupervisorSales: showingOwnSales,
+        selectedAgentId: agentId
+      }));
+    } catch (error) {
+      console.error('Error saving supervisor view state to localStorage:', error);
+    }
+  };
+  
+  // Admin-specific state
+  const [allUsers, setAllUsers] = useState([]);
+  const [selectedUserId, setSelectedUserId] = useState(null);
   
   
   // Timeline modal state
@@ -67,9 +106,44 @@ export default function Home() {
     
     setSupervisedAgents(agentsData);
     
-    // Set first agent as default selected if available
-    if (agentsData.length > 0) {
-      setSelectedAgent(agentsData[0].agent);
+    // Load saved view state from localStorage
+    const savedState = loadSupervisorViewState();
+    setShowingSupervisorSales(savedState.showingSupervisorSales);
+    
+    // Restore selected agent if one was saved and it still exists in supervised agents
+    if (savedState.selectedAgentId && !savedState.showingSupervisorSales) {
+      const savedAgent = agentsData.find(item => item.agent.id === savedState.selectedAgentId);
+      if (savedAgent) {
+        setSelectedAgent(savedAgent.agent);
+      } else {
+        // Saved agent no longer exists, fall back to first agent or null
+        setSelectedAgent(agentsData.length > 0 ? agentsData[0].agent : null);
+      }
+    } else {
+      setSelectedAgent(null);
+    }
+  };
+
+  // Fetch all users for admin filter
+  const fetchAllUsers = async () => {
+    if (user?.role !== 'admin') return;
+    
+    try {
+      const response = await apiClient.get('/api/users');
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        const users = result.data.map(u => ({
+          id: u.id,
+          firstName: u.firstName || u.first_name || '',
+          lastName: u.lastName || u.last_name || '',
+          email: u.email,
+          role: u.role
+        }));
+        setAllUsers(users);
+      }
+    } catch (error) {
+      console.error('Error fetching users for admin filter:', error);
     }
   };
 
@@ -80,11 +154,15 @@ export default function Home() {
     try {
       console.log('fetchSalesData called with user:', user?.role, 'showingSupervisorSales:', showingSupervisorSales, 'selectedAgent:', selectedAgent?.id);
       
+      // Ensure we always have a date filter - default to 'today' if none provided
+      const effectiveDateFilter = dateFilterValue || 'today';
+      const effectiveDateField = dateFieldValue || 'created_at';
+      
       // Build URL with filters
       const params = new URLSearchParams();
       if (statusFilter) params.append('status', statusFilter);
-      if (dateFilterValue) params.append('dateFilter', dateFilterValue);
-      if (dateFieldValue) params.append('dateField', dateFieldValue);
+      params.append('dateFilter', effectiveDateFilter);
+      params.append('dateField', effectiveDateField);
       
       // Add pagination parameters
       params.append('page', page.toString());
@@ -100,21 +178,21 @@ export default function Home() {
           // Default to all supervised agents' sales - no additional parameters needed
           console.log('Supervisor API: Showing all supervised agents sales for', user.first_name);
         }
+      } else if (user?.role === 'admin') {
+        // For admins, show selected user's sales or all sales
+        if (selectedUserId) {
+          params.append('agentId', selectedUserId);
+        }
       } else {
-        // For other roles, show their own data - no additional parameters needed (JWT handles authentication)
+        // For agents, show their own data - no additional parameters needed (JWT handles authentication)
         console.log('API: Showing user data for', user.first_name, 'role:', user.role);
       }
       
       const url = `/api/sales${params.toString() ? `?${params.toString()}` : ''}`;
       console.log('API URL:', url);
       
-      // Use authenticated fetch with JWT token
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      // Use authenticated fetch with JWT token and automatic refresh
+      const response = await apiClient.get(url);
       const result = await response.json();
       
       if (result.success) {
@@ -133,28 +211,48 @@ export default function Home() {
     }
   };
 
-  // Initialize supervised agents for supervisors from session data
+  // Initialize supervised agents for supervisors
   useEffect(() => {
     if (user?.role === 'supervisor') {
       initializeSupervisedAgents();
-      // Ensure supervisor starts with their own sales view
-      setShowingSupervisorSales(true);
-      setSelectedAgent(null);
     }
   }, [user]);
 
-  // Load sales data on component mount and when status, date filter, date field, selected agent, or pagination changes
+  // Fetch all users for admin filter
   useEffect(() => {
-    if (user?.role === 'supervisor') {
-      // For supervisors, always load data (default to their own sales)
-      // Only fetch if we have the proper state initialized
+    if (user?.role === 'admin') {
+      fetchAllUsers();
+    }
+  }, [user]);
+
+  // Save supervisor view state to localStorage whenever it changes
+  useEffect(() => {
+    if (user?.role === 'supervisor' && showingSupervisorSales !== undefined) {
+      saveSupervisorViewState(showingSupervisorSales, selectedAgent?.id || null);
+    }
+  }, [user, showingSupervisorSales, selectedAgent]);
+
+  // Load sales data when user, filters, pagination, or supervisor view changes
+  useEffect(() => {
+    // Only fetch data if user is loaded and we have valid filters
+    if (!user?.role) return;
+    
+    if (user.role === 'supervisor') {
+      // Only fetch for supervisors if showingSupervisorSales is set (initialized)
       if (showingSupervisorSales !== undefined) {
         fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField);
       }
-    } else if (user?.role && user?.role !== 'supervisor') {
+    } else if (user.role === 'admin') {
+      // For admins, pass selectedUserId as agentId parameter
+      fetchSalesData(status, dateFilter, selectedUserId, currentPage, itemsPerPage, dateField);
+    } else {
+      // For agents, fetch data directly (no supervisor dependencies)
       fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField);
     }
-  }, [user, status, dateFilter, dateField, selectedAgent, showingSupervisorSales, currentPage, itemsPerPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, status, dateFilter, dateField, currentPage, itemsPerPage, 
+      // Supervisor-specific dependencies only trigger for supervisors due to conditional logic above
+      selectedAgent, showingSupervisorSales, selectedUserId]);
 
 
   // Handler functions for supervisor interface
@@ -162,12 +260,28 @@ export default function Home() {
     setSelectedAgent(agent);
     setShowingSupervisorSales(false);
     setCurrentPage(1); // Reset to first page when switching agents
+    // Save to localStorage
+    saveSupervisorViewState(false, agent?.id || null);
   };
 
   const handleShowSupervisorSales = () => {
     setShowingSupervisorSales(true);
     setSelectedAgent(null);
     setCurrentPage(1); // Reset to first page when switching views
+    // Save to localStorage
+    saveSupervisorViewState(true, null);
+  };
+
+  // Handler functions for admin interface
+  const handleUserSelect = (e) => {
+    const userId = e.target.value ? parseInt(e.target.value) : null;
+    setSelectedUserId(userId);
+    setCurrentPage(1); // Reset to first page when switching users
+  };
+
+  const clearUserFilter = () => {
+    setSelectedUserId(null);
+    setCurrentPage(1); // Reset to first page when clearing filter
   };
 
   // Pagination control functions
@@ -203,13 +317,8 @@ export default function Home() {
       header: 'Status',
       key: 'status',
       render: (value) => (
-        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-          value === 'active' ? 'bg-green-100 text-green-800' :
-          value === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-          value === 'completed' ? 'bg-blue-100 text-blue-800' :
-          'bg-red-100 text-red-800'
-        }`}>
-          {value ? value.charAt(0).toUpperCase() + value.slice(1) : 'N/A'}
+        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeClasses(value || '')}`}>
+          {getStatusDisplayName(value) || 'N/A'}
         </span>
       )
     },
@@ -432,11 +541,28 @@ export default function Home() {
       </div>
       </div>
 
-      {/* Supervisor Agent Selection Interface */}
-      {user?.role === 'supervisor' && (
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div className="flex flex-wrap items-center gap-3">
+        {/* Main Content */}
+        <div className="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        {/* Appointment Summary */}
+        <div className="mb-8">
+          <AppointmentSummary />
+        </div>
+
+        {/* Date Filter */}
+        <div className="mb-8 flex justify-center">
+          <DateFilter 
+            onFilterChange={handleFilterChange} 
+            onDateFieldChange={(field) => updateFilter('dateField', field)}
+            value={dateFilter} 
+            dateField={dateField}
+          />
+        </div>
+
+        {/* Supervisor Agent Selection Interface */}
+        {user?.role === 'supervisor' && (
+          <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div className="flex flex-wrap items-center gap-3 mb-3">
               <span className="text-sm font-medium text-gray-700">View sales for:</span>
               
               {/* Me Button */}
@@ -451,7 +577,7 @@ export default function Home() {
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                Me ({user?.first_name})
+                Me (supervisor)
               </button>
               
               {/* Agent Buttons */}
@@ -478,7 +604,7 @@ export default function Home() {
             </div>
             
             {/* Current View Indicator */}
-            <div className="mt-3 text-sm text-gray-600">
+            <div className="text-sm text-gray-600">
               {showingSupervisorSales ? (
                 <span>Showing your sales data</span>
               ) : selectedAgent ? (
@@ -490,26 +616,7 @@ export default function Home() {
               )}
             </div>
           </div>
-        </div>
-      )}
-
-        {/* Main Content */}
-        <div className="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
-        {/* Appointment Summary */}
-        <div className="mb-8">
-          <AppointmentSummary />
-        </div>
-
-        {/* Date Filter */}
-        <div className="mb-8 flex justify-center">
-          <DateFilter 
-            onFilterChange={handleFilterChange} 
-            onDateFieldChange={(field) => updateFilter('dateField', field)}
-            value={dateFilter} 
-            dateField={dateField}
-          />
-        </div>
+        )}
 
         {/* Sales Data Table */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
@@ -521,7 +628,7 @@ export default function Home() {
                   {loading ? 'Loading sales data...' : `Showing ${salesData.length} sales`}
                 </p>
               </div>
-               {/* Status Filter */}
+               {/* Status Filter and User Filter (for Admin) */}
             <div className="flex gap-2 justify-end mb-6">
             <button
                   onClick={handleRefresh}
@@ -533,26 +640,58 @@ export default function Home() {
                   </svg>
                   Refresh
                 </button>
-              <div className="min-w-[250px] flex gap-2">
-                <select
-                  id="status"
-                  value={status}
-                  onChange={handleStatusChange}
-                  disabled={loading}
-                  className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <option value="">All Statuses</option>
-                  <option value="active">Active</option>
-                  <option value="pending">Pending</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-                <button
-                  onClick={clearStatus}
-                  className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
-                >
-                  Clear
-                </button>
+              <div className="flex gap-2">
+                {/* User Filter (Admin only) */}
+                {user?.role === 'admin' && (
+                  <div className="min-w-[200px] flex gap-2">
+                    <select
+                      id="user"
+                      value={selectedUserId || ''}
+                      onChange={handleUserSelect}
+                      disabled={loading}
+                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">All Users</option>
+                      {allUsers.map((userItem) => (
+                        <option key={userItem.id} value={userItem.id}>
+                          {userItem.firstName} {userItem.lastName} ({userItem.role})
+                        </option>
+                      ))}
+                    </select>
+                    {selectedUserId && (
+                      <button
+                        onClick={clearUserFilter}
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
+                        title="Clear user filter"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                )}
+                {/* Status Filter */}
+                <div className="min-w-[250px] flex gap-2">
+                  <select
+                    id="status"
+                    value={status}
+                    onChange={handleStatusChange}
+                    disabled={loading}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <option value="">All Statuses</option>
+                    {SALES_STATUS_ARRAY.map((statusValue) => (
+                      <option key={statusValue} value={statusValue}>
+                        {getStatusDisplayName(statusValue)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={clearStatus}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
             </div>
             </div>
@@ -584,33 +723,35 @@ export default function Home() {
                 />
                 
                 {/* Pagination Controls */}
-                {paginationInfo.totalPages > 1 && (
-                  <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    {/* Items per page selector */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-700">Show:</span>
-                      <select
-                        value={itemsPerPage}
-                        onChange={(e) => handleItemsPerPageChange(parseInt(e.target.value))}
-                        disabled={loading}
-                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <option value={5}>5</option>
-                        <option value={10}>10</option>
-                        <option value={20}>20</option>
-                        <option value={50}>50</option>
-                      </select>
-                      <span className="text-sm text-gray-700">per page</span>
-                    </div>
+                <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  {/* Items per page selector - Always visible */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-700">Show:</span>
+                    <select
+                      value={itemsPerPage}
+                      onChange={(e) => handleItemsPerPageChange(parseInt(e.target.value))}
+                      disabled={loading}
+                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value={5}>5</option>
+                      <option value={10}>10</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                    </select>
+                    <span className="text-sm text-gray-700">per page</span>
+                  </div>
 
-                    {/* Pagination info */}
+                  {/* Pagination info - Always visible if there are results */}
+                  {paginationInfo.totalItems > 0 && (
                     <div className="text-sm text-gray-700">
                       Showing {((paginationInfo.currentPage - 1) * paginationInfo.itemsPerPage) + 1} to{' '}
                       {Math.min(paginationInfo.currentPage * paginationInfo.itemsPerPage, paginationInfo.totalItems)} of{' '}
                       {paginationInfo.totalItems} results
                     </div>
+                  )}
 
-                    {/* Pagination buttons */}
+                  {/* Pagination buttons - Only show when there's more than 1 page */}
+                  {paginationInfo.totalPages > 1 && (
                     <div className="flex items-center gap-2">
                       <button
                         onClick={handlePreviousPage}
@@ -659,8 +800,8 @@ export default function Home() {
                         Next
                       </button>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </>
             )}
           </div>

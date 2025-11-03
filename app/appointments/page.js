@@ -19,27 +19,54 @@ export default function AppointmentsPage() {
   });
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [agents, setAgents] = useState([]);
+  const [isMyAppointments, setIsMyAppointments] = useState(false);
 
   useEffect(() => {
     if (user) {
+      // Default supervisors to "My Appointments"
+      if (user.role === 'supervisor') {
+        setIsMyAppointments(true);
+      } else {
+        setIsMyAppointments(false);
+      }
       fetchAgents();
       fetchAppointments();
     }
   }, [user]);
 
   useEffect(() => {
-    if (user) {
-      if (selectedAgent) {
-        fetchAppointments(selectedAgent.id);
-      } else {
-        fetchAppointments();
+    if (!user) return;
+    if (user.role === 'supervisor') {
+      // If My Appointments is active, force own id
+      if (isMyAppointments) {
+        fetchAppointments(user.id);
+        return;
       }
     }
-  }, [selectedAgent, user]);
+    if (selectedAgent) {
+      fetchAppointments(selectedAgent.id);
+    } else {
+      fetchAppointments();
+    }
+  }, [selectedAgent, user, isMyAppointments]);
 
   useEffect(() => {
     applyFilters();
   }, [appointments, filter, customDateRange]);
+
+  // Refetch appointments when filter or custom range changes
+  useEffect(() => {
+    if (!user) return;
+    if (user.role === 'supervisor' && isMyAppointments) {
+      fetchAppointments(user.id);
+      return;
+    }
+    if (selectedAgent) {
+      fetchAppointments(selectedAgent.id);
+    } else {
+      fetchAppointments();
+    }
+  }, [filter, customDateRange, user, selectedAgent, isMyAppointments]);
 
   const fetchAgents = async () => {
     if (!user) {
@@ -62,8 +89,18 @@ export default function AppointmentsPage() {
             console.log('Supervised agents response:', data);
             
             if (data.success && data.data && data.data.length > 0) {
-              setAgents(data.data);
-              console.log('Set agents for supervisor:', data.data);
+              // Normalize to a consistent shape and filter only agents
+              const normalized = data.data
+                .filter(u => (u.role === 'agent' || u.role === 'Agent' || u.role === 'AGENT'))
+                .map(u => ({
+                  id: u.id,
+                  firstName: u.firstName || u.first_name || '',
+                  lastName: u.lastName || u.last_name || '',
+                  email: u.email,
+                  role: 'agent'
+                }));
+              setAgents(normalized);
+              console.log('Set agents for supervisor:', normalized);
             } else {
               // Fallback: get all users and filter by role
               console.log('No supervised agents found, falling back to all users...');
@@ -71,7 +108,15 @@ export default function AppointmentsPage() {
               const fallbackData = await fallbackResponse.json();
               
               if (fallbackData.success) {
-                const agentUsers = fallbackData.data.filter(u => u.role === 'agent');
+                const agentUsers = fallbackData.data
+                  .filter(u => u.role === 'agent')
+                  .map(u => ({
+                    id: u.id,
+                    firstName: u.firstName || u.first_name || '',
+                    lastName: u.lastName || u.last_name || '',
+                    email: u.email,
+                    role: 'agent'
+                  }));
                 setAgents(agentUsers);
                 console.log('Set fallback agents for supervisor:', agentUsers);
               }
@@ -83,7 +128,15 @@ export default function AppointmentsPage() {
             const fallbackData = await fallbackResponse.json();
             
             if (fallbackData.success) {
-              const agentUsers = fallbackData.data.filter(u => u.role === 'agent');
+              const agentUsers = fallbackData.data
+                .filter(u => u.role === 'agent')
+                .map(u => ({
+                  id: u.id,
+                  firstName: u.firstName || u.first_name || '',
+                  lastName: u.lastName || u.last_name || '',
+                  email: u.email,
+                  role: 'agent'
+                }));
               setAgents(agentUsers);
               console.log('Set fallback agents for supervisor:', agentUsers);
             }
@@ -97,8 +150,16 @@ export default function AppointmentsPage() {
           console.log('All agents response:', data);
           
           if (data.success) {
-            setAgents(data.data || []);
-            console.log('Set agents for admin:', data.data);
+            // Admin: show all users (no role filter) in selector
+            const users = (data.data || []).map(u => ({
+              id: u.id,
+              firstName: u.firstName || u.first_name || '',
+              lastName: u.lastName || u.last_name || '',
+              email: u.email,
+              role: u.role
+            }));
+            setAgents(users);
+            console.log('Set users for admin (all roles):', users);
           }
         }
       } catch (error) {
@@ -111,15 +172,40 @@ export default function AppointmentsPage() {
     try {
       setLoading(true);
       
-      // Build API URL based on user role
-      let apiUrl = '/api/sales';
+      // Use dedicated appointments API - much more efficient
+      let apiUrl = '/api/appointments';
       const params = new URLSearchParams();
       
+      // Add date filtering for appointments based on current UI filter
+      const effectiveDateField = 'appointmentDateTime'; // Use appointment field for filtering
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const todayStr = today.toISOString().split('T')[0];
+
+      let effectiveDateFilter = 'today';
+      if (filter === 'today') {
+        effectiveDateFilter = 'today';
+      } else if (filter === 'upcoming') {
+        // Future appointments only
+        effectiveDateFilter = `>${todayStr}`;
+      } else if (filter === 'past') {
+        // Past appointments only
+        effectiveDateFilter = `<${todayStr}`;
+      } else if (filter === 'custom' && customDateRange?.startDate && customDateRange?.endDate) {
+        effectiveDateFilter = `${customDateRange.startDate}|${customDateRange.endDate}`;
+      }
+
+      if (effectiveDateFilter) params.append('dateFilter', effectiveDateFilter);
+      params.append('dateField', effectiveDateField);
+      
       // JWT authentication handles user identification
-      if (user?.role === 'supervisor' && agentId) {
-        // Supervisor viewing specific agent's appointments
-        params.append('agentId', agentId);
-        console.log('Supervisor viewing agent appointments for:', agentId);
+      if (user?.role === 'supervisor') {
+        // When My Appointments is selected, always send supervisor's id
+        const effectiveAgentId = isMyAppointments ? user.id : agentId;
+        if (effectiveAgentId) {
+          params.append('agentId', effectiveAgentId);
+          console.log('Supervisor appointments for:', effectiveAgentId, 'my:', isMyAppointments);
+        }
       } else if (user?.role === 'admin' && agentId) {
         // Admin viewing specific agent's appointments
         params.append('agentId', agentId);
@@ -282,25 +368,44 @@ export default function AppointmentsPage() {
 
         {/* Agent Selection for Supervisor and Admin */}
         {(user?.role === 'supervisor' || user?.role === 'admin') && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-            <div className="flex items-center space-x-4">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+          <div className="flex items-center space-x-4">
               <label className="text-sm font-medium text-gray-700">
-                {user?.role === 'supervisor' ? 'View Agent:' : 'View Agent:'}
+                {user?.role === 'admin' ? 'View Users:' : 'View Agent:'}
               </label>
+              {user?.role === 'supervisor' && (
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => { setIsMyAppointments(true); setSelectedAgent(null); }}
+                    className={`text-sm px-3 py-2 border rounded-md ${isMyAppointments ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                  >
+                    My Appointments
+                  </button>
+                  <button
+                    onClick={() => setIsMyAppointments(false)}
+                    className={`text-sm px-3 py-2 border rounded-md ${!isMyAppointments ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                  >
+                    Agent Appointments
+                  </button>
+                </div>
+              )}
               <select
                 value={selectedAgent?.id || ''}
                 onChange={(e) => {
                   const agentId = e.target.value;
                   const agent = agents.find(a => a.id === parseInt(agentId));
                   setSelectedAgent(agent || null);
+                  // Switching via dropdown implies Agent Appointments mode
+                  if (user?.role === 'supervisor') setIsMyAppointments(false);
                 }}
                 className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">All Agents</option>
+                
+                <option value="">{user?.role === 'supervisor' ? 'All Agents' : 'All Users'}</option>
                 {agents.length > 0 ? (
                   agents.map(agent => (
                     <option key={agent.id} value={agent.id}>
-                      {agent.first_name} {agent.last_name}
+                      {(agent.firstName || agent.first_name || '')} {(agent.lastName || agent.last_name || '')}
                     </option>
                   ))
                 ) : (
@@ -309,7 +414,7 @@ export default function AppointmentsPage() {
               </select>
               {/* Debug info */}
               <div className="text-xs text-gray-500">
-                Agents loaded: {agents.length}
+                {user?.role === 'admin' ? 'Users loaded: ' : 'Agents loaded: '} {agents.length}
               </div>
               {selectedAgent && (
                 <button
@@ -322,7 +427,7 @@ export default function AppointmentsPage() {
             </div>
             {selectedAgent && (
               <p className="text-sm text-gray-600 mt-2">
-                Showing appointments for: <span className="font-medium">{selectedAgent.firstName} {selectedAgent.lastName}</span>
+                Showing appointments for: <span className="font-medium">{(selectedAgent.firstName || selectedAgent.first_name || '')} {(selectedAgent.lastName || selectedAgent.last_name || '')}</span>
               </p>
             )}
           </div>
@@ -339,7 +444,7 @@ export default function AppointmentsPage() {
                 className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="upcoming">Upcoming Appointments</option>
-                <option value="all">All Appointments</option>
+                {/* <option value="all">All Appointments</option> */}
                 <option value="today">Today Only</option>
                 <option value="past">Past Appointments</option>
                 <option value="custom">Custom Range</option>

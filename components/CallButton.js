@@ -145,19 +145,13 @@ const CallButton = ({
     setError(null);
 
     try {
-      const response = await fetch('/api/calls/initiate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          customerId,
-          saleId,
-          agentId: user.id,
-          phoneNumber,
-          callPurpose,
-          customMessage: `Hello ${customerName || 'there'}, this is a call from our CRM system.`
-        }),
+      const response = await apiClient.post('/api/calls/initiate', {
+        customerId,
+        saleId,
+        agentId: user.id,
+        phoneNumber,
+        callPurpose,
+        customMessage: `Hello ${customerName || 'there'}, this is a call from our CRM system.`
       });
 
       const result = await response.json();

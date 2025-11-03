@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { setUserSession } from '../lib/auth';
 import { useAuth } from '../contexts/AuthContext';
+import { getUserLocation } from '../lib/geolocation';
 
 export default function SignIn() {
   const router = useRouter();
@@ -62,6 +63,15 @@ export default function SignIn() {
     setErrors({});
     
     try {
+      // Try to get user location (non-blocking)
+      let location = null;
+      try {
+        location = await getUserLocation({ timeout: 5000 });
+      } catch (locationError) {
+        console.warn('Could not get location:', locationError.message);
+        // Location is optional, continue without it
+      }
+
       const response = await fetch('/api/auth/signin', {
         method: 'POST',
         headers: {
@@ -69,7 +79,12 @@ export default function SignIn() {
         },
         body: JSON.stringify({
           email: formData.email,
-          password: formData.password
+          password: formData.password,
+          location: location ? {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            accuracy: location.accuracy
+          } : null
         }),
       });
 

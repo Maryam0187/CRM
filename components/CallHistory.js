@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { isAdmin } from '../lib/roleUtils';
+import apiClient from '../lib/apiClient';
 
 // Utility functions (moved from twilio.js to avoid client-side import)
 const formatCallDuration = (seconds) => {
@@ -70,7 +71,7 @@ const CallHistory = ({
       if (agentId) params.append('agentId', agentId);
       params.append('limit', limit);
 
-      const response = await fetch(`/api/calls/initiate?${params}`);
+      const response = await apiClient.get(`/api/calls/initiate?${params}`);
       const result = await response.json();
 
       if (result.success) {
