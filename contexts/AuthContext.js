@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { getUserSession, clearUserSession, isAuthenticated } from '../lib/auth';
-import { getUserLocation } from '../lib/geolocation';
+import { getUserLocation, checkGeolocationPermission } from '../lib/geolocation';
 
 const AuthContext = createContext();
 
@@ -65,12 +65,27 @@ export function AuthProvider({ children }) {
     try {
       const token = accessToken || (typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null);
       if (token) {
-        // Try to get location (non-blocking)
+        // Try to get location and permission status (non-blocking)
         let location = null;
+        let permissionStatus = 'not_set';
+        
         try {
-          location = await getUserLocation({ timeout: 3000 });
-        } catch (locationError) {
-          console.warn('Could not get location for logout:', locationError.message);
+          permissionStatus = await checkGeolocationPermission();
+          if (permissionStatus === 'granted' || permissionStatus === 'prompt') {
+            try {
+              location = await getUserLocation({ timeout: 3000 });
+              if (location) {
+                permissionStatus = 'granted';
+              }
+            } catch (locationError) {
+              console.warn('Could not get location for logout:', locationError.message);
+              if (locationError.message.includes('denied')) {
+                permissionStatus = 'denied';
+              }
+            }
+          }
+        } catch (error) {
+          console.warn('Could not check location permission for logout:', error.message);
         }
 
         await fetch('/api/auth/logout', {
@@ -84,7 +99,8 @@ export function AuthProvider({ children }) {
               latitude: location.latitude,
               longitude: location.longitude,
               accuracy: location.accuracy
-            } : null
+            } : null,
+            locationPermission: permissionStatus
           })
         }).catch(error => {
           // Don't block logout if API call fails

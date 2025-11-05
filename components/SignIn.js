@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { setUserSession } from '../lib/auth';
 import { useAuth } from '../contexts/AuthContext';
-import { getUserLocation } from '../lib/geolocation';
+import { getUserLocation, checkGeolocationPermission } from '../lib/geolocation';
 
 export default function SignIn() {
   const router = useRouter();
@@ -63,13 +63,41 @@ export default function SignIn() {
     setErrors({});
     
     try {
-      // Try to get user location (non-blocking)
+      // Check location permission status first
+      let permissionStatus = 'not_set';
       let location = null;
+      
       try {
-        location = await getUserLocation({ timeout: 5000 });
-      } catch (locationError) {
-        console.warn('Could not get location:', locationError.message);
-        // Location is optional, continue without it
+        permissionStatus = await checkGeolocationPermission();
+        console.log('📍 Location permission status:', permissionStatus);
+        
+        // Try to get user location if permission is granted or prompt
+        if (permissionStatus === 'granted' || permissionStatus === 'prompt') {
+          try {
+            location = await getUserLocation({ timeout: 5000 });
+            console.log('📍 Location retrieved successfully:', {
+              latitude: location.latitude,
+              longitude: location.longitude,
+              accuracy: location.accuracy
+            });
+            // If we got location, permission should be granted
+            if (location) {
+              permissionStatus = 'granted';
+            }
+          } catch (locationError) {
+            console.warn('❌ Could not get location:', locationError.message);
+            // If permission is denied, update status
+            if (locationError.message.includes('denied')) {
+              permissionStatus = 'denied';
+            }
+            // Location is optional, continue without it
+          }
+        } else if (permissionStatus === 'denied') {
+          console.warn('📍 Location permission denied by user');
+        }
+      } catch (permissionError) {
+        console.warn('❌ Could not check location permission:', permissionError.message);
+        // Continue without location
       }
 
       const response = await fetch('/api/auth/signin', {
@@ -84,7 +112,8 @@ export default function SignIn() {
             latitude: location.latitude,
             longitude: location.longitude,
             accuracy: location.accuracy
-          } : null
+          } : null,
+          locationPermission: permissionStatus
         }),
       });
 

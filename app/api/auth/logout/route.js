@@ -6,8 +6,15 @@ const UserTimeTracker = require('../../../../lib/userTimeTracker');
 
 export async function POST(request) {
   try {
-    // Get location from request body if provided
-    const { location } = await request.json().catch(() => ({}));
+    // Get location and permission from request body if provided
+    const { location, locationPermission } = await request.json().catch(() => ({}));
+    
+    console.log('🔍 Logout API - Received location data:', {
+      hasLocation: !!location,
+      locationPermission: locationPermission || 'not provided',
+      latitude: location?.latitude,
+      longitude: location?.longitude
+    });
     
     // Get authorization header
     const authHeader = request.headers.get('authorization');
@@ -44,11 +51,16 @@ export async function POST(request) {
           const oldStatus = user.status || 'online';
           
           // Prepare update data
-          const shouldUpdateLogout = !user.lastLoginTime || logoutTime >= new Date(user.lastLoginTime);
+          // Always update lastLogoutTime on logout (just like lastLoginTime is always updated on login)
           const updateData = {
             status: 'offline',
-            lastLogoutTime: shouldUpdateLogout ? logoutTime : user.lastLogoutTime
+            lastLogoutTime: logoutTime
           };
+          
+          console.log(`🕐 Updating logout time for user ${user.id}:`, {
+            logoutTime: logoutTime.toISOString(),
+            previousLastLogoutTime: user.lastLogoutTime ? new Date(user.lastLogoutTime).toISOString() : null
+          });
 
           // Add location data if provided
           if (location && location.latitude && location.longitude) {
@@ -56,9 +68,30 @@ export async function POST(request) {
             updateData.longitude = location.longitude;
             updateData.locationAccuracy = location.accuracy || null;
             updateData.locationTimestamp = logoutTime;
+            console.log('📍 Updating user location on logout:', {
+              latitude: location.latitude,
+              longitude: location.longitude,
+              accuracy: location.accuracy
+            });
+          }
+          
+          // Update location permission status if provided
+          if (locationPermission && ['granted', 'denied', 'prompt', 'not_set'].includes(locationPermission)) {
+            updateData.locationPermission = locationPermission;
+            console.log('📍 Updating location permission on logout:', locationPermission);
           }
           
           await user.update(updateData);
+          
+          // Reload user to get updated values
+          await user.reload();
+          
+          // Verify the update was successful
+          console.log(`✅ Logout time updated successfully for user ${user.id}:`, {
+            savedLastLogoutTime: user.lastLogoutTime ? new Date(user.lastLogoutTime).toISOString() : null,
+            expectedLogoutTime: logoutTime.toISOString(),
+            match: user.lastLogoutTime && new Date(user.lastLogoutTime).getTime() === logoutTime.getTime()
+          });
           
           console.log(`User ${decoded.userId} logged out at ${logoutTime}`);
           

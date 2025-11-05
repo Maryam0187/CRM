@@ -320,7 +320,7 @@ export default function UserDetailsModal({ user, onClose }) {
               <span>•</span>
               <span>{user.role_display || user.role}</span>
               <span>•</span>
-              {getStatusBadge(user.status)}
+              {getStatusBadge(displayedUser.status || user.status)}
             </div>
           </div>
           <button

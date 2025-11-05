@@ -6,7 +6,14 @@ const UserTimeTracker = require('../../../../lib/userTimeTracker');
 
 export async function POST(request) {
   try {
-    const { email, password, location } = await request.json();
+    const { email, password, location, locationPermission } = await request.json();
+    
+    console.log('🔍 SignIn API - Received location data:', {
+      hasLocation: !!location,
+      locationPermission: locationPermission || 'not provided',
+      latitude: location?.latitude,
+      longitude: location?.longitude
+    });
 
     // Validate input
     if (!email || !password) {
@@ -76,10 +83,16 @@ export async function POST(request) {
     const oldStatus = user.status || 'offline';
     
     // Prepare update data
+    // Always update lastLoginTime on login
     const updateData = {
       status: 'online',
       lastLoginTime: loginTime
     };
+    
+    console.log(`🕐 Updating login time for user ${user.id}:`, {
+      loginTime: loginTime.toISOString(),
+      previousLastLoginTime: user.lastLoginTime ? new Date(user.lastLoginTime).toISOString() : null
+    });
 
     // Add location data if provided
     if (location && location.latitude && location.longitude) {
@@ -87,6 +100,17 @@ export async function POST(request) {
       updateData.longitude = location.longitude;
       updateData.locationAccuracy = location.accuracy || null;
       updateData.locationTimestamp = loginTime;
+      console.log('📍 Updating user location:', {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy
+      });
+    }
+    
+    // Update location permission status if provided
+    if (locationPermission && ['granted', 'denied', 'prompt', 'not_set'].includes(locationPermission)) {
+      updateData.locationPermission = locationPermission;
+      console.log('📍 Updating location permission:', locationPermission);
     }
 
     // Always update lastLoginTime on login - this is a new login event
@@ -94,6 +118,13 @@ export async function POST(request) {
 
     // Refresh user data to get updated values
     await user.reload();
+    
+    // Verify the update was successful
+    console.log(`✅ Login time updated successfully for user ${user.id}:`, {
+      savedLastLoginTime: user.lastLoginTime ? new Date(user.lastLoginTime).toISOString() : null,
+      expectedLoginTime: loginTime.toISOString(),
+      match: user.lastLoginTime && new Date(user.lastLoginTime).getTime() === loginTime.getTime()
+    });
 
     // Log login activity
     const ipAddress = UserActivityLogger.getIpAddress(request);
