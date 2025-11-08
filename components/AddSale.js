@@ -26,6 +26,7 @@ import {
 } from '../lib/validation.js';
 import { useToast } from '../contexts/ToastContext';
 import { SALES_STATUSES, getStepForStatus, getStatusDisplayName, getStatusColorClass, getStatusBadgeClasses } from '../lib/salesStatuses.js';
+import { downloadSaleDoc, escapeHtml as docEscapeHtml, buildTableRows as docBuildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
 
 // Helper function to calculate time ago
 const getTimeAgo = (dateString) => {
@@ -170,6 +171,109 @@ export default function AddSale() {
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
+
+  const escapeHtml = docEscapeHtml;
+  const buildTableRows = docBuildTableRows;
+
+  const buildPaymentContent = () => {
+    const tableStyle = DOC_TABLE_STYLE;
+
+    if (selectedPaymentType === 'card') {
+      const rows = [
+        { label: 'Payment Type', value: 'Card' },
+        { label: 'Card Type', value: cardFormData.cardType },
+        { label: 'Provider', value: cardFormData.provider },
+        { label: 'Customer Name', value: cardFormData.customerName },
+        { label: 'Card Number', value: cardFormData.cardNumber },
+        { label: 'CVV', value: cardFormData.cvv },
+        { label: 'Expiry Date', value: cardFormData.expiryDate },
+        { label: 'Notes', value: cardFormData.notes }
+      ];
+      return `<table style="${tableStyle}">${DOC_TABLE_COLGROUP}${buildTableRows(rows)}</table>`;
+    }
+
+    if (selectedPaymentType === 'bank') {
+      const rows = [
+        { label: 'Payment Type', value: 'Bank' },
+        { label: 'Bank Name', value: bankFormData.bankName },
+        { label: 'Account Holder', value: bankFormData.accountHolder },
+        { label: 'Account Number', value: bankFormData.accountNumber },
+        { label: 'Routing Number', value: bankFormData.routingNumber },
+        { label: 'Check Number', value: bankFormData.checkNumber },
+        { label: "Driver's License", value: bankFormData.driverLicense },
+        { label: 'Name on License', value: bankFormData.nameOnLicense },
+        { label: 'State ID', value: bankFormData.stateId },
+        { label: 'Notes', value: bankFormData.notes }
+      ];
+      return `<table style="${tableStyle}">${DOC_TABLE_COLGROUP}${buildTableRows(rows)}</table>`;
+    }
+
+    return `<table style="${tableStyle}">${DOC_TABLE_COLGROUP}${buildTableRows([{ label: 'Payment Details', value: 'No payment information provided' }])}</table>`;
+  };
+
+  const handleDownloadDoc = () => {
+    try {
+      const customerFileName =
+        customer.firstName && customer.firstName.trim().length > 0
+          ? customer.firstName.trim().replace(/\s+/g, '-').toLowerCase()
+          : 'customer';
+
+      const customerRows = [
+        { label: 'First Name', value: customer.firstName },
+        { label: 'Landline', value: customer.landline },
+        { label: 'Phone', value: customer.phone },
+        { label: 'Address', value: customer.address },
+        { label: 'City', value: customer.city },
+        { label: 'State', value: customer.state },
+        { label: 'Country', value: customer.country },
+        { label: 'Mailing Address', value: customer.mailingAddress },
+        { label: 'Customer Feedback', value: customer.customerFeedback }
+      ];
+
+      const saleRows = [
+        { label: 'Sale ID', value: saleForm.id || 'N/A' },
+        { label: 'Status', value: saleForm.status },
+        { label: 'Spoke To', value: saleForm.spoke_to },
+        { label: 'PIN Code', value: saleForm.pin_code },
+        { label: 'PIN Code Status', value: saleForm.pin_code_status },
+        { label: 'SSN Name', value: saleForm.ssnName },
+        { label: 'SSN Number', value: saleForm.ssnNumber },
+        { label: 'Carrier', value: saleForm.carrier },
+        { label: 'Basic Package', value: saleForm.basicPackage },
+        { label: 'Basic Package Status', value: saleForm.basicPackageStatus },
+        { label: '# of TV', value: saleForm.NoFTV },
+        { label: 'Account Holder', value: saleForm.AccHolder },
+        { label: 'Account Number', value: saleForm.AccNumber },
+        { label: '# of Receivers', value: saleForm.NoReceiver },
+        { label: 'Security Question', value: saleForm.question },
+        { label: 'Security Answer', value: saleForm.answer },
+        { label: 'Regular Bill', value: saleForm.regularBill },
+        { label: 'Promotional Bill', value: saleForm.promotionalBill },
+        { label: 'Bundle', value: saleForm.bundle },
+        { label: 'Company', value: saleForm.company },
+        { label: 'Last Payment', value: saleForm.lastPayment },
+        { label: 'Last Payment Date', value: saleForm.lastPaymentDate },
+        { label: 'Breakdown', value: saleForm.breakdown },
+        { label: 'Notes', value: saleForm.notes },
+        { label: 'Balance', value: saleForm.balance },
+        { label: 'Due On', value: saleForm.dueonDate }
+      ];
+
+      const paymentContent = buildPaymentContent();
+
+      downloadSaleDoc({
+        fileName: `${customerFileName}-sale-${saleForm.id || 'id'}.doc`,
+        saleRows,
+        customerRows,
+        paymentContent
+      });
+
+      showSuccess('Sale summary downloaded successfully.');
+    } catch (error) {
+      console.error('Error generating sale document:', error);
+      showError('Unable to generate the sale document. Please try again.');
+    }
+  };
 
   // Sale form state
   const [saleForm, setSaleForm] = useState({
@@ -2562,14 +2666,25 @@ Room: `;
                 }
               </p>
             </div>
-            <button
-              onClick={() => router.back()}
-              className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleDownloadDoc}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
+              >
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+                </svg>
+                Download DOC
+              </button>
+              <button
+                onClick={() => router.back()}
+                className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>

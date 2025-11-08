@@ -12,11 +12,123 @@ import { useAuth } from '../contexts/AuthContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
 import apiClient from '../lib/apiClient';
 import { SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName } from '../lib/salesStatuses';
+import { downloadSaleDoc, buildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
 
 export default function Home() {
   const router = useRouter();
   const { user } = useAuth();
-  
+
+  const buildPaymentSections = (sale) => {
+    const cards = Array.isArray(sale?.cards) ? sale.cards : [];
+    const banks = Array.isArray(sale?.banks) ? sale.banks : [];
+
+    const cardSections = cards
+      .map((card, idx) => {
+        const rows = [
+          { label: 'Card Type', value: card?.cardType || card?.card_type },
+          { label: 'Provider', value: card?.provider },
+          { label: 'Customer Name', value: card?.customerName || card?.customer_name },
+          { label: 'Masked Card Number', value: card?.maskedCardNumber || card?.masked_card_number || card?.cardNumber || card?.card_number },
+          { label: 'Expiry Date', value: card?.expiryDate || card?.expiry_date },
+          { label: 'Notes', value: card?.notes }
+        ];
+
+        return `
+          <h3 style="margin-top: 16px; font-size: 16px; color: #1f2937;">Card ${idx + 1}</h3>
+          <table style="${DOC_TABLE_STYLE}">
+            ${DOC_TABLE_COLGROUP}
+            ${buildTableRows(rows)}
+          </table>
+        `;
+      })
+      .join('');
+
+    const bankSections = banks
+      .map((bank, idx) => {
+        const rows = [
+          { label: 'Bank Name', value: bank?.bankName || bank?.bank_name },
+          { label: 'Account Holder', value: bank?.accountHolder || bank?.account_holder },
+          { label: 'Masked Account Number', value: bank?.maskedAccountNumber || bank?.masked_account_number || bank?.accountNumber || bank?.account_number },
+          { label: 'Routing Number', value: bank?.routingNumber || bank?.routing_number },
+          { label: 'Check Number', value: bank?.checkNumber || bank?.check_number },
+          { label: 'Notes', value: bank?.notes }
+        ];
+
+        return `
+          <h3 style="margin-top: 16px; font-size: 16px; color: #1f2937;">Bank ${idx + 1}</h3>
+          <table style="${DOC_TABLE_STYLE}">
+            ${DOC_TABLE_COLGROUP}
+            ${buildTableRows(rows)}
+          </table>
+        `;
+      })
+      .join('');
+
+    if (!cardSections && !bankSections) {
+      return `
+        <table style="${DOC_TABLE_STYLE}">
+          ${DOC_TABLE_COLGROUP}
+          ${buildTableRows([{ label: 'Payment Methods', value: 'No payment information available' }])}
+        </table>
+      `;
+    }
+
+    return `
+      ${cardSections || ''}
+      ${bankSections || ''}
+    `;
+  };
+
+  const handleDownloadSaleDoc = (sale) => {
+    if (!sale) return;
+
+    try {
+      const saleId = sale.id || sale.saleId || sale.sale_id || sale.uuid || 'sale';
+      const customerFirstName = sale?.customer?.firstName || sale?.customerName || 'customer';
+      const fileName = `${customerFirstName.toString().trim().replace(/\s+/g, '-').toLowerCase()}-sale-${saleId}.doc`;
+
+      const customer = sale.customer || {};
+
+      const saleRows = [
+        { label: 'Sale ID', value: saleId },
+        { label: 'Status', value: getStatusDisplayName(sale?.status) || sale?.status },
+        { label: 'Agent ID', value: sale?.agentId },
+        { label: 'Customer ID', value: sale?.customerId },
+        { label: 'Created At', value: sale?.created_at ? new Date(sale.created_at).toLocaleString() : 'N/A' },
+        { label: 'Updated At', value: sale?.updated_at ? new Date(sale.updated_at).toLocaleString() : 'N/A' },
+        { label: 'Spoke To', value: sale?.spokeTo || sale?.spoke_to },
+        { label: 'PIN Code', value: sale?.pinCode || sale?.pin_code },
+        { label: 'Carrier', value: sale?.carrier },
+        { label: 'Bundle', value: sale?.bundle },
+        { label: 'Company', value: sale?.company },
+        { label: 'Notes', value: sale?.notes }
+      ];
+
+      const customerRows = [
+        { label: 'First Name', value: customer?.firstName },
+        { label: 'Last Name', value: customer?.lastName },
+        { label: 'Email', value: customer?.email },
+        { label: 'Phone', value: customer?.phone },
+        { label: 'Landline', value: customer?.landline },
+        { label: 'City', value: customer?.city },
+        { label: 'State', value: customer?.state },
+        { label: 'Country', value: customer?.country },
+        { label: 'Address', value: customer?.address }
+      ];
+
+      const paymentContent = buildPaymentSections(sale);
+
+      downloadSaleDoc({
+        fileName,
+        saleRows,
+        customerRows,
+        paymentContent
+      });
+    } catch (error) {
+      console.error('Failed to generate sale document:', error);
+    }
+  };
+
   // Save filter state to localStorage
   const { filters, updateFilter } = useFilterStorage('homeFilters', {
     status: '',
@@ -430,19 +542,34 @@ export default function Home() {
               </button>
             )}
             {user?.role === 'admin' && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedTimelineSaleId(row.id);
-                  setIsTimelineModalVisible(true);
-                }}
-                className="inline-flex items-center px-3 py-1 text-xs font-medium text-purple-600 bg-purple-50 rounded-md hover:bg-purple-100 transition-colors duration-200"
-              >
-                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Timeline
-              </button>
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDownloadSaleDoc(row);
+                  }}
+                  className="inline-flex items-center px-2.5 py-1 text-xs font-medium text-green-600 bg-green-50 rounded-md hover:bg-green-100 transition-colors duration-200"
+                  title="Download Sale DOC"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+                  </svg>
+                  <span className="sr-only">Download sale document</span>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedTimelineSaleId(row.id);
+                    setIsTimelineModalVisible(true);
+                  }}
+                  className="inline-flex items-center px-3 py-1 text-xs font-medium text-purple-600 bg-purple-50 rounded-md hover:bg-purple-100 transition-colors duration-200"
+                >
+                  <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Timeline
+                </button>
+              </>
             )}
           </div>
         );
