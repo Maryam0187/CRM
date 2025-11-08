@@ -63,7 +63,7 @@ export default function SignIn() {
     setErrors({});
     
     try {
-      // Check location permission status first
+      // Location is REQUIRED for login - check permission and get location
       let permissionStatus = 'not_set';
       let location = null;
       
@@ -71,10 +71,10 @@ export default function SignIn() {
         permissionStatus = await checkGeolocationPermission();
         console.log('📍 Location permission status:', permissionStatus);
         
-        // Try to get user location if permission is granted or prompt
+        // Location is required - try to get it
         if (permissionStatus === 'granted' || permissionStatus === 'prompt') {
           try {
-            location = await getUserLocation({ timeout: 5000 });
+            location = await getUserLocation({ timeout: 10000, enableHighAccuracy: true });
             console.log('📍 Location retrieved successfully:', {
               latitude: location.latitude,
               longitude: location.longitude,
@@ -85,19 +85,42 @@ export default function SignIn() {
               permissionStatus = 'granted';
             }
           } catch (locationError) {
-            console.warn('❌ Could not get location:', locationError.message);
+            console.error('❌ Could not get location:', locationError.message);
             // If permission is denied, update status
             if (locationError.message.includes('denied')) {
               permissionStatus = 'denied';
             }
-            // Location is optional, continue without it
+            // Location is REQUIRED - block login
+            setErrors({ 
+              submit: 'Location access is required to login. Please enable location services and grant permission.' 
+            });
+            setIsLoading(false);
+            return;
           }
         } else if (permissionStatus === 'denied') {
-          console.warn('📍 Location permission denied by user');
+          console.error('📍 Location permission denied by user');
+          setErrors({ 
+            submit: 'Location access is required to login. Please enable location services in your browser settings and try again.' 
+          });
+          setIsLoading(false);
+          return;
+        }
+        
+        // Final check: location is required
+        if (!location || !location.latitude || !location.longitude) {
+          setErrors({ 
+            submit: 'Unable to get your location. Please ensure location services are enabled and try again.' 
+          });
+          setIsLoading(false);
+          return;
         }
       } catch (permissionError) {
-        console.warn('❌ Could not check location permission:', permissionError.message);
-        // Continue without location
+        console.error('❌ Could not check location permission:', permissionError.message);
+        setErrors({ 
+          submit: 'Location access is required to login. Please enable location services and try again.' 
+        });
+        setIsLoading(false);
+        return;
       }
 
       const response = await fetch('/api/auth/signin', {

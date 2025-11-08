@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../lib/apiClient';
 import { useSocket } from '../contexts/SocketContext';
 
@@ -53,10 +53,37 @@ export default function UserDetailsModal({ user, onClose }) {
   // State for displaying current user status and permission
   const [displayedUser, setDisplayedUser] = useState(user);
 
-  // Update displayed user when prop changes
+  // Function to fetch fresh user information
+  const fetchFreshUserInfo = useCallback(async () => {
+    if (!user || !user.id) return;
+    
+    try {
+      const response = await apiClient.get(`/api/users/${user.id}`);
+      const data = await response.json();
+      
+      if (data.success && data.user) {
+        // Update displayed user with fresh data (including location and permission)
+        setDisplayedUser(data.user);
+        console.log('✅ Fresh user data fetched:', {
+          userId: data.user.id,
+          status: data.user.status,
+          location_permission: data.user.location_permission,
+          hasLocation: !!(data.user.latitude && data.user.longitude)
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching fresh user info:', error);
+    }
+  }, [user]);
+
+  // Update displayed user when prop changes and fetch fresh data
   useEffect(() => {
     setDisplayedUser(user);
-  }, [user]);
+    // Fetch fresh user data when modal opens
+    if (user && user.id) {
+      fetchFreshUserInfo();
+    }
+  }, [user, fetchFreshUserInfo]);
 
   // Listen for real-time status updates via socket
   useEffect(() => {
@@ -65,25 +92,37 @@ export default function UserDetailsModal({ user, onClose }) {
     const handleStatusChange = (data) => {
       // Only update if this status change is for the displayed user
       if (data.userId === user.id) {
-        setDisplayedUser(prev => ({ ...prev, status: data.status }));
+        // Fetch fresh user data to get all updated fields
+        fetchFreshUserInfo();
       }
     };
 
     const handlePermissionChange = (data) => {
       // Only update if this permission change is for the displayed user
       if (data.userId === user.id) {
-        setDisplayedUser(prev => ({ ...prev, location_permission: data.permission }));
+        // Fetch fresh user data to get all updated fields including location
+        fetchFreshUserInfo();
+      }
+    };
+
+    const handleLocationChange = (data) => {
+      // Only update if this location change is for the displayed user
+      if (data.userId === user.id) {
+        // Fetch fresh user data to get updated location
+        fetchFreshUserInfo();
       }
     };
 
     socket.on('user_status_change', handleStatusChange);
     socket.on('user_location_permission_changed', handlePermissionChange);
+    socket.on('user_location_changed', handleLocationChange);
 
     return () => {
       socket.off('user_status_change', handleStatusChange);
       socket.off('user_location_permission_changed', handlePermissionChange);
+      socket.off('user_location_changed', handleLocationChange);
     };
-  }, [socket, isConnected, user]);
+  }, [socket, isConnected, user, fetchFreshUserInfo]);
 
   useEffect(() => {
     if (user) {

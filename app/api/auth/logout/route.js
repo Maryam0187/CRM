@@ -92,6 +92,23 @@ export async function POST(request) {
             expectedLogoutTime: logoutTime.toISOString(),
             match: user.lastLogoutTime && new Date(user.lastLogoutTime).getTime() === logoutTime.getTime()
           });
+
+          // Broadcast location change via socket if location was updated
+          if (location && location.latitude && location.longitude) {
+            const socketManager = require('../../../../lib/socket');
+            const io = socketManager.getIO();
+            if (io) {
+              io.emit('user_location_changed', {
+                userId: user.id,
+                latitude: user.latitude,
+                longitude: user.longitude,
+                accuracy: user.locationAccuracy,
+                locationTimestamp: user.locationTimestamp,
+                timestamp: new Date().toISOString()
+              });
+              console.log('📍 Location change broadcasted via socket for user', user.id);
+            }
+          }
           
           console.log(`User ${decoded.userId} logged out at ${logoutTime}`);
           

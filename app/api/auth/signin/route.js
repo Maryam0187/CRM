@@ -23,6 +23,22 @@ export async function POST(request) {
       );
     }
 
+    // Location is REQUIRED for login
+    if (!location || !location.latitude || !location.longitude) {
+      return NextResponse.json(
+        { error: 'Location access is required to login. Please enable location services and grant permission.' },
+        { status: 400 }
+      );
+    }
+
+    // Validate location permission
+    if (!locationPermission || locationPermission === 'denied') {
+      return NextResponse.json(
+        { error: 'Location permission is required to login. Please grant location permission in your browser settings.' },
+        { status: 400 }
+      );
+    }
+
     // Find user by email with supervisor/agent information based on role
     const user = await User.findOne({
       where: { email: email.toLowerCase() },
@@ -125,6 +141,23 @@ export async function POST(request) {
       expectedLoginTime: loginTime.toISOString(),
       match: user.lastLoginTime && new Date(user.lastLoginTime).getTime() === loginTime.getTime()
     });
+
+    // Broadcast location change via socket if location was updated
+    if (location && location.latitude && location.longitude) {
+      const socketManager = require('../../../../lib/socket');
+      const io = socketManager.getIO();
+      if (io) {
+        io.emit('user_location_changed', {
+          userId: user.id,
+          latitude: user.latitude,
+          longitude: user.longitude,
+          accuracy: user.locationAccuracy,
+          locationTimestamp: user.locationTimestamp,
+          timestamp: new Date().toISOString()
+        });
+        console.log('📍 Location change broadcasted via socket for user', user.id);
+      }
+    }
 
     // Log login activity
     const ipAddress = UserActivityLogger.getIpAddress(request);
