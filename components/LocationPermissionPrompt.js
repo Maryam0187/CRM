@@ -73,7 +73,7 @@ export default function LocationPermissionPrompt() {
     setIsLoading(true);
     try {
       // Try to get location to trigger permission prompt
-      await getUserLocation({ timeout: 5000 });
+        await getUserLocation({ timeout: 5000, enableHighAccuracy: true, maximumAge: 0 });
       
       // Success - user granted permission
       setPermissionStatus('granted');

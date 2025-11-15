@@ -72,8 +72,8 @@ export function AuthProvider({ children }) {
         try {
           permissionStatus = await checkGeolocationPermission();
           if (permissionStatus === 'granted' || permissionStatus === 'prompt') {
-            try {
-              location = await getUserLocation({ timeout: 3000 });
+                 try {
+                   location = await getUserLocation({ timeout: 3000, enableHighAccuracy: true, maximumAge: 0 });
               if (location) {
                 permissionStatus = 'granted';
               }
