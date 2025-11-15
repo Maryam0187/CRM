@@ -15,6 +15,10 @@ export async function POST(request) {
     }
 
     const body = await request.json();
+    
+    // Check if call recording is enabled (default to false)
+    const recordingEnabled = process.env.TWILIO_ENABLE_RECORDING === 'true';
+    
     const { 
       customerId, 
       saleId, 
@@ -22,8 +26,11 @@ export async function POST(request) {
       phoneNumber, 
       callPurpose = 'follow_up',
       customMessage,
-      recordCall = true 
+      recordCall = false // Default to false, can be overridden by request
     } = body;
+    
+    // Only allow recording if globally enabled AND explicitly requested
+    const shouldRecord = recordingEnabled && recordCall;
 
     // Validate required fields
     if (!agentId || !phoneNumber) {
@@ -57,7 +64,7 @@ export async function POST(request) {
     // Generate TwiML for the call
     const twiml = generateCallTwiML({
       sayMessage: customMessage || 'Hello, this is a call from your CRM system.',
-      recordCall,
+      recordCall: shouldRecord,
       recordingCallback: getWebhookUrl('/api/twilio/recording-callback')
     });
 
@@ -72,15 +79,21 @@ export async function POST(request) {
 
     // Create the call
     const voiceUrl = getWebhookUrl('/api/twilio/voice-response');
-    const call = await client.calls.create({
+    const callOptions = {
       url: voiceUrl,
       to: formattedNumber,
       from: twilioPhoneNumber,
       statusCallback: statusCallbackUrl,
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-      record: recordCall, // Enable recording at call level
-      recordingStatusCallback: recordingCallbackUrl // Add recording status callback
-    });
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
+    };
+    
+    // Only add recording options if recording is enabled
+    if (shouldRecord) {
+      callOptions.record = true;
+      callOptions.recordingStatusCallback = recordingCallbackUrl;
+    }
+    
+    const call = await client.calls.create(callOptions);
     
     console.log('📞 Call created:', {
       callSid: call.sid,
