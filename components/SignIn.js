@@ -4,11 +4,13 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { setUserSession } from '../lib/auth';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { getUserLocation, checkGeolocationPermission } from '../lib/geolocation';
 
 export default function SignIn() {
   const router = useRouter();
   const { login } = useAuth();
+  const { showInfo } = useToast();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -150,6 +152,11 @@ export default function SignIn() {
         setUserSession(data.user);
         // Login with user data and tokens
         login(data.user, data.accessToken, data.refreshToken);
+        
+        // Show notification if previous session was logged out
+        if (data.previousSessionLoggedOut) {
+          showInfo('You have logged in from a new device. Your previous session has been logged out.');
+        }
         
         // Verify tokens are stored
         console.log('🔍 SignIn - Stored Access Token:', localStorage.getItem('accessToken') ? 'exists' : 'missing');

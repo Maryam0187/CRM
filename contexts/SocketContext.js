@@ -2,9 +2,11 @@
 
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
+import { useRouter } from 'next/navigation';
 import { useAuth } from './AuthContext';
 import { useAppDispatch } from '../store/hooks';
 import { addNotification } from '../store/slices/notificationSlice';
+import { useToast } from './ToastContext';
 
 const SocketContext = createContext();
 
@@ -17,7 +19,9 @@ export const useSocket = () => {
 };
 
 export const SocketProvider = ({ children }) => {
-  const { user, accessToken } = useAuth();
+  const { user, accessToken, logout } = useAuth();
+  const router = useRouter();
+  const { showWarning, showError } = useToast();
   const dispatch = useAppDispatch();
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -265,6 +269,28 @@ export const SocketProvider = ({ children }) => {
       });
       console.log('📞 Dispatching custom event:', callStatusEvent);
       window.dispatchEvent(callStatusEvent);
+    });
+
+    // Force logout handler
+    socketInstance.on('force_logout', (data) => {
+      console.log('🔐 Force logout received:', data);
+      const { reason, message } = data;
+      
+      // Show appropriate notification based on reason
+      if (reason === 'account_deactivated') {
+        showError(message || 'Your account has been deactivated by an administrator.');
+      } else if (reason === 'admin_action') {
+        showWarning(message || 'You have been logged out by an administrator.');
+      } else {
+        // new_login or other reasons
+        showWarning(message || 'You have been logged out because you logged in from another device.');
+      }
+      
+      // Logout and redirect after a short delay to allow notification to be seen
+      setTimeout(() => {
+        logout();
+        router.push('/signin');
+      }, 2000);
     });
 
     setSocket(socketInstance);

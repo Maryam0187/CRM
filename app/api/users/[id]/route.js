@@ -120,9 +120,17 @@ export async function PUT(request, { params }) {
       );
     }
 
-    // Validate role if provided
+    // Validate role if provided - prevent setting admin role
     if (role) {
-      const validRoles = ['admin', 'supervisor', 'agent', 'processor', 'verification'];
+      // Prevent changing role to admin
+      if (role === 'admin') {
+        return NextResponse.json(
+          { error: 'Cannot set user role to admin. Admin role cannot be assigned through the UI.' },
+          { status: 400 }
+        );
+      }
+      
+      const validRoles = ['supervisor', 'agent', 'processor', 'verification'];
       if (!validRoles.includes(role)) {
         return NextResponse.json(
           { error: 'Invalid role' },
@@ -164,9 +172,33 @@ export async function PUT(request, { params }) {
     if (email) updateData.email = email.toLowerCase();
     if (role) updateData.role = role;
     if (typeof is_active === 'boolean') updateData.isActive = is_active;
-    if (phone !== undefined) updateData.phone = phone;
-    if (cnic !== undefined) updateData.cnic = cnic;
-    if (address !== undefined) updateData.address = address;
+    
+    // Handle optional phone field - clean and convert empty string to null
+    if (phone !== undefined) {
+      if (phone === '' || phone === null) {
+        updateData.phone = null;
+      } else {
+        // Remove dashes, spaces, and other non-numeric characters for validation
+        const cleanedPhone = phone.replace(/\D/g, '');
+        updateData.phone = cleanedPhone || null;
+      }
+    }
+    
+    // Handle optional CNIC field - clean and convert empty string to null
+    if (cnic !== undefined) {
+      if (cnic === '' || cnic === null) {
+        updateData.cnic = null;
+      } else {
+        // Remove dashes, spaces, and other non-numeric characters for validation
+        const cleanedCNIC = cnic.replace(/\D/g, '');
+        updateData.cnic = cleanedCNIC || null;
+      }
+    }
+    
+    // Handle optional address field - convert empty string to null
+    if (address !== undefined) {
+      updateData.address = address === '' ? null : address;
+    }
 
     try {
       await user.update(updateData);

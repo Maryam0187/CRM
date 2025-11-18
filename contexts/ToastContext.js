@@ -3,14 +3,22 @@
 import { createContext, useContext, useState, useCallback } from 'react';
 import Toast from '../components/Toast';
 
-const ToastContext = createContext();
+// Default no-op functions for when context is not available
+const defaultToastFunctions = {
+  showSuccess: () => {},
+  showError: () => {},
+  showWarning: () => {},
+  showInfo: () => {},
+  addToast: () => {},
+  removeToast: () => {}
+};
+
+const ToastContext = createContext(defaultToastFunctions);
 
 export const useToast = () => {
   const context = useContext(ToastContext);
-  if (!context) {
-    throw new Error('useToast must be used within a ToastProvider');
-  }
-  return context;
+  // Return context or default functions if context is not available
+  return context || defaultToastFunctions;
 };
 
 export const ToastProvider = ({ children }) => {

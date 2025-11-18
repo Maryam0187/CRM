@@ -14,13 +14,8 @@ export async function GET(request) {
       );
     }
 
+    // Exclude admin role from the list - admin users cannot be created through the UI
     const roles = [
-      {
-        id: 'admin',
-        name: 'admin',
-        display_name: getRoleDisplayName('admin'),
-        description: getRoleDescription('admin')
-      },
       {
         id: 'supervisor',
         name: 'supervisor',

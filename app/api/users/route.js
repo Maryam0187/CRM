@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { User } from '../../../models';
 import { requireJWTAdmin } from '../../../lib/jwtAuth';
 import { getRoleDisplayName } from '../../../lib/roleUtils';
+import { Op } from 'sequelize';
 
 // GET /api/users - Get all users (admin only)
 export async function GET(request) {
@@ -17,6 +18,11 @@ export async function GET(request) {
 
     const users = await User.findAll({
       attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'cnic', 'phone', 'address', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'created_at', 'updated_at'],
+      where: {
+        role: {
+          [Op.ne]: 'admin' // Exclude admin users
+        }
+      },
       include: [
         {
           model: require('../../../models').SupervisorAgent,
@@ -121,11 +127,11 @@ export async function POST(request) {
       );
     }
 
-    // Validate role
-    const validRoles = ['admin', 'supervisor', 'agent', 'processor', 'verification'];
+    // Validate role - admin role cannot be created through this endpoint
+    const validRoles = ['supervisor', 'agent', 'processor', 'verification'];
     if (!validRoles.includes(role)) {
       return NextResponse.json(
-        { error: 'Invalid role' },
+        { error: 'Invalid role. Admin role cannot be created.' },
         { status: 400 }
       );
     }

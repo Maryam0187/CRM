@@ -68,6 +68,7 @@ const Notification = require('./Notification')(sequelize);
 const UserActivityLog = require('./UserActivityLog')(sequelize);
 const UserTimeSession = require('./UserTimeSession')(sequelize);
 const UserDailyTimeLog = require('./UserDailyTimeLog')(sequelize);
+const UserSession = require('./UserSession')(sequelize);
 
 // Define associations
 Object.keys(sequelize.models).forEach(modelName => {
@@ -131,6 +132,7 @@ module.exports = {
   UserActivityLog,
   UserTimeSession,
   UserDailyTimeLog,
+  UserSession,
   testConnection,
   syncDatabase
 };

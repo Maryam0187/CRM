@@ -8,6 +8,7 @@ import ProtectedRoute from '../../../components/ProtectedRoute';
 import AdminRoute from '../../../components/AdminRoute';
 import UserForm from '../../../components/UserForm';
 import UserDetailsModal from '../../../components/UserDetailsModal';
+import ConfirmModal from '../../../components/ConfirmModal';
 import { apiClient } from '../../../lib/apiClient';
 
 
@@ -20,6 +21,8 @@ export default function AdminUsersPage() {
   const [showUserForm, setShowUserForm] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false, userId: null, userName: null });
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const { socket, isConnected } = useSocket();
 
   useEffect(() => {
@@ -111,6 +114,50 @@ export default function AdminUsersPage() {
       setError('Failed to update user status');
       console.error('Error updating user status:', err);
     }
+  };
+
+  const handleForceLogoutClick = (userId, userName) => {
+    setConfirmModal({
+      isOpen: true,
+      userId,
+      userName
+    });
+  };
+
+  const handleForceLogoutConfirm = async () => {
+    if (!user) {
+      setError('User not authenticated');
+      setConfirmModal({ isOpen: false, userId: null, userName: null });
+      return;
+    }
+
+    const { userId, userName } = confirmModal;
+    setIsLoggingOut(true);
+
+    try {
+      const response = await apiClient.post(`/api/admin/users/${userId}/logout`, {
+        reason: 'admin_action'
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        showSuccess(data.message || `User ${userName} has been logged out successfully.`);
+        fetchUsers(); // Refresh the users list
+        setConfirmModal({ isOpen: false, userId: null, userName: null });
+      } else {
+        showError(data.error || 'Failed to force logout user');
+      }
+    } catch (err) {
+      showError('Failed to force logout user');
+      console.error('Error force logging out user:', err);
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
+  const handleForceLogoutCancel = () => {
+    setConfirmModal({ isOpen: false, userId: null, userName: null });
   };
 
 
@@ -263,6 +310,13 @@ export default function AdminUsersPage() {
                               Edit
                             </button>
                             <button
+                              onClick={() => handleForceLogoutClick(userItem.id, `${userItem.first_name} ${userItem.last_name}`)}
+                              className="text-orange-600 hover:text-orange-900"
+                              title="Force logout user from all devices"
+                            >
+                              Force Logout
+                            </button>
+                            <button
                               onClick={() => handleToggleUserStatus(userItem.id, userItem.is_active)}
                               className={`${
                                 userItem.is_active ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'
@@ -298,6 +352,26 @@ export default function AdminUsersPage() {
             onClose={() => setSelectedUser(null)}
           />
         )}
+
+        {/* Force Logout Confirmation Modal */}
+        <ConfirmModal
+          isOpen={confirmModal.isOpen}
+          onClose={handleForceLogoutCancel}
+          onConfirm={handleForceLogoutConfirm}
+          title="Force Logout User"
+          message={`Are you sure you want to force logout ${confirmModal.userName}? They will be logged out from all devices immediately.`}
+          confirmText="Force Logout"
+          cancelText="Cancel"
+          confirmButtonClass="bg-orange-600 hover:bg-orange-700"
+          isLoading={isLoggingOut}
+          icon={
+            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-orange-100">
+              <svg className="h-6 w-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+            </div>
+          }
+        />
 
       </div>
       </AdminRoute>

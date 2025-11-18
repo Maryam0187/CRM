@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { User } from '../../../../models';
+import { User, UserSession } from '../../../../models';
 import jwt from 'jsonwebtoken';
+import { Op } from 'sequelize';
 const UserActivityLogger = require('../../../../lib/userActivityLogger');
 const UserTimeTracker = require('../../../../lib/userTimeTracker');
 
@@ -50,12 +51,33 @@ export async function POST(request) {
           const logoutTime = new Date();
           const oldStatus = user.status || 'online';
           
+          // Check if there are any other active sessions for this user
+          // If yes, don't set status to offline (user is still logged in elsewhere)
+          const activeSessions = await UserSession.findAll({
+            where: {
+              userId: user.id,
+              isActive: true,
+              ...(decoded.sessionId ? {
+                sessionId: {
+                  [Op.ne]: decoded.sessionId // Exclude current session
+                }
+              } : {})
+            }
+          });
+          
           // Prepare update data
           // Always update lastLogoutTime on logout (just like lastLoginTime is always updated on login)
           const updateData = {
-            status: 'offline',
             lastLogoutTime: logoutTime
           };
+          
+          // Only set status to offline if there are no other active sessions
+          if (activeSessions.length === 0) {
+            updateData.status = 'offline';
+          } else {
+            // User has other active sessions, keep status as is (should be 'online')
+            console.log(`⚠️ User ${user.id} has ${activeSessions.length} other active session(s), not setting status to offline`);
+          }
           
           console.log(`🕐 Updating logout time for user ${user.id}:`, {
             logoutTime: logoutTime.toISOString(),
@@ -131,14 +153,35 @@ export async function POST(request) {
             metadata: logoutMetadata
           });
           
-          // Log status change if status changed
-          if (oldStatus !== 'offline') {
+          // Log status change if status actually changed to offline
+          if (updateData.status === 'offline' && oldStatus !== 'offline') {
             await UserActivityLogger.logStatusChange(user.id, oldStatus, 'offline', ipAddress, userAgent);
           }
 
           // End active session and start inactive session
           await UserTimeTracker.endOngoingSessions(user.id, logoutTime);
           await UserTimeTracker.startSession(user.id, 'offline', logoutTime);
+
+          // Invalidate user session
+          if (decoded.sessionId) {
+            try {
+              const session = await UserSession.findOne({
+                where: {
+                  sessionId: decoded.sessionId,
+                  userId: user.id,
+                  isActive: true
+                }
+              });
+
+              if (session) {
+                await session.update({ isActive: false });
+                console.log(`✅ Session ${decoded.sessionId} invalidated for user ${user.id}`);
+              }
+            } catch (sessionError) {
+              console.error('Error invalidating session:', sessionError);
+              // Don't fail logout if session invalidation fails
+            }
+          }
         }
       } catch (dbError) {
         // Log error but don't fail the logout request

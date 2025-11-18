@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { User, SupervisorAgent } from '../../../../models';
+import { User, SupervisorAgent, UserSession } from '../../../../models';
 import jwt from 'jsonwebtoken';
 const UserActivityLogger = require('../../../../lib/userActivityLogger');
 const UserTimeTracker = require('../../../../lib/userTimeTracker');
@@ -187,6 +187,76 @@ export async function POST(request) {
     await UserTimeTracker.startSession(user.id, 'online', loginTime);
     await UserTimeTracker.incrementLoginCount(user.id, loginTime);
 
+    // Session Management: Check for existing active sessions
+    let previousSessionExisted = false;
+    const existingSessions = await UserSession.findAll({
+      where: {
+        userId: user.id,
+        isActive: true
+      }
+    });
+
+    // Create new session FIRST before invalidating old sessions
+    // This ensures there's always an active session when old sessions log out
+    const sessionId = UserSession.generateSessionId();
+    
+    // Calculate expiration time (same as JWT expiration)
+    const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
+    let expiresAt = null;
+    if (JWT_EXPIRES_IN) {
+      const expiresInMs = parseExpiration(JWT_EXPIRES_IN);
+      if (expiresInMs) {
+        expiresAt = new Date(Date.now() + expiresInMs);
+      }
+    }
+
+    await UserSession.create({
+      userId: user.id,
+      sessionId: sessionId,
+      deviceInfo: userAgent || null,
+      ipAddress: ipAddress || null,
+      isActive: true,
+      expiresAt: expiresAt
+    });
+
+    console.log(`✅ Created new session ${sessionId} for user ${user.id}`);
+
+    // Now invalidate old sessions (new session already exists, so logout won't set status to offline)
+    if (existingSessions.length > 0) {
+      previousSessionExisted = true;
+      console.log(`🔐 Found ${existingSessions.length} active session(s) for user ${user.id}, invalidating...`);
+      
+      // Get socket manager to notify old sessions
+      const socketManager = require('../../../../lib/socket');
+      
+      // Invalidate all existing sessions and notify via Socket.IO
+      for (const session of existingSessions) {
+        // Mark session as inactive
+        await session.update({ isActive: false });
+        
+        // Notify old device via Socket.IO
+        socketManager.forceLogoutUser(session.sessionId, 'new_login', {
+          message: 'You have been logged out because you logged in from another device.',
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // Ensure user status is online after all session management
+    // Reload to get latest status (in case old session logout happened)
+    await user.reload();
+    const currentStatus = user.status;
+    if (currentStatus !== 'online') {
+      await user.update({ status: 'online' });
+      await user.reload();
+      console.log(`✅ Updated user ${user.id} status from ${currentStatus} to online after session creation`);
+    }
+    
+    // Always broadcast status change to online via Socket.IO when new session is created
+    const socketManager = require('../../../../lib/socket');
+    socketManager.broadcastUserStatusChange(user.id, 'online');
+    console.log(`📊 Broadcasted status change: User ${user.id} is now online`);
+
     // Get supervisor information if user is an agent
     let supervisorInfo = null;
     if (userDataValues.role === 'agent' && userDataValues.supervisorRelationships && userDataValues.supervisorRelationships.length > 0) {
@@ -238,16 +308,16 @@ export async function POST(request) {
     // Generate JWT tokens
     const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
     const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key-change-in-production';
-    const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m'; // Default to 15 minutes if not set
     const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '1d'; // Default to 1 day if not set
     
-    // Access token (configurable via JWT_EXPIRES_IN)
+    // Access token (configurable via JWT_EXPIRES_IN) - includes sessionId
     const accessToken = jwt.sign(
       {
         userId: userData.id,
         email: userData.email,
         role: userData.role,
         name: `${userData.first_name} ${userData.last_name}`.trim(),
+        sessionId: sessionId, // Include sessionId in JWT
         type: 'access'
       },
       JWT_SECRET,
@@ -278,7 +348,10 @@ export async function POST(request) {
       accessToken: accessToken,
       refreshToken: refreshToken,
       expiresIn: JWT_EXPIRES_IN, // Token expiration from environment variable
-      message: 'Sign in successful'
+      previousSessionLoggedOut: previousSessionExisted,
+      message: previousSessionExisted 
+        ? 'Sign in successful. Your previous session has been logged out.'
+        : 'Sign in successful'
     });
 
   } catch (error) {
@@ -288,4 +361,24 @@ export async function POST(request) {
       { status: 500 }
     );
   }
+}
+
+// Helper function to parse expiration string (e.g., '15m', '1h', '1d')
+function parseExpiration(expiresIn) {
+  if (!expiresIn) return null;
+  
+  const match = expiresIn.match(/^(\d+)([smhd])$/);
+  if (!match) return null;
+  
+  const value = parseInt(match[1]);
+  const unit = match[2];
+  
+  const multipliers = {
+    's': 1000,           // seconds
+    'm': 60 * 1000,      // minutes
+    'h': 60 * 60 * 1000, // hours
+    'd': 24 * 60 * 60 * 1000 // days
+  };
+  
+  return value * (multipliers[unit] || 1000);
 }

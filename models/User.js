@@ -49,7 +49,17 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING(15),
       allowNull: true,
       validate: {
-        isNumeric: true
+        // Custom validator that only validates if value is provided
+        isNumericOrEmpty(value) {
+          // Allow null, undefined, or empty string
+          if (value === null || value === '' || value === undefined) {
+            return true;
+          }
+          // If value is provided, it must be numeric
+          if (!/^\d+$/.test(value)) {
+            throw new Error('Phone number must contain only numbers (no spaces, dashes, or special characters)');
+          }
+        }
       }
     },
     address: {
@@ -182,6 +192,12 @@ module.exports = (sequelize) => {
     User.hasMany(models.UserActivityLog, {
       foreignKey: 'userId',
       as: 'activityLogs'
+    });
+
+    // User has many sessions
+    User.hasMany(models.UserSession, {
+      foreignKey: 'userId',
+      as: 'sessions'
     });
   };
 
