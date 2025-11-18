@@ -7,26 +7,26 @@ const UserTimeTracker = require('../../../../lib/userTimeTracker');
 
 export async function POST(request) {
   try {
-    // Get location and permission from request body if provided
-    const { location, locationPermission } = await request.json().catch(() => ({}));
+    // Get location, permission, and token from request body if provided
+    // (for sendBeacon compatibility, which doesn't support custom headers)
+    const body = await request.json().catch(() => ({}));
+    const { location, locationPermission, token: bodyToken } = body;
     
-    console.log('🔍 Logout API - Received location data:', {
-      hasLocation: !!location,
-      locationPermission: locationPermission || 'not provided',
-      latitude: location?.latitude,
-      longitude: location?.longitude
-    });
-    
-    // Get authorization header
+    // Get authorization header (preferred method)
     const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    let token = null;
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    } else if (bodyToken) {
+      // Fallback: get token from request body (for sendBeacon)
+      token = bodyToken;
+    } else {
       return NextResponse.json(
         { error: 'Authorization token required' },
         { status: 401 }
       );
     }
-
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
     // Verify JWT token
     const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -51,17 +51,34 @@ export async function POST(request) {
           const logoutTime = new Date();
           const oldStatus = user.status || 'online';
           
-          // Check if there are any other active sessions for this user
+          // First, invalidate the current session
+          if (decoded.sessionId) {
+            try {
+              const session = await UserSession.findOne({
+                where: {
+                  sessionId: decoded.sessionId,
+                  userId: user.id,
+                  isActive: true
+                }
+              });
+
+              if (session) {
+                await session.update({ isActive: false });
+                console.log(`✅ Session ${decoded.sessionId} invalidated for user ${user.id}`);
+              }
+            } catch (sessionError) {
+              console.error('Error invalidating session:', sessionError);
+              // Continue with logout even if session invalidation fails
+            }
+          }
+          
+          // Now check if there are any other active sessions for this user
+          // (after invalidating the current one)
           // If yes, don't set status to offline (user is still logged in elsewhere)
           const activeSessions = await UserSession.findAll({
             where: {
               userId: user.id,
-              isActive: true,
-              ...(decoded.sessionId ? {
-                sessionId: {
-                  [Op.ne]: decoded.sessionId // Exclude current session
-                }
-              } : {})
+              isActive: true
             }
           });
           
@@ -74,15 +91,11 @@ export async function POST(request) {
           // Only set status to offline if there are no other active sessions
           if (activeSessions.length === 0) {
             updateData.status = 'offline';
+            console.log(`✅ User ${user.id} has no other active sessions, setting status to offline`);
           } else {
             // User has other active sessions, keep status as is (should be 'online')
             console.log(`⚠️ User ${user.id} has ${activeSessions.length} other active session(s), not setting status to offline`);
           }
-          
-          console.log(`🕐 Updating logout time for user ${user.id}:`, {
-            logoutTime: logoutTime.toISOString(),
-            previousLastLogoutTime: user.lastLogoutTime ? new Date(user.lastLogoutTime).toISOString() : null
-          });
 
           // Add location data if provided
           if (location && location.latitude && location.longitude) {
@@ -107,13 +120,6 @@ export async function POST(request) {
           
           // Reload user to get updated values
           await user.reload();
-          
-          // Verify the update was successful
-          console.log(`✅ Logout time updated successfully for user ${user.id}:`, {
-            savedLastLogoutTime: user.lastLogoutTime ? new Date(user.lastLogoutTime).toISOString() : null,
-            expectedLogoutTime: logoutTime.toISOString(),
-            match: user.lastLogoutTime && new Date(user.lastLogoutTime).getTime() === logoutTime.getTime()
-          });
 
           // Broadcast location change via socket if location was updated
           if (location && location.latitude && location.longitude) {
@@ -156,32 +162,16 @@ export async function POST(request) {
           // Log status change if status actually changed to offline
           if (updateData.status === 'offline' && oldStatus !== 'offline') {
             await UserActivityLogger.logStatusChange(user.id, oldStatus, 'offline', ipAddress, userAgent);
+            
+            // Broadcast status change via socket
+            const socketManager = require('../../../../lib/socket');
+            socketManager.broadcastUserStatusChange(user.id, 'offline');
+            console.log(`📊 Status change to offline broadcasted via socket for user ${user.id}`);
           }
 
           // End active session and start inactive session
           await UserTimeTracker.endOngoingSessions(user.id, logoutTime);
           await UserTimeTracker.startSession(user.id, 'offline', logoutTime);
-
-          // Invalidate user session
-          if (decoded.sessionId) {
-            try {
-              const session = await UserSession.findOne({
-                where: {
-                  sessionId: decoded.sessionId,
-                  userId: user.id,
-                  isActive: true
-                }
-              });
-
-              if (session) {
-                await session.update({ isActive: false });
-                console.log(`✅ Session ${decoded.sessionId} invalidated for user ${user.id}`);
-              }
-            } catch (sessionError) {
-              console.error('Error invalidating session:', sessionError);
-              // Don't fail logout if session invalidation fails
-            }
-          }
         }
       } catch (dbError) {
         // Log error but don't fail the logout request

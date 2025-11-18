@@ -34,6 +34,34 @@ export function AuthProvider({ children }) {
     setLoading(false);
   }, []);
 
+  // Handle window close/tab close to ensure logout is called
+  useEffect(() => {
+    if (typeof window === 'undefined' || !user) return;
+
+    const handleBeforeUnload = (event) => {
+      // Use navigator.sendBeacon for reliable logout on window close
+      // sendBeacon doesn't support custom headers, so we'll send token in body
+      const token = accessToken || localStorage.getItem('accessToken');
+      if (token) {
+        const logoutData = JSON.stringify({
+          token: token,
+          location: null, // Can't get location during unload
+          locationPermission: 'not_set'
+        });
+        
+        // Use sendBeacon which is designed for this exact use case
+        // It guarantees the request will be sent even if the page is unloading
+        navigator.sendBeacon('/api/auth/logout', new Blob([logoutData], { type: 'application/json' }));
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [user, accessToken]);
+
   const login = (userData, accessToken = null, refreshTokenValue = null) => {
     console.log('🔍 AuthContext - Login called with:', { 
       userData: userData ? 'exists' : 'missing', 
