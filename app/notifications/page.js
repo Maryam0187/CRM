@@ -65,6 +65,12 @@ export default function NotificationsPage() {
         const mappedNotifications = data.data.notifications.map(notification => {
           const timestamp = notification.createdAt || notification.created_at || notification.timestamp;
           
+          // Determine route based on relatedType
+          let route = notification.route;
+          if (!route && notification.relatedType === 'receiver') {
+            route = '/admin/receivers';
+          }
+          
           return {
             id: notification.id,
             title: notification.title,
@@ -74,6 +80,8 @@ export default function NotificationsPage() {
             time: timestamp ? formatNotificationTime(new Date(timestamp)) : 'Just now',
             saleId: notification.saleId || notification.sale_id,
             agentName: notification.agentName || notification.agent_name,
+            relatedType: notification.relatedType || notification.related_type,
+            route: route,
             createdAt: timestamp
           };
         });
@@ -151,7 +159,11 @@ export default function NotificationsPage() {
     }
     
     // Navigate based on notification type
-    if (notification.saleId) {
+    if (notification.route) {
+      router.push(notification.route);
+    } else if (notification.relatedType === 'receiver') {
+      router.push('/admin/receivers');
+    } else if (notification.saleId) {
       router.push(`/add-sale?id=${notification.saleId}`);
     } else {
       router.push('/');
@@ -198,7 +210,18 @@ export default function NotificationsPage() {
   useEffect(() => {
     const handleNewNotification = (event) => {
       const { notification } = event.detail;
-      console.log('📨 New notification arrived on notifications page:', notification);
+      
+      // Determine route based on relatedType
+      let route = notification.route;
+      if (!route && notification.relatedType === 'receiver') {
+        route = '/admin/receivers';
+      }
+      
+      const formattedNotification = {
+        ...notification,
+        route: route,
+        relatedType: notification.relatedType || notification.related_type
+      };
       
       // Increment total count for "All" tab
       setAllTotalCount(prev => prev + 1);
@@ -210,11 +233,11 @@ export default function NotificationsPage() {
       
       // If we're on the "Unread" tab and notification is unread, add it
       if (activeTab === 'unread' && !notification.isRead) {
-        setUnreadNotifications(prev => [notification, ...prev]);
+        setUnreadNotifications(prev => [formattedNotification, ...prev]);
       }
       // If we're on the "All" tab, add the notification to the current page
       else if (activeTab === 'all') {
-        setAllNotifications(prev => [notification, ...prev]);
+        setAllNotifications(prev => [formattedNotification, ...prev]);
       }
     };
 

@@ -58,6 +58,11 @@ module.exports = (sequelize) => {
       allowNull: true,
       field: 'ssn_number'
     },
+    ssnNumberStatus: {
+      type: DataTypes.ENUM('matched', 'not_matched'),
+      allowNull: true,
+      field: 'ssn_number_status'
+    },
     carrier: {
       type: DataTypes.STRING(100),
       allowNull: true

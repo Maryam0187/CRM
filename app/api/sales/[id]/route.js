@@ -66,6 +66,7 @@ export async function PUT(request, { params }) {
     const sanitizedData = {
       ...updateData,
       pinCodeStatus: sanitizeEnumField(updateData.pinCodeStatus),
+      ssnNumberStatus: sanitizeEnumField(updateData.ssnNumberStatus),
       basicPackageStatus: sanitizeEnumField(updateData.basicPackageStatus),
       bundle: sanitizeEnumField(updateData.bundle),
       status: sanitizeEnumField(updateData.status)

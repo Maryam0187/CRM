@@ -238,6 +238,7 @@ export default function AddSale() {
         { label: 'PIN Code Status', value: saleForm.pin_code_status },
         { label: 'SSN Name', value: saleForm.ssnName },
         { label: 'SSN Number', value: saleForm.ssnNumber },
+        { label: 'SSN Number Status', value: saleForm.ssn_number_status },
         { label: 'Carrier', value: saleForm.carrier },
         { label: 'Basic Package', value: saleForm.basicPackage },
         { label: 'Basic Package Status', value: saleForm.basicPackageStatus },
@@ -283,6 +284,7 @@ export default function AddSale() {
     pin_code_status: '',
     ssnName: '',
     ssnNumber: '',
+    ssn_number_status: '',
     carrier: '',
     basicPackage: '',
     basicPackageStatus: '',
@@ -351,6 +353,9 @@ export default function AddSale() {
     }
   }, [shouldScrollToBottom]);
   const [selectedReceiver, setSelectedReceiver] = useState([]);
+  const [showOtherReceiverInput, setShowOtherReceiverInput] = useState(false);
+  const [otherReceiverName, setOtherReceiverName] = useState('');
+  const [savingOtherReceiver, setSavingOtherReceiver] = useState(false);
   const [modalId, setModalId] = useState(null);
   const [saleStatus, setSaleStatus] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
@@ -500,6 +505,7 @@ export default function AddSale() {
           pin_code_status: sale.pinCodeStatus || '',
           ssnName: sale.ssnName || '',
           ssnNumber: sale.ssnNumber || '',
+          ssn_number_status: sale.ssnNumberStatus || '',
           carrier: sale.carrier || '',
           basicPackage: sale.basicPackage || '',
           basicPackageStatus: sale.basicPackageStatus || '',
@@ -1019,9 +1025,7 @@ export default function AddSale() {
   const handleSaleFormChange = (field, value) => {
     // Format input based on field type
     let formattedValue = value;
-    if (field === 'ssnNumber') {
-      formattedValue = formatSSN(value);
-    } else if (field === 'regularBill' || field === 'promotionalBill' || field === 'lastPayment' || field === 'balance') {
+    if (field === 'regularBill' || field === 'promotionalBill' || field === 'lastPayment' || field === 'balance') {
       formattedValue = formatCurrency(value);
     }
     // Note: techVisitTime uses predefined options like "8am - 12pm", so no formatting needed
@@ -1035,6 +1039,8 @@ export default function AddSale() {
     if (field === 'carrier') {
       // Reset selected receivers when carrier changes
       setSelectedReceiver([]);
+      setShowOtherReceiverInput(false);
+      setOtherReceiverName('');
       setSaleForm(prev => ({
         ...prev,
         receivers: {},
@@ -1082,6 +1088,78 @@ export default function AddSale() {
       const count = newReceivers[receiver] || 1;
       initializeReceiverTemplates(receiver, count);
     });
+  };
+
+  // Handle creating a new receiver
+  const handleCreateOtherReceiver = async () => {
+    if (!otherReceiverName.trim()) {
+      showError('Please enter a receiver name');
+      return;
+    }
+
+    if (!saleForm.carrier) {
+      showError('Please select a carrier first');
+      return;
+    }
+
+    // Find the selected carrier to get its ID
+    const selectedCarrier = carriers.find(c => c.name === saleForm.carrier);
+    if (!selectedCarrier) {
+      showError('Carrier not found. Please select a carrier first.');
+      return;
+    }
+
+    setSavingOtherReceiver(true);
+    try {
+      // Create the new receiver
+      const response = await apiClient.post('/api/receivers', {
+        name: otherReceiverName.trim(),
+        carrierId: selectedCarrier.id,
+        status: 'active',
+        createdBy: user?.id || null
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        // Notify admins about the new receiver
+        try {
+          const notifyResponse = await apiClient.post('/api/receivers/notify-admin', {
+            receiverName: otherReceiverName.trim(),
+            carrierName: saleForm.carrier,
+            createdBy: user?.firstName && user?.lastName 
+              ? `${user.firstName} ${user.lastName}` 
+              : user?.email || 'Unknown User'
+          });
+          const notifyData = await notifyResponse.json();
+          if (!notifyData.success) {
+            console.warn('Admin notification failed:', notifyData.message);
+          }
+        } catch (notifyError) {
+          console.error('Failed to notify admins:', notifyError);
+          // Don't fail the whole operation if notification fails, but log it
+        }
+
+        // Refresh receivers list
+        await fetchReceiversByCarrier(selectedCarrier.id);
+        
+        // Add the new receiver to selected receivers
+        handleReceiverChange([...selectedReceiver, otherReceiverName.trim()]);
+        
+        // Reset other receiver input
+        setOtherReceiverName('');
+        setShowOtherReceiverInput(false);
+        
+        showSuccess(`Receiver "${otherReceiverName.trim()}" added successfully!`);
+      } else {
+        showError(data.message || 'Failed to create receiver');
+      }
+    } catch (error) {
+      console.error('Error creating receiver:', error);
+      showError('Failed to create receiver. Please try again.');
+    } finally {
+      setSavingOtherReceiver(false);
+    }
   };
 
   // Increment receiver quantity
@@ -1938,6 +2016,7 @@ Room: `;
         pinCodeStatus: sanitizeEnumValue(saleForm.pin_code_status),
         ssnName: sanitizeValue(saleForm.ssnName),
         ssnNumber: sanitizeValue(saleForm.ssnNumber),
+        ssnNumberStatus: sanitizeEnumValue(saleForm.ssn_number_status),
         carrier: sanitizeValue(saleForm.carrier),
         basicPackage: sanitizeValue(saleForm.basicPackage),
         basicPackageStatus: sanitizeEnumValue(saleForm.basicPackageStatus),
@@ -2552,6 +2631,7 @@ Room: `;
         pinCodeStatus: sanitizeEnumValue(saleForm.pin_code_status),
         ssnName: sanitizeValue(saleForm.ssnName),
         ssnNumber: sanitizeValue(saleForm.ssnNumber),
+        ssnNumberStatus: sanitizeEnumValue(saleForm.ssn_number_status),
         carrier: sanitizeValue(saleForm.carrier),
         basicPackage: sanitizeValue(saleForm.basicPackage),
         basicPackageStatus: sanitizeEnumValue(saleForm.basicPackageStatus),
@@ -3670,88 +3750,6 @@ Room: `;
             
             <form className="space-y-6">
               <div className="grid gap-6 md:grid-cols-2">
-                {/* Pin Code */}
-                <div>
-                  <label htmlFor="pinCode" className="block mb-2 text-sm font-medium text-gray-900">
-                    Pin code
-                  </label>
-                  <input
-                    type="text"
-                    id="pinCode"
-                    value={saleForm.pin_code}
-                    onChange={(e) => handleSaleFormChange('pin_code', e.target.value)}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                    placeholder="Enter Pin code"
-                  />
-                </div>
-
-                {/* Pin Code Status */}
-                <div>
-                  <label className="block mb-2 text-sm font-medium text-gray-900">
-                    Pin code status
-                  </label>
-                  <div className="flex flex-wrap gap-4">
-                    <div className="flex items-center">
-                      <input
-                        type="radio"
-                        id="matched"
-                        name="pinCodeStatus"
-                        value="matched"
-                        checked={saleForm.pin_code_status === 'matched'}
-                        onChange={(e) => handleSaleFormChange('pin_code_status', e.target.value)}
-                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500"
-                      />
-                      <label htmlFor="matched" className="ml-2 text-sm font-medium text-gray-900">
-                        Matched
-                      </label>
-                    </div>
-                    <div className="flex items-center">
-                      <input
-                        type="radio"
-                        id="notMatched"
-                        name="pinCodeStatus"
-                        value="not_matched"
-                        checked={saleForm.pin_code_status === 'not_matched'}
-                        onChange={(e) => handleSaleFormChange('pin_code_status', e.target.value)}
-                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500"
-                      />
-                      <label htmlFor="notMatched" className="ml-2 text-sm font-medium text-gray-900">
-                        Not Matched
-                      </label>
-                    </div>
-                  </div>
-                </div>
-
-                {/* SSN Name */}
-                <div>
-                  <label htmlFor="ssnName" className="block mb-2 text-sm font-medium text-gray-900">
-                    SSN Name
-                  </label>
-                  <input
-                    type="text"
-                    id="ssnName"
-                    value={saleForm.ssnName}
-                    onChange={(e) => handleSaleFormChange('ssnName', e.target.value)}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                    placeholder="Enter SSN Name"
-                  />
-                </div>
-
-                {/* SSN Number */}
-                <div>
-                  <label htmlFor="ssnNumber" className="block mb-2 text-sm font-medium text-gray-900">
-                    SSN Number
-                  </label>
-                  <input
-                    type="text"
-                    id="ssnNumber"
-                    value={saleForm.ssnNumber}
-                    onChange={(e) => handleSaleFormChange('ssnNumber', e.target.value)}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                    placeholder="123-45-6789"
-                  />
-                </div>
-
                 {/* Carrier */}
                 <div>
                   <label htmlFor="carrier" className="block mb-2 text-sm font-medium text-gray-900">
@@ -3835,6 +3833,319 @@ Room: `;
                   </div>
                 )}
 
+                {/* Select Receiver and Receiver Details - Side by Side */}
+                <div className="md:col-span-2">
+                  <div className="grid gap-6 md:grid-cols-2">
+                    {/* Select Receiver */}
+                    <div>
+                      <label className="block mb-2 text-sm font-medium text-gray-900">
+                        Select Receiver
+                      </label>
+                      {!saleForm.carrier ? (
+                        <p className="text-sm text-gray-500">Please select a carrier first</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {loadingReceivers ? (
+                            <p className="text-sm text-gray-500">Loading receivers...</p>
+                          ) : (
+                            <>
+                              {receivers.length > 0 && (
+                                receivers.map((receiver) => (
+                                  <label key={receiver.id} className="flex items-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedReceiver.includes(receiver.name)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          handleReceiverChange([...selectedReceiver, receiver.name]);
+                                        } else {
+                                          handleReceiverChange(selectedReceiver.filter(r => r !== receiver.name));
+                                        }
+                                      }}
+                                      className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                                    />
+                                    <span className="ml-2 text-sm text-gray-900">{receiver.name}</span>
+                                  </label>
+                                ))
+                              )}
+                              
+                              {/* Other option */}
+                              <div className="border-t border-gray-200 pt-2 mt-2">
+                                <label className="flex items-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={showOtherReceiverInput}
+                                    onChange={(e) => {
+                                      setShowOtherReceiverInput(e.target.checked);
+                                      if (!e.target.checked) {
+                                        setOtherReceiverName('');
+                                      }
+                                    }}
+                                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                                  />
+                                  <span className="ml-2 text-sm text-gray-900 font-medium">Other</span>
+                                </label>
+                                
+                                {showOtherReceiverInput && (
+                                  <div className="mt-2 ml-6 space-y-2">
+                                    <input
+                                      type="text"
+                                      value={otherReceiverName}
+                                      onChange={(e) => setOtherReceiverName(e.target.value)}
+                                      onKeyPress={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          handleCreateOtherReceiver();
+                                        }
+                                      }}
+                                      placeholder="Enter receiver name"
+                                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                                      disabled={savingOtherReceiver}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={handleCreateOtherReceiver}
+                                      disabled={savingOtherReceiver || !otherReceiverName.trim()}
+                                      className="text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                    >
+                                      {savingOtherReceiver ? 'Adding...' : 'Add Receiver'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Receiver Details with Collapsible Textarea Template */}
+                    {selectedReceiver.length > 0 && (
+                      <div>
+                        <label className="block mb-2 text-sm font-medium text-gray-900">
+                          Receiver Details
+                        </label>
+                        <div className="space-y-3">
+                          {Object.keys(saleForm.receivers).map((receiver) => {
+                            const isExpanded = expandedReceivers[receiver] || false;
+                            const count = saleForm.receivers[receiver] || 0;
+                            
+                            return (
+                              <div key={receiver} className="border border-gray-200 rounded-lg bg-gray-50">
+                                {/* Collapsible Header */}
+                                <div 
+                                  className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-100 transition-colors"
+                                  onClick={() => toggleReceiverExpansion(receiver)}
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <svg 
+                                      className={`w-4 h-4 text-gray-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                                      fill="none" 
+                                      stroke="currentColor" 
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                    <h4 className="text-sm font-medium text-gray-900">{receiver}</h4>
+                                    <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">
+                                      Count: {count}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        decrementReceiver(receiver);
+                                      }}
+                                      className="bg-gray-200 hover:bg-gray-300 border border-gray-300 rounded-s-lg p-2 h-8 focus:ring-gray-100 focus:ring-2 focus:outline-none"
+                                    >
+                                      <svg className="w-3 h-3 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                                      </svg>
+                                    </button>
+                                    <span className="bg-white border-t border-b border-gray-300 px-3 py-1 h-8 text-center text-gray-900 text-sm font-medium min-w-[2rem] flex items-center justify-center">
+                                      {count}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        incrementReceiver(receiver);
+                                      }}
+                                      className="bg-gray-200 hover:bg-gray-300 border border-gray-300 rounded-e-lg p-2 h-8 focus:ring-gray-100 focus:ring-2 focus:outline-none"
+                                    >
+                                      <svg className="w-3 h-3 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                </div>
+                                
+                                {/* Collapsible Content */}
+                                {isExpanded && (
+                                  <div className="px-4 pb-4 border-t border-gray-200 bg-white">
+                                    <div className="pt-4 space-y-3">
+                                      {Array.from({ length: count }, (_, index) => (
+                                        <div key={index} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                                          <div className="flex items-center justify-between mb-2">
+                                            <label className="block text-sm font-medium text-gray-700">
+                                              System Information {index + 1}
+                                            </label>
+                                            <button
+                                              type="button"
+                                              onClick={() => removeSystemInformation(receiver, index)}
+                                              className="text-red-600 hover:text-red-800 hover:bg-red-100 p-1 rounded transition-colors"
+                                              title="Remove this system information"
+                                            >
+                                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                              </svg>
+                                            </button>
+                                          </div>
+                                          <textarea
+                                            value={getReceiverTemplate(`${receiver}_${index + 1}`)}
+                                            onChange={(e) => updateReceiverTemplate(`${receiver}_${index + 1}`, e.target.value)}
+                                            className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm"
+                                            placeholder="Enter system information..."
+                                          />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Pin Code */}
+                <div>
+                  <label htmlFor="pinCode" className="block mb-2 text-sm font-medium text-gray-900">
+                    Pin code
+                  </label>
+                  <input
+                    type="text"
+                    id="pinCode"
+                    value={saleForm.pin_code}
+                    onChange={(e) => handleSaleFormChange('pin_code', e.target.value)}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                    placeholder="Enter Pin code"
+                  />
+                </div>
+
+                {/* Pin Code Status */}
+                <div>
+                  <label className="block mb-2 text-sm font-medium text-gray-900">
+                    Pin code status
+                  </label>
+                  <div className="flex flex-wrap gap-4">
+                    <div className="flex items-center">
+                      <input
+                        type="radio"
+                        id="matched"
+                        name="pinCodeStatus"
+                        value="matched"
+                        checked={saleForm.pin_code_status === 'matched'}
+                        onChange={(e) => handleSaleFormChange('pin_code_status', e.target.value)}
+                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500"
+                      />
+                      <label htmlFor="matched" className="ml-2 text-sm font-medium text-gray-900">
+                        Matched
+                      </label>
+                    </div>
+                    <div className="flex items-center">
+                      <input
+                        type="radio"
+                        id="notMatched"
+                        name="pinCodeStatus"
+                        value="not_matched"
+                        checked={saleForm.pin_code_status === 'not_matched'}
+                        onChange={(e) => handleSaleFormChange('pin_code_status', e.target.value)}
+                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500"
+                      />
+                      <label htmlFor="notMatched" className="ml-2 text-sm font-medium text-gray-900">
+                        Not Matched
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SSN Name */}
+                <div>
+                  <label htmlFor="ssnName" className="block mb-2 text-sm font-medium text-gray-900">
+                    SSN Name
+                  </label>
+                  <input
+                    type="text"
+                    id="ssnName"
+                    value={saleForm.ssnName}
+                    onChange={(e) => handleSaleFormChange('ssnName', e.target.value)}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                    placeholder="Enter SSN Name"
+                  />
+                </div>
+
+                {/* SSN Number and SSN Number Status - Side by Side */}
+                <div className="md:col-span-2">
+                  <div className="grid gap-6 md:grid-cols-2">
+                    {/* SSN Number */}
+                    <div>
+                      <label htmlFor="ssnNumber" className="block mb-2 text-sm font-medium text-gray-900">
+                        SSN Number
+                      </label>
+                      <input
+                        type="text"
+                        id="ssnNumber"
+                        value={saleForm.ssnNumber}
+                        onChange={(e) => handleSaleFormChange('ssnNumber', e.target.value)}
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                        placeholder="Enter SSN Number"
+                      />
+                    </div>
+
+                    {/* SSN Number Status */}
+                    <div>
+                      <label className="block mb-2 text-sm font-medium text-gray-900">
+                        SSN Number Status
+                      </label>
+                      <div className="flex flex-wrap gap-4">
+                        <div className="flex items-center">
+                          <input
+                            type="radio"
+                            id="ssnMatched"
+                            name="ssnNumberStatus"
+                            value="matched"
+                            checked={saleForm.ssn_number_status === 'matched'}
+                            onChange={(e) => handleSaleFormChange('ssn_number_status', e.target.value)}
+                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500"
+                          />
+                          <label htmlFor="ssnMatched" className="ml-2 text-sm font-medium text-gray-900">
+                            Matched
+                          </label>
+                        </div>
+                        <div className="flex items-center">
+                          <input
+                            type="radio"
+                            id="ssnNotMatched"
+                            name="ssnNumberStatus"
+                            value="not_matched"
+                            checked={saleForm.ssn_number_status === 'not_matched'}
+                            onChange={(e) => handleSaleFormChange('ssn_number_status', e.target.value)}
+                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500"
+                          />
+                          <label htmlFor="ssnNotMatched" className="ml-2 text-sm font-medium text-gray-900">
+                            Not Matched
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
                 {/* Basic Package */}
                 <div>
@@ -3867,144 +4178,6 @@ Room: `;
                     ))}
                   </select>
                 </div>
-
-                {/* Select Receiver */}
-                <div>
-                  <label className="block mb-2 text-sm font-medium text-gray-900">
-                    Select Receiver
-                  </label>
-                  {!saleForm.carrier ? (
-                    <p className="text-sm text-gray-500">Please select a carrier first</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {loadingReceivers ? (
-                        <p className="text-sm text-gray-500">Loading receivers...</p>
-                      ) : receivers.length === 0 ? (
-                        <p className="text-sm text-gray-500">No receivers available for this carrier</p>
-                      ) : (
-                        receivers.map((receiver) => (
-                          <label key={receiver.id} className="flex items-center">
-                            <input
-                              type="checkbox"
-                              checked={selectedReceiver.includes(receiver.name)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  handleReceiverChange([...selectedReceiver, receiver.name]);
-                                } else {
-                                  handleReceiverChange(selectedReceiver.filter(r => r !== receiver.name));
-                                }
-                              }}
-                              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-                            />
-                            <span className="ml-2 text-sm text-gray-900">{receiver.name}</span>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Receiver Details with Collapsible Textarea Template */}
-                {selectedReceiver.length > 0 && (
-                  <div>
-                    <label className="block mb-2 text-sm font-medium text-gray-900">
-                      Receiver Details
-                    </label>
-                    <div className="space-y-3">
-                      {Object.keys(saleForm.receivers).map((receiver) => {
-                        const isExpanded = expandedReceivers[receiver] || false;
-                        const count = saleForm.receivers[receiver] || 0;
-                        
-                        return (
-                          <div key={receiver} className="border border-gray-200 rounded-lg bg-gray-50">
-                            {/* Collapsible Header */}
-                            <div 
-                              className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-100 transition-colors"
-                              onClick={() => toggleReceiverExpansion(receiver)}
-                            >
-                              <div className="flex items-center gap-3">
-                                <svg 
-                                  className={`w-4 h-4 text-gray-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                                  fill="none" 
-                                  stroke="currentColor" 
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                                <h4 className="text-sm font-medium text-gray-900">{receiver}</h4>
-                                <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">
-                                  Count: {count}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    decrementReceiver(receiver);
-                                  }}
-                                  className="bg-gray-200 hover:bg-gray-300 border border-gray-300 rounded-s-lg p-2 h-8 focus:ring-gray-100 focus:ring-2 focus:outline-none"
-                                >
-                                  <svg className="w-3 h-3 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-                                  </svg>
-                                </button>
-                                <span className="bg-white border-t border-b border-gray-300 px-3 py-1 h-8 text-center text-gray-900 text-sm font-medium min-w-[2rem] flex items-center justify-center">
-                                  {count}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    incrementReceiver(receiver);
-                                  }}
-                                  className="bg-gray-200 hover:bg-gray-300 border border-gray-300 rounded-e-lg p-2 h-8 focus:ring-gray-100 focus:ring-2 focus:outline-none"
-                                >
-                                  <svg className="w-3 h-3 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                                  </svg>
-                                </button>
-                              </div>
-                            </div>
-                            
-                            {/* Collapsible Content */}
-                            {isExpanded && (
-                              <div className="px-4 pb-4 border-t border-gray-200 bg-white">
-                                <div className="pt-4 space-y-3">
-                                  {Array.from({ length: count }, (_, index) => (
-                                    <div key={index} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                                      <div className="flex items-center justify-between mb-2">
-                                        <label className="block text-sm font-medium text-gray-700">
-                                          System Information {index + 1}
-                                        </label>
-                                        <button
-                                          type="button"
-                                          onClick={() => removeSystemInformation(receiver, index)}
-                                          className="text-red-600 hover:text-red-800 hover:bg-red-100 p-1 rounded transition-colors"
-                                          title="Remove this system information"
-                                        >
-                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                          </svg>
-                                        </button>
-                                      </div>
-                                      <textarea
-                                        value={getReceiverTemplate(`${receiver}_${index + 1}`)}
-                                        onChange={(e) => updateReceiverTemplate(`${receiver}_${index + 1}`, e.target.value)}
-                                        className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm"
-                                        placeholder="Enter system information..."
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
 
                 {/* Number of TV */}
                 <div>

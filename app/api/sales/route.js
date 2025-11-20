@@ -154,6 +154,7 @@ export async function POST(request) {
       ...saleData,
       agentId: user.id, // Set agentId from authenticated user
       pinCodeStatus: sanitizeEnumField(saleData.pinCodeStatus),
+      ssnNumberStatus: sanitizeEnumField(saleData.ssnNumberStatus),
       basicPackageStatus: sanitizeEnumField(saleData.basicPackageStatus),
       bundle: sanitizeEnumField(saleData.bundle),
       status: sanitizeEnumField(saleData.status)

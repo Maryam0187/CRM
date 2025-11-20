@@ -67,6 +67,12 @@ export default function NotificationBell() {
         const mappedNotifications = data.data.notifications.map(notification => {
           const timestamp = notification.createdAt || notification.created_at || notification.timestamp;
           
+          // Determine route based on relatedType
+          let route = notification.route;
+          if (!route && notification.relatedType === 'receiver') {
+            route = '/admin/receivers';
+          }
+          
           return {
             id: notification.id,
             title: notification.title,
@@ -76,6 +82,8 @@ export default function NotificationBell() {
             time: timestamp ? formatNotificationTime(new Date(timestamp)) : 'Just now',
             saleId: notification.saleId || notification.sale_id,
             agentName: notification.agentName || notification.agent_name,
+            relatedType: notification.relatedType || notification.related_type,
+            route: route,
             createdAt: timestamp
           };
         });
@@ -140,7 +148,12 @@ export default function NotificationBell() {
     // Close dropdown and navigate
     setIsOpen(false);
     
-    if (notification.saleId) {
+    // Navigate based on notification type
+    if (notification.route) {
+      router.push(notification.route);
+    } else if (notification.relatedType === 'receiver') {
+      router.push('/admin/receivers');
+    } else if (notification.saleId) {
       router.push(`/add-sale?id=${notification.saleId}`);
     } else {
       router.push('/');
@@ -166,7 +179,7 @@ export default function NotificationBell() {
 
   // Toggle dropdown
   const toggleDropdown = () => {
-    if (!isOpen && user?.role === 'supervisor') {
+    if (!isOpen && (user?.role === 'supervisor' || user?.role === 'admin')) {
       // Use cache to prevent excessive API calls
       const lastFetch = localStorage.getItem('lastNotificationFetch');
       const now = Date.now();
