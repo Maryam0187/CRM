@@ -3561,6 +3561,7 @@ Room: `;
                           customerName={customer.firstName}
                           callPurpose="follow_up"
                           onCallInitiated={handleCallInitiated}
+                          onCallCompleted={handleCallCompleted}
                           size="small"
                         />
                       </div>
@@ -3605,6 +3606,7 @@ Room: `;
                           customerName={customer.firstName}
                           callPurpose="follow_up"
                           onCallInitiated={handleCallInitiated}
+                          onCallCompleted={handleCallCompleted}
                           size="small"
                         />
                       </div>
@@ -4964,6 +4966,7 @@ Room: `;
                     customerName={customer.firstName}
                     callPurpose="follow_up"
                     onCallInitiated={handleCallInitiated}
+                    onCallCompleted={handleCallCompleted}
                     size="large"
                   />
                 </div>

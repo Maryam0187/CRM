@@ -11,6 +11,7 @@ const CallButton = ({
   customerName, 
   callPurpose = 'follow_up',
   onCallInitiated,
+  onCallCompleted,
   className = '',
   size = 'default'
 }) => {
@@ -23,6 +24,7 @@ const CallButton = ({
   const [callTimer, setCallTimer] = useState(0);
   const ringingInterval = useRef(null);
   const timerInterval = useRef(null);
+  const hasNotifiedCompletion = useRef(false);
   
   // Use the custom hook for call status management
   const { 
@@ -118,8 +120,22 @@ const CallButton = ({
 
   // Handle call completion
   useEffect(() => {
-    if (isCallCompleted() && currentCallSid) {
+    if (isCallCompleted() && currentCallSid && !hasNotifiedCompletion.current) {
       console.log('📞 Call completed, cleaning up');
+      
+      // Notify parent component that call is completed (only once)
+      if (onCallCompleted) {
+        hasNotifiedCompletion.current = true;
+        onCallCompleted({
+          callSid: currentCallSid,
+          status: currentCallStatus?.status,
+          customerId,
+          saleId,
+          phoneNumber,
+          customerName
+        });
+      }
+      
       setIsCalling(false);
       setCurrentCallSid(null);
       setCallStartTime(null);
@@ -133,7 +149,14 @@ const CallButton = ({
         timerInterval.current = null;
       }
     }
-  }, [currentCallStatus, isCallCompleted, currentCallSid]);
+  }, [currentCallStatus, isCallCompleted, currentCallSid, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
+
+  // Reset completion notification flag when a new call starts
+  useEffect(() => {
+    if (currentCallSid && !isCallCompleted()) {
+      hasNotifiedCompletion.current = false;
+    }
+  }, [currentCallSid, isCallCompleted]);
 
   const handleCall = async () => {
     if (!phoneNumber || !user?.id) {
