@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getClient, validatePhoneNumber, generateCallTwiML, getWebhookUrl } from '../../../../lib/twilio';
+import { getClient, validatePhoneNumber, getWebhookUrl } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 
@@ -60,34 +60,23 @@ export async function POST(request) {
         { status: 500 }
       );
     }
+    
 
-    // Generate TwiML for the call
-    const twiml = generateCallTwiML({
-      sayMessage: customMessage || 'Hello, this is a call from your CRM system.',
-      recordCall: shouldRecord,
-      recordingCallback: getWebhookUrl('/api/twilio/recording-callback')
-    });
-
-    // Get webhook URLs for debugging
     const statusCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
     const recordingCallbackUrl = getWebhookUrl('/api/twilio/recording-callback');
-    
-    console.log('🔗 Webhook URLs:', {
-      statusCallback: statusCallbackUrl,
-      recordingCallback: recordingCallbackUrl
-    });
 
-    // Create the call
-    const voiceUrl = getWebhookUrl('/api/twilio/voice-response');
+    const voiceUrl = `${getWebhookUrl('/api/twilio/voice-response')}?agentId=${agentId}`;
     const callOptions = {
       url: voiceUrl,
       to: formattedNumber,
       from: twilioPhoneNumber,
       statusCallback: statusCallbackUrl,
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      machineDetection: 'Enable',
+      machineDetectionTimeout: 30,
+      answerOnMedia: false
     };
     
-    // Only add recording options if recording is enabled
     if (shouldRecord) {
       callOptions.record = true;
       callOptions.recordingStatusCallback = recordingCallbackUrl;
