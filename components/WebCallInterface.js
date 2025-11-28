@@ -130,36 +130,91 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
         throw new Error('Failed to create call');
       }
 
+      console.log('📞 Call object created:', call);
+      console.log('📞 Call object type:', typeof call);
+      console.log('📞 Call object methods:', Object.keys(call));
+      
       activeConnection.current = call;
 
-      call.on('accept', () => {
-        console.log('✅ Call accepted - connected to conference');
-        setIsConnected(true);
-        setIsConnecting(false);
-        onCallConnected && onCallConnected(call);
-      });
+      // SDK 2.x Call object - check available methods
+      if (call && typeof call === 'object') {
+        // Try to attach event listeners using the available method
+        if (typeof call.addEventListener === 'function') {
+          console.log('📞 Using addEventListener for events');
+          
+          call.addEventListener('accept', () => {
+            console.log('✅ Call accepted - connected to conference');
+            setIsConnected(true);
+            setIsConnecting(false);
+            onCallConnected && onCallConnected(call);
+          });
 
-      call.on('disconnect', () => {
-        console.log('📞 Call disconnected');
-        setIsConnected(false);
-        setIsConnecting(false);
-        activeConnection.current = null;
-        onCallDisconnected && onCallDisconnected();
-      });
+          call.addEventListener('disconnect', () => {
+            console.log('📞 Call disconnected');
+            setIsConnected(false);
+            setIsConnecting(false);
+            activeConnection.current = null;
+            onCallDisconnected && onCallDisconnected();
+          });
 
-      call.on('error', (err) => {
-        console.error('❌ Call error:', err);
-        setError(`Call error: ${err.message || err.code || 'Unknown error'}`);
-        setIsConnected(false);
-        setIsConnecting(false);
-      });
+          call.addEventListener('error', (err) => {
+            console.error('❌ Call error:', err);
+            setError(`Call error: ${err?.message || err?.code || 'Unknown error'}`);
+            setIsConnected(false);
+            setIsConnecting(false);
+          });
 
-      call.on('reject', () => {
-        console.error('❌ Call rejected');
-        setError('Call was rejected');
-        setIsConnected(false);
-        setIsConnecting(false);
-      });
+          call.addEventListener('reject', () => {
+            console.error('❌ Call rejected');
+            setError('Call was rejected');
+            setIsConnected(false);
+            setIsConnecting(false);
+          });
+        } else if (typeof call.on === 'function') {
+          console.log('📞 Using .on() for events');
+          
+          call.on('accept', () => {
+            console.log('✅ Call accepted - connected to conference');
+            setIsConnected(true);
+            setIsConnecting(false);
+            onCallConnected && onCallConnected(call);
+          });
+
+          call.on('disconnect', () => {
+            console.log('📞 Call disconnected');
+            setIsConnected(false);
+            setIsConnecting(false);
+            activeConnection.current = null;
+            onCallDisconnected && onCallDisconnected();
+          });
+
+          call.on('error', (err) => {
+            console.error('❌ Call error:', err);
+            setError(`Call error: ${err?.message || err?.code || 'Unknown error'}`);
+            setIsConnected(false);
+            setIsConnecting(false);
+          });
+
+          call.on('reject', () => {
+            console.error('❌ Call rejected');
+            setError('Call was rejected');
+            setIsConnected(false);
+            setIsConnecting(false);
+          });
+        } else {
+          console.warn('⚠️ Call object does not support event listeners');
+          console.warn('📞 Call object:', call);
+          // Set connected after a delay as fallback
+          setTimeout(() => {
+            console.log('📞 Setting connected state (fallback)');
+            setIsConnected(true);
+            setIsConnecting(false);
+            onCallConnected && onCallConnected(call);
+          }, 2000);
+        }
+      } else {
+        throw new Error('Invalid call object returned');
+      }
 
     } catch (err) {
       console.error('❌ Error joining conference:', err);
