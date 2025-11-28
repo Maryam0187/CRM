@@ -132,7 +132,14 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
 
       console.log('📞 Call object created:', call);
       console.log('📞 Call object type:', typeof call);
-      console.log('📞 Call object methods:', Object.keys(call));
+      if (call && typeof call === 'object') {
+        const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(call)).filter(name => 
+          name !== 'constructor' && typeof call[name] === 'function'
+        );
+        console.log('📞 Call object methods:', methods);
+        console.log('📞 Call.hasDisconnect?', 'disconnect' in call);
+        console.log('📞 Call.hasHangup?', 'hangup' in call);
+      }
       
       activeConnection.current = call;
 
@@ -159,16 +166,29 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
 
           call.addEventListener('error', (err) => {
             console.error('❌ Call error:', err);
-            setError(`Call error: ${err?.message || err?.code || 'Unknown error'}`);
+            const errorCode = err?.code || err?.twilioError?.code;
+            const errorMessage = err?.message || err?.twilioError?.message || 'Unknown error';
+            
+            // Handle specific error codes
+            if (errorCode === 31603 || errorMessage.includes('Decline')) {
+              setError('Call was declined by Twilio. Please check TwiML App configuration in Twilio Console.');
+            } else if (errorCode === 31005) {
+              setError('Connection error. Please check your internet connection and try again.');
+            } else {
+              setError(`Call error: ${errorMessage} (Code: ${errorCode || 'N/A'})`);
+            }
+            
             setIsConnected(false);
             setIsConnecting(false);
+            activeConnection.current = null;
           });
 
           call.addEventListener('reject', () => {
             console.error('❌ Call rejected');
-            setError('Call was rejected');
+            setError('Call was rejected. Please check TwiML App Voice URL configuration.');
             setIsConnected(false);
             setIsConnecting(false);
+            activeConnection.current = null;
           });
         } else if (typeof call.on === 'function') {
           console.log('📞 Using .on() for events');
@@ -190,16 +210,29 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
 
           call.on('error', (err) => {
             console.error('❌ Call error:', err);
-            setError(`Call error: ${err?.message || err?.code || 'Unknown error'}`);
+            const errorCode = err?.code || err?.twilioError?.code;
+            const errorMessage = err?.message || err?.twilioError?.message || 'Unknown error';
+            
+            // Handle specific error codes
+            if (errorCode === 31603 || errorMessage.includes('Decline')) {
+              setError('Call was declined by Twilio. Please check TwiML App configuration in Twilio Console.');
+            } else if (errorCode === 31005) {
+              setError('Connection error. Please check your internet connection and try again.');
+            } else {
+              setError(`Call error: ${errorMessage} (Code: ${errorCode || 'N/A'})`);
+            }
+            
             setIsConnected(false);
             setIsConnecting(false);
+            activeConnection.current = null;
           });
 
           call.on('reject', () => {
             console.error('❌ Call rejected');
-            setError('Call was rejected');
+            setError('Call was rejected. Please check TwiML App Voice URL configuration.');
             setIsConnected(false);
             setIsConnecting(false);
+            activeConnection.current = null;
           });
         } else {
           console.warn('⚠️ Call object does not support event listeners');
@@ -224,14 +257,54 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
   };
 
   const hangUp = () => {
-    if (activeConnection.current) {
-      console.log('📞 Hanging up call');
-      activeConnection.current.disconnect();
-    }
-    if (device) {
-      device.unregister();
+    console.log('📞 hangUp called');
+    
+    try {
+      if (activeConnection.current) {
+        const call = activeConnection.current;
+        
+        // SDK 2.x - Call object should have disconnect() method
+        // But we'll try multiple approaches in case the call is in an error state
+        if (call) {
+          // Check if call has status property (indicates it's a valid Call object)
+          if (call.status) {
+            console.log('📞 Call status before disconnect:', call.status);
+          }
+          
+          // Try disconnect method (standard for SDK 2.x)
+          if (typeof call.disconnect === 'function') {
+            console.log('📞 Disconnecting call using call.disconnect()');
+            call.disconnect();
+          } 
+          // Fallback: try device disconnectAll
+          else if (device && typeof device.disconnectAll === 'function') {
+            console.log('📞 Disconnecting all calls using device.disconnectAll()');
+            device.disconnectAll();
+          }
+          // If call is already disconnected/errored, just clear the reference
+          else {
+            console.log('📞 Call object exists but no disconnect method available - clearing reference');
+          }
+        }
+        
+        activeConnection.current = null;
+      }
+      
+      // Also try device-level disconnect if available
+      if (device && typeof device.disconnectAll === 'function') {
+        try {
+          device.disconnectAll();
+        } catch (e) {
+          // Ignore errors - call might already be disconnected
+        }
+      }
+    } catch (err) {
+      console.error('❌ Error in hangUp:', err);
+    } finally {
+      // Always update state regardless of disconnect success
       setIsConnected(false);
       setIsConnecting(false);
+      onCallDisconnected && onCallDisconnected();
     }
   };
 
