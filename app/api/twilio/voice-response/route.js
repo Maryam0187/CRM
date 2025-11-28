@@ -25,11 +25,8 @@ async function handleVoiceResponse(request) {
       }
     }
     
-    // Check if call recording is enabled (default to false)
-    const recordingEnabled = process.env.TWILIO_ENABLE_RECORDING === 'true';
-    
-    // Get recording callback URL (only if recording is enabled)
-    const recordingCallbackUrl = recordingEnabled ? getWebhookUrl('/api/twilio/recording-callback') : null;
+    // Call recording is DISABLED - no calls will be recorded
+    const recordingEnabled = false;
     
     
     let twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -58,13 +55,8 @@ async function handleVoiceResponse(request) {
         
         // Place customer in conference room
         // Agent can join via web interface or we'll call their phone separately
-        twiml += `\n  <Dial record="${recordingEnabled ? 'true' : 'false'}"`;
-        
-        if (recordingEnabled && recordingCallbackUrl) {
-          twiml += ` recordingStatusCallback="${recordingCallbackUrl}"`;
-        }
-        
-        twiml += `>`;
+        // Recording is DISABLED
+        twiml += `\n  <Dial record="false">`;
         twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST">${conferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
@@ -83,13 +75,8 @@ async function handleVoiceResponse(request) {
         twiml += `\n  <Say voice="alice">We're sorry, we're unable to connect you at this time.</Say>`;
       }
     } else {
-      // Fallback: automated message
+      // Fallback: automated message (no recording)
       twiml += `\n  <Say voice="alice">Hello, this is a call from your CRM system.</Say>`;
-      
-      if (recordingEnabled && recordingCallbackUrl) {
-        twiml += `\n  <Record maxLength="300" action="${recordingCallbackUrl}" playBeep="true" recordingStatusCallback="${recordingCallbackUrl}"/>`;
-      }
-      
       twiml += `\n  <Say voice="alice">Thank you for your time. Have a great day!</Say>`;
     }
     

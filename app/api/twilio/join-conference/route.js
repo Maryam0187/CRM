@@ -25,14 +25,12 @@ async function handleJoinConference(request) {
       );
     }
 
-    const recordingEnabled = process.env.TWILIO_ENABLE_RECORDING === 'true';
-    const recordingCallbackUrl = recordingEnabled ? getWebhookUrl('/api/twilio/recording-callback') : null;
-
+    // Recording is DISABLED - no calls will be recorded
     console.log(`📞 Agent joining conference via web: ${conferenceName}`);
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial record="${recordingEnabled ? 'true' : 'false'}"${recordingEnabled && recordingCallbackUrl ? ` recordingStatusCallback="${recordingCallbackUrl}"` : ''}>
+  <Dial record="false">
     <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false">${conferenceName}</Conference>
   </Dial>
 </Response>`;

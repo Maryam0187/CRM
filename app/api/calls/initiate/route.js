@@ -16,21 +16,21 @@ export async function POST(request) {
 
     const body = await request.json();
     
-    // Check if call recording is enabled (default to false)
-    const recordingEnabled = process.env.TWILIO_ENABLE_RECORDING === 'true';
+    // Call recording is DISABLED - no calls will be recorded
+    const recordingEnabled = false;
     
-    const { 
-      customerId, 
-      saleId, 
+    const {
+      customerId,
+      saleId,
       agentId, 
       phoneNumber, 
       callPurpose = 'follow_up',
       customMessage,
-      recordCall = false // Default to false, can be overridden by request
+      recordCall = false // Ignored - recording is disabled
     } = body;
     
-    // Only allow recording if globally enabled AND explicitly requested
-    const shouldRecord = recordingEnabled && recordCall;
+    // Recording is always disabled
+    const shouldRecord = false;
 
     // Validate required fields
     if (!agentId || !phoneNumber) {
@@ -63,7 +63,6 @@ export async function POST(request) {
     
 
     const statusCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
-    const recordingCallbackUrl = getWebhookUrl('/api/twilio/recording-callback');
 
     const voiceUrl = `${getWebhookUrl('/api/twilio/voice-response')}?agentId=${agentId}`;
     const callOptions = {
@@ -75,12 +74,8 @@ export async function POST(request) {
       machineDetection: 'Enable',
       machineDetectionTimeout: 30,
       answerOnMedia: false
+      // Note: record option is NOT set - calls will NOT be recorded
     };
-    
-    if (shouldRecord) {
-      callOptions.record = true;
-      callOptions.recordingStatusCallback = recordingCallbackUrl;
-    }
     
     const call = await client.calls.create(callOptions);
     

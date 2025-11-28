@@ -187,7 +187,14 @@ const CallButton = ({
       if (result.success) {
         // Call initiated successfully
         setCurrentCallSid(result.data.callSid);
+        // Set conference name from response or generate it
+        const confName = result.data.conferenceName || `call-${user.id}`;
+        setConferenceName(confName);
+        setShowWebInterface(true);
         console.log('📞 Call initiated successfully:', result.data);
+        console.log('📞 Conference name:', confName);
+        console.log('📞 showWebInterface set to:', true);
+        console.log('📞 conferenceName set to:', confName);
         
         if (onCallInitiated) {
           onCallInitiated(result.data);
@@ -315,19 +322,19 @@ const CallButton = ({
       )}
 
       {/* Web Call Interface - shows when call is active */}
-      {showWebInterface && conferenceName && (
+      {showWebInterface && conferenceName ? (
         <WebCallInterface
           conferenceName={conferenceName}
           onCallConnected={() => {
-            console.log('Web call connected');
+            console.log('✅ Web call connected');
           }}
           onCallDisconnected={() => {
-            console.log('Web call disconnected');
+            console.log('📞 Web call disconnected');
             setShowWebInterface(false);
             setConferenceName(null);
           }}
         />
-      )}
+      ) : null}
     </div>
   );
 };
