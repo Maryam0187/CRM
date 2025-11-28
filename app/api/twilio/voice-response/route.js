@@ -46,27 +46,16 @@ async function handleVoiceResponse(request) {
           const agentPhone = validatePhoneNumber(agent.phone);
           
           if (agentPhone) {
-            // Get conference name from URL or generate one
-            const url = new URL(request.url);
-            let conferenceName = url.searchParams.get('conferenceName');
-            
-            if (!conferenceName) {
-              // Generate if not provided (fallback)
-              conferenceName = `call-${agentId}-${Date.now()}`;
-            }
-            
-            // Put customer in conference
-            twiml += `\n  <Dial record="${recordingEnabled ? 'true' : 'false'}"`;
+            // Connect customer directly to agent's phone
+            twiml += `\n  <Dial timeout="30" record="${recordingEnabled ? 'true' : 'false'}"`;
             
             if (recordingEnabled && recordingCallbackUrl) {
               twiml += ` recordingStatusCallback="${recordingCallbackUrl}"`;
             }
             
             twiml += `>`;
-            twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true">${conferenceName}</Conference>`;
+            twiml += `\n    <Number>${agentPhone}</Number>`;
             twiml += `\n  </Dial>`;
-            
-            console.log(`📞 Conference created: ${conferenceName} - Agent ${agentId} should join via web interface`);
             
           } else {
             twiml += `\n  <Say voice="alice">We're sorry, the agent is not available at this time.</Say>`;

@@ -65,9 +65,7 @@ export async function POST(request) {
     const statusCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
     const recordingCallbackUrl = getWebhookUrl('/api/twilio/recording-callback');
 
-    // Generate conference name and pass it to voice response
-    const conferenceName = `call-${agentId}-${Date.now()}`;
-    const voiceUrl = `${getWebhookUrl('/api/twilio/voice-response')}?agentId=${agentId}&conferenceName=${encodeURIComponent(conferenceName)}`;
+    const voiceUrl = `${getWebhookUrl('/api/twilio/voice-response')}?agentId=${agentId}`;
     const callOptions = {
       url: voiceUrl,
       to: formattedNumber,
@@ -117,8 +115,6 @@ export async function POST(request) {
       }
     });
 
-    // Use the already declared conferenceName variable
-
     return NextResponse.json({
       success: true,
       data: {
@@ -126,10 +122,9 @@ export async function POST(request) {
         status: call.status,
         to: call.to,
         from: call.from,
-        callLogId: callLog.id,
-        conferenceName: conferenceName
+        callLogId: callLog.id
       },
-      message: 'Call initiated - join via web interface'
+      message: 'Call initiated successfully'
     });
 
   } catch (error) {
