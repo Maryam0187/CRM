@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.9.2",
+    "@twilio/voice-sdk": "^2.16.0",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",

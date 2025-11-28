@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient';
+import { Device } from '@twilio/voice-sdk';
 
 export default function WebCallInterface({ conferenceName, onCallConnected, onCallDisconnected }) {
   const { user } = useAuth();
@@ -11,43 +12,6 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState(null);
   const activeConnection = useRef(null);
-  const [twilioLoaded, setTwilioLoaded] = useState(false);
-
-  // Load Twilio Voice SDK
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    // Check if Twilio is already loaded
-    if (window.Twilio?.Device) {
-      setTwilioLoaded(true);
-      return;
-    }
-
-    // Load Twilio Voice SDK from CDN
-    const script = document.createElement('script');
-    script.src = 'https://sdk.twilio.com/js/client/releases/1.14.0/twilio.min.js';
-    script.async = true;
-    script.onload = () => {
-      if (window.Twilio?.Device) {
-        setTwilioLoaded(true);
-        console.log('✅ Twilio SDK loaded');
-      } else {
-        console.error('❌ Twilio SDK loaded but Device not found');
-        setError('Failed to load Twilio SDK - Device not found');
-      }
-    };
-    script.onerror = () => {
-      console.error('❌ Failed to load Twilio SDK script');
-      setError('Failed to load Twilio SDK');
-    };
-    document.body.appendChild(script);
-
-    return () => {
-      if (script.parentNode) {
-        script.parentNode.removeChild(script);
-      }
-    };
-  }, []);
 
   const fetchToken = async () => {
     try {
@@ -66,35 +30,29 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
   };
 
   useEffect(() => {
-    if (!twilioLoaded || !conferenceName || !user) return;
+    if (!conferenceName || !user) return;
 
-    const setupTwilioDevice = async () => {
+    const setupDevice = async () => {
       try {
         const token = await fetchToken();
         if (!token) return;
 
-        // Initialize Twilio Device using SDK 1.x API
-        if (!window.Twilio || !window.Twilio.Device) {
-          throw new Error('Twilio SDK not loaded properly');
-        }
-
-        console.log('📞 Setting up Twilio Device...');
-        window.Twilio.Device.setup(token, {
+        console.log('📞 Setting up Twilio Device (SDK 2.x)...');
+        
+        const twilioDevice = new Device(token, {
           logLevel: 1,
-          codecPreferences: ['opus', 'pcmu']
+          codecPreferences: ['opus', 'pcmu'],
         });
 
-        const twilioDevice = window.Twilio.Device;
-
-        twilioDevice.on('ready', () => {
-          console.log('✅ Twilio Device ready');
+        twilioDevice.on('registered', () => {
+          console.log('✅ Twilio Device registered');
           setDevice(twilioDevice);
           setError(null);
-          // Auto-join conference when device is ready
+          // Auto-join conference when device is registered
           setTimeout(() => {
             if (conferenceName && !isConnected) {
               console.log('📞 Auto-joining conference:', conferenceName);
-              joinConference();
+              joinConference(twilioDevice);
             }
           }, 500);
         });
@@ -105,15 +63,10 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
           setIsConnecting(false);
         });
 
-        twilioDevice.on('incoming', (connection) => {
-          console.log('📞 Incoming call:', connection);
-          // For outbound calls, reject incoming calls
-          connection.reject();
-        });
-
-        twilioDevice.on('offline', () => {
-          console.log('📞 Device offline');
-          setIsConnected(false);
+        twilioDevice.on('incoming', (call) => {
+          console.log('📞 Incoming call:', call);
+          // Reject unexpected incoming calls
+          call.reject();
         });
 
         twilioDevice.on('tokenWillExpire', async () => {
@@ -123,7 +76,8 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
             twilioDevice.updateToken(newToken);
           }
         });
-        
+
+        twilioDevice.register();
         setDevice(twilioDevice);
 
       } catch (err) {
@@ -132,23 +86,23 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
       }
     };
 
-    setupTwilioDevice();
+    setupDevice();
 
     return () => {
       if (device) {
         try {
-          device.disconnectAll();
+          device.unregister();
           device.destroy();
         } catch (e) {
           console.error('Error cleaning up device:', e);
         }
       }
     };
-  }, [twilioLoaded, conferenceName, user]);
+  }, [conferenceName, user]);
 
-  const joinConference = () => {
-    if (!device || !conferenceName) {
-      const errorMsg = `Device not ready or conference name missing. Device: ${!!device}, Conference: ${conferenceName}`;
+  const joinConference = (deviceInstance = device) => {
+    if (!deviceInstance || !conferenceName) {
+      const errorMsg = `Device not ready or conference name missing. Device: ${!!deviceInstance}, Conference: ${conferenceName}`;
       console.error('❌', errorMsg);
       setError(errorMsg);
       return;
@@ -165,28 +119,27 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
       console.log(`📞 Attempting to join conference: ${conferenceName}`);
       
       // Use TwiML App to connect to conference
-      // The 'To' parameter will be passed to the TwiML App's Voice URL
       const params = {
         To: conferenceName
       };
 
       console.log('📞 Connecting with params:', params);
-      const connection = device.connect(params);
+      const call = deviceInstance.connect({ params });
       
-      if (!connection) {
-        throw new Error('Failed to create connection');
+      if (!call) {
+        throw new Error('Failed to create call');
       }
 
-      activeConnection.current = connection;
+      activeConnection.current = call;
 
-      connection.on('accept', () => {
+      call.on('accept', () => {
         console.log('✅ Call accepted - connected to conference');
         setIsConnected(true);
         setIsConnecting(false);
-        onCallConnected && onCallConnected(connection);
+        onCallConnected && onCallConnected(call);
       });
 
-      connection.on('disconnect', () => {
+      call.on('disconnect', () => {
         console.log('📞 Call disconnected');
         setIsConnected(false);
         setIsConnecting(false);
@@ -194,16 +147,16 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
         onCallDisconnected && onCallDisconnected();
       });
 
-      connection.on('error', (err) => {
-        console.error('❌ Connection error:', err);
-        setError(`Connection error: ${err.message || err.code || 'Unknown error'}`);
+      call.on('error', (err) => {
+        console.error('❌ Call error:', err);
+        setError(`Call error: ${err.message || err.code || 'Unknown error'}`);
         setIsConnected(false);
         setIsConnecting(false);
       });
 
-      connection.on('reject', () => {
-        console.error('❌ Connection rejected');
-        setError('Connection was rejected');
+      call.on('reject', () => {
+        console.error('❌ Call rejected');
+        setError('Call was rejected');
         setIsConnected(false);
         setIsConnecting(false);
       });
@@ -221,21 +174,14 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
       activeConnection.current.disconnect();
     }
     if (device) {
-      device.disconnectAll();
+      device.unregister();
       setIsConnected(false);
       setIsConnecting(false);
     }
   };
 
-  console.log('📞 WebCallInterface render - conferenceName:', conferenceName, 'twilioLoaded:', twilioLoaded, 'device:', !!device);
-
   if (!conferenceName) {
-    console.log('⚠️ WebCallInterface: No conference name, returning null');
-    return (
-      <div className="fixed bottom-4 right-4 bg-yellow-100 border-2 border-yellow-500 rounded-lg p-4 z-50 min-w-[300px]">
-        <p className="text-sm text-yellow-800">⚠️ Conference name missing</p>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -272,18 +218,22 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
         </div>
       )}
 
-      {!isConnected && !isConnecting && !error && twilioLoaded && (
+      {!isConnected && !isConnecting && !error && device && (
         <button
-          onClick={joinConference}
+          onClick={() => joinConference()}
           className="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
         >
           Join Call
         </button>
       )}
 
-      {!twilioLoaded && (
-        <div className="text-sm text-gray-500">Loading Twilio SDK...</div>
+      {!device && !error && (
+        <div className="text-sm text-gray-500">Initializing device...</div>
       )}
+
+      <div className="mt-2 text-xs text-gray-500">
+        Conference: {conferenceName}
+      </div>
     </div>
   );
 }
