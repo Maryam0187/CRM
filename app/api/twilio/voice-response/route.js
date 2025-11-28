@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getWebhookUrl } from '../../../../lib/twilio';
+import { getWebhookUrl, validatePhoneNumber, getClient } from '../../../../lib/twilio';
+import sequelizeDb from '../../../../lib/sequelize-db';
 
 // Handle both GET and POST requests (Twilio can use either)
 export async function GET(request) {
@@ -35,18 +36,48 @@ async function handleVoiceResponse(request) {
 <Response>`;
     
     if (agentId) {
-      // Connect customer directly - agent phone will NOT ring
-      const conferenceName = `call-${agentId}-${Date.now()}`;
-      
-      twiml += `\n  <Dial record="${recordingEnabled ? 'true' : 'false'}"`;
-      
-      if (recordingEnabled && recordingCallbackUrl) {
-        twiml += ` recordingStatusCallback="${recordingCallbackUrl}"`;
+      try {
+        // Get agent's phone number
+        const agent = await sequelizeDb.User.findByPk(parseInt(agentId), {
+          attributes: ['id', 'firstName', 'lastName', 'phone']
+        });
+        
+        if (agent && agent.phone) {
+          const agentPhone = validatePhoneNumber(agent.phone);
+          
+          if (agentPhone) {
+            // Get conference name from URL or generate one
+            const url = new URL(request.url);
+            let conferenceName = url.searchParams.get('conferenceName');
+            
+            if (!conferenceName) {
+              // Generate if not provided (fallback)
+              conferenceName = `call-${agentId}-${Date.now()}`;
+            }
+            
+            // Put customer in conference
+            twiml += `\n  <Dial record="${recordingEnabled ? 'true' : 'false'}"`;
+            
+            if (recordingEnabled && recordingCallbackUrl) {
+              twiml += ` recordingStatusCallback="${recordingCallbackUrl}"`;
+            }
+            
+            twiml += `>`;
+            twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true">${conferenceName}</Conference>`;
+            twiml += `\n  </Dial>`;
+            
+            console.log(`📞 Conference created: ${conferenceName} - Agent ${agentId} should join via web interface`);
+            
+          } else {
+            twiml += `\n  <Say voice="alice">We're sorry, the agent is not available at this time.</Say>`;
+          }
+        } else {
+          twiml += `\n  <Say voice="alice">We're sorry, the agent is not available at this time.</Say>`;
+        }
+      } catch (error) {
+        console.error('Error in voice response:', error);
+        twiml += `\n  <Say voice="alice">We're sorry, we're unable to connect you at this time.</Say>`;
       }
-      
-      twiml += `>`;
-      twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true">${conferenceName}</Conference>`;
-      twiml += `\n  </Dial>`;
     } else {
       // Fallback: automated message
       twiml += `\n  <Say voice="alice">Hello, this is a call from your CRM system.</Say>`;

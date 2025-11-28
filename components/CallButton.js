@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useCallStatus } from '../lib/useCallStatus';
 import apiClient from '../lib/apiClient';
+import WebCallInterface from './WebCallInterface';
 
 const CallButton = ({ 
   customerId, 
@@ -19,6 +20,7 @@ const CallButton = ({
   const { isConnected } = useSocket();
   const [isCalling, setIsCalling] = useState(false);
   const [currentCallSid, setCurrentCallSid] = useState(null);
+  const [conferenceName, setConferenceName] = useState(null);
   const [error, setError] = useState(null);
   const [callStartTime, setCallStartTime] = useState(null);
   const [callTimer, setCallTimer] = useState(0);
@@ -182,12 +184,9 @@ const CallButton = ({
       if (result.success) {
         // Call initiated successfully
         setCurrentCallSid(result.data.callSid);
+        setConferenceName(result.data.conferenceName);
         console.log('📞 Call initiated successfully:', result.data);
-        console.log('📞 Call SID:', result.data.callSid);
-        console.log('📞 Initial status:', result.data.status);
-        console.log('📞 Customer ID:', customerId);
-        console.log('📞 Sale ID:', saleId);
-        console.log('📞 Agent ID:', user.id);
+        console.log('📞 Conference Name:', result.data.conferenceName);
         
         if (onCallInitiated) {
           onCallInitiated(result.data);
@@ -312,6 +311,18 @@ const CallButton = ({
         <div className="mt-1 text-xs text-red-600">
           {error}
         </div>
+      )}
+      
+      {/* Web Call Interface - shows when call is initiated */}
+      {conferenceName && (
+        <WebCallInterface 
+          conferenceName={conferenceName}
+          onCallEnd={() => {
+            setConferenceName(null);
+            setCurrentCallSid(null);
+            setIsCalling(false);
+          }}
+        />
       )}
     </div>
   );

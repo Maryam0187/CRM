@@ -17,7 +17,7 @@ TWILIO_AUTH_TOKEN=your_twilio_auth_token
 TWILIO_PHONE_NUMBER=+1234567890
 
 # Webhook Configuration (IMPORTANT!)
-TWILIO_WEBHOOK_BASE_URL=https://your-app-name.railway.app
+TWILIO_WEBHOOK_BASE_URL=https://crm-production-0339.up.railway.app
 
 # Database Configuration
 DATABASE_URL=mysql://username:password@host:port/database_name
@@ -39,14 +39,14 @@ NEXT_PUBLIC_APP_URL=https://your-app-name.railway.app
 1. Go to your Railway project dashboard
 2. Click on your service
 3. Go to the "Settings" tab
-4. Copy the "Public Domain" URL (it looks like `https://your-app-name.railway.app`)
+4. Copy the "Public Domain" URL (currently: `https://crm-production-0339.up.railway.app`)
 5. Set this as your `TWILIO_WEBHOOK_BASE_URL` environment variable
 
 ### 3. Verify Webhook URLs
 
 After deployment, your webhook URLs should be:
-- **Status Callback**: `https://your-app-name.railway.app/api/twilio/call-status-callback`
-- **Recording Callback**: `https://your-app-name.railway.app/api/twilio/recording-callback`
+- **Status Callback**: `https://crm-production-0339.up.railway.app/api/twilio/call-status-callback`
+- **Recording Callback**: `https://crm-production-0339.up.railway.app/api/twilio/recording-callback`
 
 ## 🔧 Troubleshooting Call Issues
 
