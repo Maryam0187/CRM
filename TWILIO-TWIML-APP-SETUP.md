@@ -38,9 +38,13 @@ First, determine your webhook base URL:
      - URL: `https://crm-production-0339.up.railway.app/api/twilio/join-conference`
      - Method: **POST** (or GET, both work)
    
-   - **CALL STATUS CHANGES**:
+   - **CALL STATUS CHANGES** (Optional but recommended):
      - URL: `https://crm-production-0339.up.railway.app/api/twilio/call-status-callback`
      - Method: **POST**
+
+   **Important**: Make sure the TwiML App SID matches your environment variable:
+   - Your TwiML App SID: `APc937198de093d44d3185d327367b1d18`
+   - Should be set as: `TWILIO_APP_SID=APc937198de093d44d3185d327367b1d18`
 
 4. **Save the TwiML App**
    - Click **"Save"** or **"Create"**
