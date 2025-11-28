@@ -115,6 +115,9 @@ export async function POST(request) {
       }
     });
 
+    // Conference name for agent to join via web
+    const conferenceName = `call-${agentId}`;
+
     return NextResponse.json({
       success: true,
       data: {
@@ -122,9 +125,10 @@ export async function POST(request) {
         status: call.status,
         to: call.to,
         from: call.from,
-        callLogId: callLog.id
+        callLogId: callLog.id,
+        conferenceName: conferenceName
       },
-      message: 'Call initiated successfully'
+      message: 'Call initiated successfully - join via web interface'
     });
 
   } catch (error) {

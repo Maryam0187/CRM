@@ -37,34 +37,49 @@ async function handleVoiceResponse(request) {
     
     if (agentId) {
       try {
+        console.log(`📞 Voice response - Looking for agent ID: ${agentId}`);
+        
         // Get agent's phone number
         const agent = await sequelizeDb.User.findByPk(parseInt(agentId), {
           attributes: ['id', 'firstName', 'lastName', 'phone']
         });
         
+        console.log(`📞 Agent lookup result:`, {
+          found: !!agent,
+          agentId: agent?.id,
+          name: agent ? `${agent.firstName} ${agent.lastName}` : 'N/A',
+          hasPhone: !!agent?.phone,
+          phoneValue: agent?.phone || 'N/A'
+        });
+        
+        // Use conference room so agent can join via web or phone
+        const conferenceName = `call-${agentId}`;
+        console.log(`📞 Placing customer in conference: ${conferenceName}`);
+        
+        // Place customer in conference room
+        // Agent can join via web interface or we'll call their phone separately
+        twiml += `\n  <Dial record="${recordingEnabled ? 'true' : 'false'}"`;
+        
+        if (recordingEnabled && recordingCallbackUrl) {
+          twiml += ` recordingStatusCallback="${recordingCallbackUrl}"`;
+        }
+        
+        twiml += `>`;
+        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST">${conferenceName}</Conference>`;
+        twiml += `\n  </Dial>`;
+        
+        // If agent has phone, we'll call them separately to join the conference
+        // This is handled in the initiate route
         if (agent && agent.phone) {
           const agentPhone = validatePhoneNumber(agent.phone);
-          
           if (agentPhone) {
-            // Connect customer directly to agent's phone
-            twiml += `\n  <Dial timeout="30" record="${recordingEnabled ? 'true' : 'false'}"`;
-            
-            if (recordingEnabled && recordingCallbackUrl) {
-              twiml += ` recordingStatusCallback="${recordingCallbackUrl}"`;
-            }
-            
-            twiml += `>`;
-            twiml += `\n    <Number>${agentPhone}</Number>`;
-            twiml += `\n  </Dial>`;
-            
-          } else {
-            twiml += `\n  <Say voice="alice">We're sorry, the agent is not available at this time.</Say>`;
+            console.log(`📞 Agent phone available: ${agentPhone} - will be called separately to join conference`);
           }
         } else {
-          twiml += `\n  <Say voice="alice">We're sorry, the agent is not available at this time.</Say>`;
+          console.log(`⚠️ Agent ${agentId} has no phone number - agent must join via web interface to conference: ${conferenceName}`);
         }
       } catch (error) {
-        console.error('Error in voice response:', error);
+        console.error('❌ Error in voice response:', error);
         twiml += `\n  <Say voice="alice">We're sorry, we're unable to connect you at this time.</Say>`;
       }
     } else {

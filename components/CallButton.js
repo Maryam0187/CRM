@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useCallStatus } from '../lib/useCallStatus';
 import apiClient from '../lib/apiClient';
+import WebCallInterface from './WebCallInterface';
 
 const CallButton = ({ 
   customerId, 
@@ -19,6 +20,8 @@ const CallButton = ({
   const { isConnected } = useSocket();
   const [isCalling, setIsCalling] = useState(false);
   const [currentCallSid, setCurrentCallSid] = useState(null);
+  const [conferenceName, setConferenceName] = useState(null);
+  const [showWebInterface, setShowWebInterface] = useState(false);
   const [error, setError] = useState(null);
   const [callStartTime, setCallStartTime] = useState(null);
   const [callTimer, setCallTimer] = useState(0);
@@ -136,20 +139,22 @@ const CallButton = ({
         });
       }
       
-      setIsCalling(false);
-      setCurrentCallSid(null);
-      setCallStartTime(null);
-      setCallTimer(0);
-      if (ringingInterval.current) {
-        clearInterval(ringingInterval.current);
-        ringingInterval.current = null;
-      }
-      if (timerInterval.current) {
-        clearInterval(timerInterval.current);
-        timerInterval.current = null;
-      }
-    }
-  }, [currentCallStatus, isCallCompleted, currentCallSid, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
+            setIsCalling(false);
+            setCurrentCallSid(null);
+            setConferenceName(null);
+            setShowWebInterface(false);
+            setCallStartTime(null);
+            setCallTimer(0);
+            if (ringingInterval.current) {
+              clearInterval(ringingInterval.current);
+              ringingInterval.current = null;
+            }
+            if (timerInterval.current) {
+              clearInterval(timerInterval.current);
+              timerInterval.current = null;
+            }
+          }
+        }, [currentCallStatus, isCallCompleted, currentCallSid, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
 
   // Reset completion notification flag when a new call starts
   useEffect(() => {
@@ -307,6 +312,21 @@ const CallButton = ({
         <div className="mt-1 text-xs text-red-600">
           {error}
         </div>
+      )}
+
+      {/* Web Call Interface - shows when call is active */}
+      {showWebInterface && conferenceName && (
+        <WebCallInterface
+          conferenceName={conferenceName}
+          onCallConnected={() => {
+            console.log('Web call connected');
+          }}
+          onCallDisconnected={() => {
+            console.log('Web call disconnected');
+            setShowWebInterface(false);
+            setConferenceName(null);
+          }}
+        />
       )}
     </div>
   );

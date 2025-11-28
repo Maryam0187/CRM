@@ -38,6 +38,8 @@ First, determine your webhook base URL:
      - URL: `https://crm-production-0339.up.railway.app/api/twilio/join-conference`
      - Method: **POST** (or GET, both work)
    
+   **Important**: This URL is used when the agent connects via web interface. The `To` parameter will contain the conference name.
+   
    - **CALL STATUS CHANGES** (Optional but recommended):
      - URL: `https://crm-production-0339.up.railway.app/api/twilio/call-status-callback`
      - Method: **POST**
