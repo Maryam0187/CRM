@@ -100,12 +100,15 @@ const CallButton = ({
     }
   }, [currentCallStatus?.status, currentCallSid]);
 
-  // Handle call timer for in-progress calls
+  // Handle call timer for in-progress calls (from Twilio status updates)
   useEffect(() => {
     const callStatus = currentCallStatus?.status;
     
-    if ((callStatus === 'in-progress' || isWebCallConnected) && !callStartTime) {
-      // Call just started, set start time
+    // Only handle timer for Twilio status updates, not web call connections
+    // (web call connections are handled in onCallConnected callback)
+    if (callStatus === 'in-progress' && !callStartTime && !isWebCallConnected) {
+      // Call just started via Twilio status update, set start time
+      console.log('📞 Call in-progress detected, starting timer');
       setCallStartTime(Date.now());
       setCallTimer(0);
       
@@ -135,7 +138,7 @@ const CallButton = ({
       setCallStartTime(null);
       setCallTimer(0);
     }
-  }, [currentCallStatus?.status, callStartTime, isWebCallConnected, callTimer]);
+  }, [currentCallStatus?.status, callStartTime, isWebCallConnected]);
 
   // Handle call completion - when customer hangs up or call ends
   useEffect(() => {
@@ -333,18 +336,47 @@ const CallButton = ({
       // First, hang up the customer's call via API
       if (completedCallSid) {
         console.log('📞 Hanging up customer call via API:', completedCallSid);
-        try {
-          const response = await apiClient.post('/api/calls/hangup', {
-            callSid: completedCallSid
-          });
-          const result = await response.json();
-          if (result.success) {
-            console.log('✅ Customer call hung up successfully');
-          } else {
-            console.error('❌ Failed to hang up customer call:', result.message);
+        // Hang up the customer's call via API
+        if (completedCallSid) {
+          console.log('📞 Attempting to hang up customer call via API:', completedCallSid);
+          
+          // Use fetch directly with proper error handling
+          try {
+            const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+            const headers = {
+              'Content-Type': 'application/json',
+            };
+            
+            if (token) {
+              headers['Authorization'] = `Bearer ${token}`;
+            }
+            
+            const response = await fetch('/api/calls/hangup', {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify({ callSid: completedCallSid })
+            });
+            
+            if (response.ok) {
+              const result = await response.json();
+              if (result.success) {
+                console.log('✅ Customer call hung up successfully');
+              } else {
+                console.error('❌ Failed to hang up customer call:', result.message || result.error);
+              }
+            } else {
+              const errorText = await response.text().catch(() => 'Unknown error');
+              console.error('❌ Hangup API returned error:', response.status, errorText);
+            }
+          } catch (err) {
+            console.error('❌ Error calling hangup API:', err);
+            console.error('❌ Error details:', {
+              message: err.message,
+              callSid: completedCallSid
+            });
+            // Continue with cleanup even if API call fails
+            // The call might be terminated by Twilio when agent disconnects from conference
           }
-        } catch (err) {
-          console.error('❌ Error hanging up customer call via API:', err);
         }
       }
       
@@ -355,6 +387,7 @@ const CallButton = ({
       }
     } catch (err) {
       console.error('Error in handleEndCall:', err);
+      // Continue with cleanup even if there's an error
     }
     
     // Reset all call state immediately
@@ -498,16 +531,28 @@ const CallButton = ({
             ref={webCallInterfaceRef}
             conferenceName={conferenceName}
             onCallConnected={() => {
-              console.log('✅ Web call connected');
+              console.log('✅ Web call connected - starting timer immediately');
               setIsWebCallConnected(true);
-              // Start timer immediately when web call connects
-              setCallStartTime(Date.now());
+              
+              // Start timer immediately when web call connects - no delay
+              const now = Date.now();
+              setCallStartTime(now);
               setCallTimer(0);
-              if (!timerInterval.current) {
-                timerInterval.current = setInterval(() => {
-                  setCallTimer(prev => prev + 1);
-                }, 1000);
+              
+              // Clear any existing timer first
+              if (timerInterval.current) {
+                clearInterval(timerInterval.current);
               }
+              
+              // Start timer immediately
+              timerInterval.current = setInterval(() => {
+                setCallTimer(prev => {
+                  const newValue = prev + 1;
+                  return newValue;
+                });
+              }, 1000);
+              
+              console.log('✅ Timer started immediately');
             }}
             onCallDisconnected={() => {
               console.log('📞 Web call disconnected');

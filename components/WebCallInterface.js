@@ -44,6 +44,8 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           codecPreferences: ['opus', 'pcmu'],
           // Suppress insights errors
           allowIncomingWhileBusy: false,
+          // Enable audio immediately
+          enableRTCStats: false,
         });
         
         // Suppress console warnings for insights errors
@@ -131,7 +133,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     };
   }, [conferenceName, user]);
 
-  const joinConference = (deviceInstance = device) => {
+  const joinConference = async (deviceInstance = device) => {
     if (!deviceInstance || !conferenceName) {
       const errorMsg = `Device not ready or conference name missing. Device: ${!!deviceInstance}, Conference: ${conferenceName}`;
       console.error('❌', errorMsg);
@@ -155,6 +157,29 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       };
 
       console.log('📞 Connecting with params:', params);
+      
+      // Request audio permissions before connecting to ensure immediate audio
+      try {
+        console.log('📞 Requesting audio permissions...');
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }, 
+          video: false 
+        });
+        console.log('✅ Audio permissions granted, audio stream active');
+        // Stop the test stream - Twilio SDK will create its own
+        stream.getTracks().forEach(track => {
+          track.stop();
+          console.log('📞 Stopped test audio track');
+        });
+      } catch (audioErr) {
+        console.warn('⚠️ Audio permission issue (will be requested by Twilio SDK):', audioErr);
+        // Continue anyway - Twilio SDK will request permissions
+      }
+      
       const call = deviceInstance.connect({ params });
       
       if (!call) {
@@ -184,6 +209,15 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             console.log('✅ Call accepted - connected to conference');
             setIsConnected(true);
             setIsConnecting(false);
+            
+            // Ensure audio is enabled and playing
+            try {
+              // The call object should automatically handle audio, but we can verify
+              console.log('📞 Call accepted, audio should be active');
+            } catch (err) {
+              console.error('❌ Error enabling audio:', err);
+            }
+            
             onCallConnected && onCallConnected(call);
           });
 

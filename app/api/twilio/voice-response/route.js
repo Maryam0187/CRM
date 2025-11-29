@@ -56,8 +56,8 @@ async function handleVoiceResponse(request) {
         // Place customer in conference room
         // Agent can join via web interface or we'll call their phone separately
         // Recording is DISABLED
-        twiml += `\n  <Dial record="false">`;
-        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST">${conferenceName}</Conference>`;
+        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600">`;
+        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST" maxParticipants="2">${conferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
         // If agent has phone, we'll call them separately to join the conference
