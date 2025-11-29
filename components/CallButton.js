@@ -103,7 +103,7 @@ const CallButton = ({
   useEffect(() => {
     const callStatus = currentCallStatus?.status;
     
-    if (callStatus === 'in-progress' && !callStartTime) {
+    if ((callStatus === 'in-progress' || isWebCallConnected) && !callStartTime) {
       // Call just started, set start time
       setCallStartTime(Date.now());
       setCallTimer(0);
@@ -114,26 +114,54 @@ const CallButton = ({
           setCallTimer(prev => prev + 1);
         }, 1000);
       }
-    } else if (callStatus !== 'in-progress' && timerInterval.current) {
-      // Call ended, stop timer
+    } else if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'busy' || callStatus === 'no-answer') {
+      // Call ended - preserve final timer value before clearing
+      const finalDuration = callTimer;
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
+        timerInterval.current = null;
+      }
+      // Don't reset timer immediately - let it show final duration briefly
+      // Reset after a delay to allow UI to show final duration
+      setTimeout(() => {
+        setCallStartTime(null);
+        setCallTimer(0);
+      }, 2000);
+    } else if ((callStatus !== 'in-progress' && !isWebCallConnected) && timerInterval.current) {
+      // Call ended for other reasons, stop timer
       clearInterval(timerInterval.current);
       timerInterval.current = null;
       setCallStartTime(null);
       setCallTimer(0);
     }
-  }, [currentCallStatus?.status, callStartTime]);
+  }, [currentCallStatus?.status, callStartTime, isWebCallConnected, callTimer]);
 
-  // Handle call completion
+  // Handle call completion - when customer hangs up or call ends
   useEffect(() => {
-    if (isCallCompleted() && currentCallSid && !hasNotifiedCompletion.current) {
-      console.log('📞 Call completed, cleaning up');
+    const callStatus = currentCallStatus?.status;
+    const isCompleted = callStatus === 'completed' || callStatus === 'failed' || callStatus === 'busy' || callStatus === 'no-answer';
+    
+    if (isCompleted && currentCallSid && !hasNotifiedCompletion.current) {
+      console.log('📞 Call completed by customer or system, cleaning up:', callStatus);
+      
+      // Stop timer but preserve final value briefly
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
+        timerInterval.current = null;
+      }
+      
+      // Stop ringing if still playing
+      if (ringingInterval.current) {
+        clearInterval(ringingInterval.current);
+        ringingInterval.current = null;
+      }
       
       // Notify parent component that call is completed (only once)
       if (onCallCompleted) {
         hasNotifiedCompletion.current = true;
         onCallCompleted({
           callSid: currentCallSid,
-          status: currentCallStatus?.status,
+          status: callStatus,
           customerId,
           saleId,
           phoneNumber,
@@ -141,22 +169,21 @@ const CallButton = ({
         });
       }
       
-            setIsCalling(false);
-            setCurrentCallSid(null);
-            setConferenceName(null);
-            setShowWebInterface(false);
-            setCallStartTime(null);
-            setCallTimer(0);
-            if (ringingInterval.current) {
-              clearInterval(ringingInterval.current);
-              ringingInterval.current = null;
-            }
-            if (timerInterval.current) {
-              clearInterval(timerInterval.current);
-              timerInterval.current = null;
-            }
-          }
-        }, [currentCallStatus, isCallCompleted, currentCallSid, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
+      // Reset state after showing final duration (2 seconds)
+      setTimeout(() => {
+        setIsCalling(false);
+        setIsWebCallConnected(false);
+        setShowWebInterface(false);
+        setCallStartTime(null);
+        setCallTimer(0);
+        // Keep callSid and conferenceName for a bit longer in case we need them
+        setTimeout(() => {
+          setCurrentCallSid(null);
+          setConferenceName(null);
+        }, 1000);
+      }, 2000);
+    }
+  }, [currentCallStatus?.status, currentCallSid, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
 
   // Reset completion notification flag when a new call starts
   useEffect(() => {
@@ -272,20 +299,34 @@ const CallButton = ({
     }
   };
 
-  const handleEndCall = () => {
-    // Disconnect web call if connected
-    if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.hangUp === 'function') {
-      webCallInterfaceRef.current.hangUp();
+  const handleEndCall = async () => {
+    console.log('📞 End call button clicked');
+    
+    try {
+      // Disconnect web call if connected
+      if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.hangUp === 'function') {
+        console.log('📞 Calling hangUp on web interface');
+        webCallInterfaceRef.current.hangUp();
+      } else if (currentCallSid) {
+        // If web call not available, try to hang up via API
+        console.log('📞 Web interface not available, trying to hang up via API');
+        try {
+          // You could add an API endpoint to hang up calls if needed
+          // For now, we'll just clean up the UI
+        } catch (err) {
+          console.error('Error hanging up call:', err);
+        }
+      }
+    } catch (err) {
+      console.error('Error in handleEndCall:', err);
     }
     
-    // Reset all call state
+    // Reset all call state immediately
     setIsCalling(false);
     setCurrentCallSid(null);
     setConferenceName(null);
     setShowWebInterface(false);
     setIsWebCallConnected(false);
-    setCallStartTime(null);
-    setCallTimer(0);
     setError(null);
     
     // Clear intervals
@@ -297,6 +338,12 @@ const CallButton = ({
       clearInterval(timerInterval.current);
       timerInterval.current = null;
     }
+    
+    // Reset timer after showing final duration
+    setTimeout(() => {
+      setCallStartTime(null);
+      setCallTimer(0);
+    }, 1000);
     
     // Notify parent
     if (onCallCompleted) {
@@ -413,16 +460,14 @@ const CallButton = ({
             onCallConnected={() => {
               console.log('✅ Web call connected');
               setIsWebCallConnected(true);
-              // Start timer when web call connects (with 10 second delay as mentioned)
-              setTimeout(() => {
-                setCallStartTime(Date.now());
-                setCallTimer(0);
-                if (!timerInterval.current) {
-                  timerInterval.current = setInterval(() => {
-                    setCallTimer(prev => prev + 1);
-                  }, 1000);
-                }
-              }, 10000); // 10 second delay
+              // Start timer immediately when web call connects
+              setCallStartTime(Date.now());
+              setCallTimer(0);
+              if (!timerInterval.current) {
+                timerInterval.current = setInterval(() => {
+                  setCallTimer(prev => prev + 1);
+                }, 1000);
+              }
             }}
             onCallDisconnected={() => {
               console.log('📞 Web call disconnected');
