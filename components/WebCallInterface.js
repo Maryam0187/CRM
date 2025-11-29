@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient';
 import { Device } from '@twilio/voice-sdk';
 
-export default function WebCallInterface({ conferenceName, onCallConnected, onCallDisconnected }) {
+const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, onCallConnected, onCallDisconnected }, ref) {
   const { user } = useAuth();
   const [device, setDevice] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -308,21 +308,24 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
     }
   };
 
+  // Expose hangUp method via ref
+  useImperativeHandle(ref, () => ({
+    hangUp
+  }));
+
   if (!conferenceName) {
     return null;
   }
 
   return (
-    <div className="fixed bottom-4 right-4 bg-white shadow-lg rounded-lg p-4 border-2 border-blue-500 z-50 min-w-[300px]">
+    <div className="w-full">
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold text-gray-800">Web Call</h3>
         {isConnected && (
-          <button
-            onClick={hangUp}
-            className="text-red-600 hover:text-red-700 text-sm font-medium"
-          >
-            End Call
-          </button>
+          <div className="flex items-center gap-2 text-green-600">
+            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+            <span className="text-sm">Connected</span>
+          </div>
         )}
       </div>
 
@@ -364,4 +367,6 @@ export default function WebCallInterface({ conferenceName, onCallConnected, onCa
       </div>
     </div>
   );
-}
+});
+
+export default WebCallInterface;

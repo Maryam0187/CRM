@@ -22,12 +22,14 @@ const CallButton = ({
   const [currentCallSid, setCurrentCallSid] = useState(null);
   const [conferenceName, setConferenceName] = useState(null);
   const [showWebInterface, setShowWebInterface] = useState(false);
+  const [isWebCallConnected, setIsWebCallConnected] = useState(false);
   const [error, setError] = useState(null);
   const [callStartTime, setCallStartTime] = useState(null);
   const [callTimer, setCallTimer] = useState(0);
   const ringingInterval = useRef(null);
   const timerInterval = useRef(null);
   const hasNotifiedCompletion = useRef(false);
+  const webCallInterfaceRef = useRef(null);
   
   // Use the custom hook for call status management
   const { 
@@ -231,11 +233,14 @@ const CallButton = ({
       large: 'px-4 py-3 text-lg'
     };
     
+    // Determine ringing state (including web interface connecting)
+    const isRingingState = currentCallStatus?.status === 'ringing' || 
+                          (showWebInterface && !isWebCallConnected && !error);
+    
     let colorClasses;
-    const callStatus = currentCallStatus?.status;
-    if (callStatus === 'ringing') {
+    if (isRingingState) {
       colorClasses = 'bg-blue-500 hover:bg-blue-600 text-white animate-pulse';
-    } else if (callStatus === 'in-progress') {
+    } else if (isCallActiveState) {
       colorClasses = 'bg-green-500 hover:bg-green-600 text-white';
     } else if (isCalling) {
       colorClasses = 'bg-orange-500 hover:bg-orange-600 text-white';
@@ -255,14 +260,54 @@ const CallButton = ({
 
   const getButtonText = () => {
     const callStatus = currentCallStatus?.status;
-    if (callStatus === 'ringing') {
+    // Show "Ringing" when call is ringing or when web interface is connecting
+    if (callStatus === 'ringing' || (showWebInterface && !isWebCallConnected && !error)) {
       return 'Ringing...';
-    } else if (callStatus === 'in-progress') {
+    } else if (callStatus === 'in-progress' || isWebCallConnected) {
       return formatTimer(callTimer);
     } else if (isCalling) {
       return 'Calling...';
     } else {
       return 'Call';
+    }
+  };
+
+  const handleEndCall = () => {
+    // Disconnect web call if connected
+    if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.hangUp === 'function') {
+      webCallInterfaceRef.current.hangUp();
+    }
+    
+    // Reset all call state
+    setIsCalling(false);
+    setCurrentCallSid(null);
+    setConferenceName(null);
+    setShowWebInterface(false);
+    setIsWebCallConnected(false);
+    setCallStartTime(null);
+    setCallTimer(0);
+    setError(null);
+    
+    // Clear intervals
+    if (ringingInterval.current) {
+      clearInterval(ringingInterval.current);
+      ringingInterval.current = null;
+    }
+    if (timerInterval.current) {
+      clearInterval(timerInterval.current);
+      timerInterval.current = null;
+    }
+    
+    // Notify parent
+    if (onCallCompleted) {
+      onCallCompleted({
+        callSid: currentCallSid,
+        status: 'completed',
+        customerId,
+        saleId,
+        phoneNumber,
+        customerName
+      });
     }
   };
 
@@ -286,55 +331,107 @@ const CallButton = ({
     return null;
   };
 
+  // Determine if call is in ringing state (including web interface connecting)
+  // Show "Ringing" when: call status is ringing OR web interface is shown but not connected yet
+  const isRinging = currentCallStatus?.status === 'ringing' || 
+                    (showWebInterface && !isWebCallConnected && !error && !isCallCompleted());
+  
+  // Determine if call is active (in-progress or web call connected)
+  const isCallActiveState = (currentCallStatus?.status === 'in-progress' || isWebCallConnected) && !isCallCompleted();
+
   return (
-    <div className="inline-flex items-center gap-2">
-      {/* Status indicator */}
-      {getStatusText() && (
-        <div className={`px-2 py-1 rounded text-xs font-medium ${
-          currentCallStatus?.status === 'ringing' ? 'bg-blue-100 text-blue-800' :
-          currentCallStatus?.status === 'in-progress' ? 'bg-green-100 text-green-800' :
-          currentCallStatus?.status === 'completed' ? 'bg-gray-100 text-gray-800' :
-          currentCallStatus?.status === 'failed' ? 'bg-red-100 text-red-800' :
-          currentCallStatus?.status === 'busy' ? 'bg-yellow-100 text-yellow-800' :
-          currentCallStatus?.status === 'no-answer' ? 'bg-orange-100 text-orange-800' :
-          isCalling ? 'bg-orange-100 text-orange-800' :
-          'bg-gray-100 text-gray-800'
-        }`}>
-          {getStatusText()}
-        </div>
-      )}
-      
-      {/* Call button */}
-      <button
-        onClick={handleCall}
-        disabled={isCalling || isCallActive()}
-        className={getButtonClasses()}
-        title={`Call ${customerName || phoneNumber}`}
-      >
-        <PhoneIcon isCalling={isCalling || isCallActive()} />
-        {getButtonText()}
-      </button>
+    <div className="inline-flex flex-col gap-2">
+      <div className="inline-flex items-center gap-2">
+        {/* Status indicator */}
+        {getStatusText() && (
+          <div className={`px-2 py-1 rounded text-xs font-medium ${
+            isRinging ? 'bg-blue-100 text-blue-800' :
+            isCallActiveState ? 'bg-green-100 text-green-800' :
+            currentCallStatus?.status === 'completed' ? 'bg-gray-100 text-gray-800' :
+            currentCallStatus?.status === 'failed' ? 'bg-red-100 text-red-800' :
+            currentCallStatus?.status === 'busy' ? 'bg-yellow-100 text-yellow-800' :
+            currentCallStatus?.status === 'no-answer' ? 'bg-orange-100 text-orange-800' :
+            isCalling ? 'bg-orange-100 text-orange-800' :
+            'bg-gray-100 text-gray-800'
+          }`}>
+            {getStatusText()}
+          </div>
+        )}
+        
+        {/* Call button - shows "Ringing" when connecting, or "Call" when idle */}
+        {!isCallActiveState && !isRinging && (
+          <button
+            onClick={handleCall}
+            disabled={isCalling}
+            className={getButtonClasses()}
+            title={`Call ${customerName || phoneNumber}`}
+          >
+            <PhoneIcon isCalling={isCalling} />
+            {getButtonText()}
+          </button>
+        )}
+        
+        {/* Call status button - shows "Ringing..." or timer when call is active */}
+        {(isRinging || isCallActiveState) && (
+          <button
+            disabled
+            className={getButtonClasses()}
+            title="Call Status"
+          >
+            <PhoneIcon isCalling={isRinging || isCallActiveState} />
+            {getButtonText()}
+          </button>
+        )}
+        
+        {/* End Call button - shows when call is ringing or in-progress */}
+        {(isRinging || isCallActiveState) && (
+          <button
+            onClick={handleEndCall}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-md font-medium transition-colors duration-200 bg-red-500 hover:bg-red-600 text-white"
+            title="End Call"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            End Call
+          </button>
+        )}
+      </div>
       
       {error && (
-        <div className="mt-1 text-xs text-red-600">
+        <div className="text-xs text-red-600">
           {error}
         </div>
       )}
 
-      {/* Web Call Interface - shows when call is active */}
-      {showWebInterface && conferenceName ? (
-        <WebCallInterface
-          conferenceName={conferenceName}
-          onCallConnected={() => {
-            console.log('✅ Web call connected');
-          }}
-          onCallDisconnected={() => {
-            console.log('📞 Web call disconnected');
-            setShowWebInterface(false);
-            setConferenceName(null);
-          }}
-        />
-      ) : null}
+      {/* Web Call Interface - hidden, works in background */}
+      {showWebInterface && conferenceName && (
+        <div className="hidden">
+          <WebCallInterface
+            ref={webCallInterfaceRef}
+            conferenceName={conferenceName}
+            onCallConnected={() => {
+              console.log('✅ Web call connected');
+              setIsWebCallConnected(true);
+              // Start timer when web call connects (with 10 second delay as mentioned)
+              setTimeout(() => {
+                setCallStartTime(Date.now());
+                setCallTimer(0);
+                if (!timerInterval.current) {
+                  timerInterval.current = setInterval(() => {
+                    setCallTimer(prev => prev + 1);
+                  }, 1000);
+                }
+              }, 10000); // 10 second delay
+            }}
+            onCallDisconnected={() => {
+              console.log('📞 Web call disconnected');
+              setIsWebCallConnected(false);
+              handleEndCall();
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };
