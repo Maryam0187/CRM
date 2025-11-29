@@ -326,27 +326,36 @@ const CallButton = ({
     // Mark as completed immediately to prevent loops
     hasNotifiedCompletion.current = true;
     
+    // Save callSid before clearing state
+    const completedCallSid = currentCallSid;
+    
     try {
-      // Disconnect web call if connected
-      if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.hangUp === 'function') {
-        console.log('📞 Calling hangUp on web interface');
-        webCallInterfaceRef.current.hangUp();
-      } else if (currentCallSid) {
-        // If web call not available, try to hang up via API
-        console.log('📞 Web interface not available, trying to hang up via API');
+      // First, hang up the customer's call via API
+      if (completedCallSid) {
+        console.log('📞 Hanging up customer call via API:', completedCallSid);
         try {
-          // You could add an API endpoint to hang up calls if needed
-          // For now, we'll just clean up the UI
+          const response = await apiClient.post('/api/calls/hangup', {
+            callSid: completedCallSid
+          });
+          const result = await response.json();
+          if (result.success) {
+            console.log('✅ Customer call hung up successfully');
+          } else {
+            console.error('❌ Failed to hang up customer call:', result.message);
+          }
         } catch (err) {
-          console.error('Error hanging up call:', err);
+          console.error('❌ Error hanging up customer call via API:', err);
         }
+      }
+      
+      // Then disconnect web call if connected
+      if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.hangUp === 'function') {
+        console.log('📞 Disconnecting web interface');
+        webCallInterfaceRef.current.hangUp();
       }
     } catch (err) {
       console.error('Error in handleEndCall:', err);
     }
-    
-    // Save callSid before clearing state
-    const completedCallSid = currentCallSid;
     
     // Reset all call state immediately
     setIsCalling(false);
