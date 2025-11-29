@@ -30,6 +30,7 @@ const CallButton = ({
   const timerInterval = useRef(null);
   const hasNotifiedCompletion = useRef(false);
   const webCallInterfaceRef = useRef(null);
+  const previousCallSid = useRef(null);
   
   // Use the custom hook for call status management
   const { 
@@ -141,8 +142,12 @@ const CallButton = ({
     const callStatus = currentCallStatus?.status;
     const isCompleted = callStatus === 'completed' || callStatus === 'failed' || callStatus === 'busy' || callStatus === 'no-answer';
     
+    // Only handle if call is completed AND we haven't already notified AND we have a callSid
     if (isCompleted && currentCallSid && !hasNotifiedCompletion.current) {
       console.log('📞 Call completed by customer or system, cleaning up:', callStatus);
+      
+      // Mark as notified immediately to prevent loops
+      hasNotifiedCompletion.current = true;
       
       // Stop timer but preserve final value briefly
       if (timerInterval.current) {
@@ -156,11 +161,13 @@ const CallButton = ({
         ringingInterval.current = null;
       }
       
+      // Save callSid before clearing
+      const completedCallSid = currentCallSid;
+      
       // Notify parent component that call is completed (only once)
-      if (onCallCompleted) {
-        hasNotifiedCompletion.current = true;
+      if (onCallCompleted && completedCallSid) {
         onCallCompleted({
-          callSid: currentCallSid,
+          callSid: completedCallSid,
           status: callStatus,
           customerId,
           saleId,
@@ -176,21 +183,29 @@ const CallButton = ({
         setShowWebInterface(false);
         setCallStartTime(null);
         setCallTimer(0);
-        // Keep callSid and conferenceName for a bit longer in case we need them
+        // Clear callSid and conferenceName after notification
         setTimeout(() => {
           setCurrentCallSid(null);
           setConferenceName(null);
-        }, 1000);
+        }, 100);
       }, 2000);
     }
   }, [currentCallStatus?.status, currentCallSid, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
 
-  // Reset completion notification flag when a new call starts
+  // Reset completion notification flag when a new call starts (different callSid)
   useEffect(() => {
-    if (currentCallSid && !isCallCompleted()) {
+    if (currentCallSid) {
+      // Only reset if this is a different call (new callSid)
+      if (previousCallSid.current !== currentCallSid) {
+        hasNotifiedCompletion.current = false;
+        previousCallSid.current = currentCallSid;
+      }
+    } else {
+      // No active call, reset the flag
       hasNotifiedCompletion.current = false;
+      previousCallSid.current = null;
     }
-  }, [currentCallSid, isCallCompleted]);
+  }, [currentCallSid]);
 
   const handleCall = async () => {
     if (!phoneNumber || !user?.id) {
@@ -302,6 +317,15 @@ const CallButton = ({
   const handleEndCall = async () => {
     console.log('📞 End call button clicked');
     
+    // Prevent multiple calls to onCallCompleted
+    if (hasNotifiedCompletion.current) {
+      console.log('📞 Already notified completion, skipping');
+      return;
+    }
+    
+    // Mark as completed immediately to prevent loops
+    hasNotifiedCompletion.current = true;
+    
     try {
       // Disconnect web call if connected
       if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.hangUp === 'function') {
@@ -321,12 +345,13 @@ const CallButton = ({
       console.error('Error in handleEndCall:', err);
     }
     
+    // Save callSid before clearing state
+    const completedCallSid = currentCallSid;
+    
     // Reset all call state immediately
     setIsCalling(false);
-    setCurrentCallSid(null);
-    setConferenceName(null);
-    setShowWebInterface(false);
     setIsWebCallConnected(false);
+    setShowWebInterface(false);
     setError(null);
     
     // Clear intervals
@@ -345,10 +370,10 @@ const CallButton = ({
       setCallTimer(0);
     }, 1000);
     
-    // Notify parent
-    if (onCallCompleted) {
+    // Notify parent ONCE
+    if (onCallCompleted && completedCallSid) {
       onCallCompleted({
-        callSid: currentCallSid,
+        callSid: completedCallSid,
         status: 'completed',
         customerId,
         saleId,
@@ -356,6 +381,12 @@ const CallButton = ({
         customerName
       });
     }
+    
+    // Clear callSid and conferenceName after a delay to prevent re-triggering
+    setTimeout(() => {
+      setCurrentCallSid(null);
+      setConferenceName(null);
+    }, 100);
   };
 
   const getStatusText = () => {
