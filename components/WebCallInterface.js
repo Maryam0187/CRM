@@ -34,8 +34,12 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
     const setupDevice = async () => {
       try {
+        console.log('📞 Starting device setup for conference:', conferenceName);
         const token = await fetchToken();
-        if (!token) return;
+        if (!token) {
+          console.error('❌ Failed to fetch token');
+          return;
+        }
 
         console.log('📞 Setting up Twilio Device (SDK 2.x)...');
         
@@ -46,6 +50,8 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           allowIncomingWhileBusy: false,
           // Enable audio immediately
           enableRTCStats: false,
+          // Optimize for faster connection
+          closeProtection: false,
         });
         
         // Suppress console warnings for insights errors
@@ -81,13 +87,12 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           console.log('✅ Twilio Device registered');
           setDevice(twilioDevice);
           setError(null);
-          // Auto-join conference when device is registered
-          setTimeout(() => {
-            if (conferenceName && !isConnected) {
-              console.log('📞 Auto-joining conference:', conferenceName);
-              joinConference(twilioDevice);
-            }
-          }, 500);
+          // Auto-join conference IMMEDIATELY when device is registered (no delay)
+          // This ensures agent is in conference BEFORE customer answers
+          if (conferenceName && !isConnected) {
+            console.log('📞 Auto-joining conference immediately:', conferenceName);
+            joinConference(twilioDevice);
+          }
         });
 
         twilioDevice.on('error', (err) => {
@@ -158,9 +163,10 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
       console.log('📞 Connecting with params:', params);
       
-      // Request audio permissions before connecting to ensure immediate audio
+      // Request audio permissions IMMEDIATELY before connecting
+      // This ensures audio is ready when connection is established (reduces delay)
       try {
-        console.log('📞 Requesting audio permissions...');
+        console.log('📞 Requesting audio permissions immediately...');
         const stream = await navigator.mediaDevices.getUserMedia({ 
           audio: {
             echoCancellation: true,
@@ -169,15 +175,16 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           }, 
           video: false 
         });
-        console.log('✅ Audio permissions granted, audio stream active');
-        // Stop the test stream - Twilio SDK will create its own
-        stream.getTracks().forEach(track => {
-          track.stop();
-          console.log('📞 Stopped test audio track');
-        });
+        console.log('✅ Audio permissions granted immediately');
+        // Keep stream active briefly to ensure permissions are set
+        // Twilio SDK will use these permissions
+        setTimeout(() => {
+          stream.getTracks().forEach(track => track.stop());
+          console.log('📞 Released test audio stream');
+        }, 100);
       } catch (audioErr) {
-        console.warn('⚠️ Audio permission issue (will be requested by Twilio SDK):', audioErr);
-        // Continue anyway - Twilio SDK will request permissions
+        console.warn('⚠️ Audio permission request failed (Twilio SDK will request):', audioErr);
+        // Continue - Twilio SDK will request permissions during connection
       }
       
       const call = deviceInstance.connect({ params });

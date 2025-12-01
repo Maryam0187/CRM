@@ -54,10 +54,11 @@ async function handleVoiceResponse(request) {
         console.log(`📞 Placing customer in conference: ${conferenceName}`);
         
         // Place customer in conference room
-        // Agent can join via web interface or we'll call their phone separately
+        // Agent should already be connected via web interface (connected immediately when call initiated)
         // Recording is DISABLED
-        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600">`;
-        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST" maxParticipants="2">${conferenceName}</Conference>`;
+        // Optimize for immediate connection - no waitUrl to reduce delay
+        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false">`;
+        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST" maxParticipants="2" muted="false">${conferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
         // If agent has phone, we'll call them separately to join the conference

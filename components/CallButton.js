@@ -104,20 +104,24 @@ const CallButton = ({
   useEffect(() => {
     const callStatus = currentCallStatus?.status;
     
-    // Only handle timer for Twilio status updates, not web call connections
-    // (web call connections are handled in onCallConnected callback)
-    if (callStatus === 'in-progress' && !callStartTime && !isWebCallConnected) {
-      // Call just started via Twilio status update, set start time
-      console.log('📞 Call in-progress detected, starting timer');
-      setCallStartTime(Date.now());
+    // Start timer immediately when call becomes in-progress (customer answers)
+    // Don't wait for web call to connect - the call has already started
+    if (callStatus === 'in-progress' && !callStartTime) {
+      // Call just started via Twilio status update, set start time immediately
+      console.log('📞 Call in-progress detected, starting timer immediately');
+      const now = Date.now();
+      setCallStartTime(now);
       setCallTimer(0);
       
-      // Start timer interval
-      if (!timerInterval.current) {
-        timerInterval.current = setInterval(() => {
-          setCallTimer(prev => prev + 1);
-        }, 1000);
+      // Clear any existing timer first
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
       }
+      
+      // Start timer interval immediately - no delay
+      timerInterval.current = setInterval(() => {
+        setCallTimer(prev => prev + 1);
+      }, 1000);
     } else if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'busy' || callStatus === 'no-answer') {
       // Call ended - preserve final timer value before clearing
       const finalDuration = callTimer;
@@ -531,26 +535,20 @@ const CallButton = ({
             ref={webCallInterfaceRef}
             conferenceName={conferenceName}
             onCallConnected={() => {
-              console.log('✅ Web call connected - starting timer immediately');
+              console.log('✅ Web call connected');
               setIsWebCallConnected(true);
               
-              // Start timer immediately when web call connects - no delay
-              const now = Date.now();
-              setCallStartTime(now);
-              setCallTimer(0);
-              
-              // Clear any existing timer first
-              if (timerInterval.current) {
-                clearInterval(timerInterval.current);
+              // Timer should already be running from when call status became "in-progress"
+              // Only start timer if it's not already running (fallback)
+              if (!callStartTime && !timerInterval.current) {
+                console.log('📞 Starting timer from web call connection (fallback)');
+                const now = Date.now();
+                setCallStartTime(now);
+                setCallTimer(0);
+                timerInterval.current = setInterval(() => {
+                  setCallTimer(prev => prev + 1);
+                }, 1000);
               }
-              
-              // Start timer immediately
-              timerInterval.current = setInterval(() => {
-                setCallTimer(prev => {
-                  const newValue = prev + 1;
-                  return newValue;
-                });
-              }, 1000);
               
               console.log('✅ Timer started immediately');
             }}

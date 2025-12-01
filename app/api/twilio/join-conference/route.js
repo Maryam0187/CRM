@@ -72,10 +72,13 @@ async function handleJoinConference(request) {
     // Escape conference name to prevent XML injection
     const safeConferenceName = conferenceName.replace(/[<>&"']/g, '');
 
+    // Agent joining conference - ensure immediate connection
+    // startConferenceOnEnter="true" means conference starts when agent (first participant) enters
+    // This allows agent to be in conference BEFORE customer answers
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial record="false">
-    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST">${safeConferenceName}</Conference>
+  <Dial record="false" answerOnMedia="false">
+    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST" maxParticipants="2" muted="false">${safeConferenceName}</Conference>
   </Dial>
 </Response>`;
 
