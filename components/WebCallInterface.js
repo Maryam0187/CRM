@@ -387,15 +387,39 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     }
   };
 
-  // Mute/Unmute functionality
+  // Mute/Unmute functionality - using media stream tracks
   const mute = () => {
     try {
-      if (activeConnection.current && typeof activeConnection.current.mute === 'function') {
-        activeConnection.current.mute();
-        setIsMuted(true);
-        console.log('🔇 Call muted');
-      } else {
-        console.warn('⚠️ Mute method not available on call object');
+      if (activeConnection.current) {
+        // Try multiple approaches for muting
+        // Method 1: Use call's mute method if available (SDK 2.x)
+        if (typeof activeConnection.current.mute === 'function') {
+          activeConnection.current.mute();
+          setIsMuted(true);
+          console.log('🔇 Call muted (using call.mute())');
+          return;
+        }
+        
+        // Method 2: Get local stream and disable audio tracks
+        if (typeof activeConnection.current.getLocalStream === 'function') {
+          const localStream = activeConnection.current.getLocalStream();
+          if (localStream) {
+            localStream.getAudioTracks().forEach(track => {
+              track.enabled = false;
+            });
+            setIsMuted(true);
+            console.log('🔇 Call muted (using track.enabled = false)');
+            return;
+          }
+        }
+        
+        // Method 3: Try to get stream from device
+        if (device && typeof device.getAudioInputDevices === 'function') {
+          // This is a fallback - not ideal but might work
+          console.warn('⚠️ Using device-level mute (may not work)');
+        }
+        
+        console.warn('⚠️ Mute method not available - call object:', activeConnection.current);
       }
     } catch (err) {
       console.error('❌ Error muting call:', err);
@@ -404,12 +428,30 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
   const unmute = () => {
     try {
-      if (activeConnection.current && typeof activeConnection.current.unmute === 'function') {
-        activeConnection.current.unmute();
-        setIsMuted(false);
-        console.log('🔊 Call unmuted');
-      } else {
-        console.warn('⚠️ Unmute method not available on call object');
+      if (activeConnection.current) {
+        // Try multiple approaches for unmuting
+        // Method 1: Use call's unmute method if available (SDK 2.x)
+        if (typeof activeConnection.current.unmute === 'function') {
+          activeConnection.current.unmute();
+          setIsMuted(false);
+          console.log('🔊 Call unmuted (using call.unmute())');
+          return;
+        }
+        
+        // Method 2: Get local stream and enable audio tracks
+        if (typeof activeConnection.current.getLocalStream === 'function') {
+          const localStream = activeConnection.current.getLocalStream();
+          if (localStream) {
+            localStream.getAudioTracks().forEach(track => {
+              track.enabled = true;
+            });
+            setIsMuted(false);
+            console.log('🔊 Call unmuted (using track.enabled = true)');
+            return;
+          }
+        }
+        
+        console.warn('⚠️ Unmute method not available - call object:', activeConnection.current);
       }
     } catch (err) {
       console.error('❌ Error unmuting call:', err);
@@ -424,12 +466,21 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     }
   };
 
-  // Hold/Resume functionality
+  // Hold/Resume functionality - mute local and remote audio
   const hold = () => {
     try {
       if (activeConnection.current) {
-        // Twilio SDK 2.x uses getLocalStream() and disable/enable tracks for hold
-        // Check if call has getLocalStream method
+        // Hold = mute local audio (agent can't hear customer, customer can't hear agent)
+        // Method 1: Use call's mute method
+        if (typeof activeConnection.current.mute === 'function') {
+          activeConnection.current.mute();
+          setIsOnHold(true);
+          setIsMuted(true); // Hold also mutes
+          console.log('⏸️ Call on hold (using call.mute())');
+          return;
+        }
+        
+        // Method 2: Disable local audio tracks
         if (typeof activeConnection.current.getLocalStream === 'function') {
           const localStream = activeConnection.current.getLocalStream();
           if (localStream) {
@@ -437,16 +488,13 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
               track.enabled = false;
             });
             setIsOnHold(true);
-            console.log('⏸️ Call on hold');
+            setIsMuted(true); // Hold also mutes
+            console.log('⏸️ Call on hold (using track.enabled = false)');
+            return;
           }
-        } else if (typeof activeConnection.current.mute === 'function') {
-          // Fallback: use mute as hold
-          activeConnection.current.mute();
-          setIsOnHold(true);
-          console.log('⏸️ Call on hold (using mute)');
-        } else {
-          console.warn('⚠️ Hold method not available on call object');
         }
+        
+        console.warn('⚠️ Hold method not available - call object:', activeConnection.current);
       }
     } catch (err) {
       console.error('❌ Error holding call:', err);
@@ -456,7 +504,17 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   const resume = () => {
     try {
       if (activeConnection.current) {
-        // Twilio SDK 2.x - re-enable audio tracks
+        // Resume = unmute local audio
+        // Method 1: Use call's unmute method
+        if (typeof activeConnection.current.unmute === 'function') {
+          activeConnection.current.unmute();
+          setIsOnHold(false);
+          setIsMuted(false); // Resume also unmutes
+          console.log('▶️ Call resumed (using call.unmute())');
+          return;
+        }
+        
+        // Method 2: Enable local audio tracks
         if (typeof activeConnection.current.getLocalStream === 'function') {
           const localStream = activeConnection.current.getLocalStream();
           if (localStream) {
@@ -464,16 +522,13 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
               track.enabled = true;
             });
             setIsOnHold(false);
-            console.log('▶️ Call resumed');
+            setIsMuted(false); // Resume also unmutes
+            console.log('▶️ Call resumed (using track.enabled = true)');
+            return;
           }
-        } else if (typeof activeConnection.current.unmute === 'function') {
-          // Fallback: use unmute as resume
-          activeConnection.current.unmute();
-          setIsOnHold(false);
-          console.log('▶️ Call resumed (using unmute)');
-        } else {
-          console.warn('⚠️ Resume method not available on call object');
         }
+        
+        console.warn('⚠️ Resume method not available - call object:', activeConnection.current);
       }
     } catch (err) {
       console.error('❌ Error resuming call:', err);
@@ -488,7 +543,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     }
   };
 
-  // Expose methods via ref
+  // Expose methods and state via ref
   useImperativeHandle(ref, () => ({
     hangUp,
     mute,
@@ -498,7 +553,9 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     resume,
     toggleHold,
     isMuted: () => isMuted,
-    isOnHold: () => isOnHold
+    isOnHold: () => isOnHold,
+    getMutedState: () => isMuted,
+    getHoldState: () => isOnHold
   }));
 
   if (!conferenceName) {

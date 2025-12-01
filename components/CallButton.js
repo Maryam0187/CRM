@@ -28,9 +28,50 @@ const CallButton = ({
   const [callTimer, setCallTimer] = useState(0);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferPhoneNumber, setTransferPhoneNumber] = useState('');
+  const [transferType, setTransferType] = useState('blind'); // 'blind' or 'warm'
+  const [transferDestinationType, setTransferDestinationType] = useState('phone'); // 'phone' or 'agent'
+  const [selectedAgentId, setSelectedAgentId] = useState(null);
+  const [availableAgents, setAvailableAgents] = useState([]);
+  const [loadingAgents, setLoadingAgents] = useState(false);
   const [isTransferring, setIsTransferring] = useState(false);
+
+  // Fetch available agents for transfer
+  const fetchAvailableAgents = async () => {
+    setLoadingAgents(true);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+      const response = await fetch(`${baseUrl}/api/calls/agents`, {
+        method: 'GET',
+        headers: headers
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          setAvailableAgents(result.data || []);
+        }
+      }
+    } catch (err) {
+      console.error('❌ Error fetching agents:', err);
+    } finally {
+      setLoadingAgents(false);
+    }
+  };
+  const [isMuted, setIsMuted] = useState(false);
+  const [isOnHold, setIsOnHold] = useState(false);
   const ringingInterval = useRef(null);
   const timerInterval = useRef(null);
+  const stateSyncInterval = useRef(null);
+  const statusPollInterval = useRef(null);
   const hasNotifiedCompletion = useRef(false);
   const webCallInterfaceRef = useRef(null);
   const previousCallSid = useRef(null);
@@ -52,8 +93,97 @@ const CallButton = ({
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
       }
+      if (stateSyncInterval.current) {
+        clearInterval(stateSyncInterval.current);
+      }
+      if (statusPollInterval.current) {
+        clearInterval(statusPollInterval.current);
+      }
     };
   }, []);
+
+  // Poll call status when ringing to catch no-answer/failed status updates
+  useEffect(() => {
+    const callStatus = currentCallStatus?.status;
+    
+    // Start polling when call is ringing
+    if (callStatus === 'ringing' && currentCallSid && !statusPollInterval.current) {
+      console.log('📞 Starting status polling for call:', currentCallSid);
+      
+      statusPollInterval.current = setInterval(async () => {
+        try {
+          const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+          const headers = {
+            'Content-Type': 'application/json',
+          };
+          
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+          }
+
+          const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+          const response = await fetch(`${baseUrl}/api/calls/status/${currentCallSid}`, {
+            method: 'GET',
+            headers: headers
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            
+            if (result.success && result.callLog) {
+              const dbStatus = result.callLog.status;
+              
+              // If status changed from ringing to something else, trigger update
+              if (dbStatus !== 'ringing' && callStatus === 'ringing') {
+                console.log('📞 Status changed detected via polling:', {
+                  oldStatus: callStatus,
+                  newStatus: dbStatus,
+                  callSid: currentCallSid
+                });
+                
+                // Create a custom event to update the call status
+                // This matches the structure sent by Socket.IO in SocketContext
+                const callStatusData = {
+                  callSid: currentCallSid,
+                  status: dbStatus,
+                  duration: result.callLog.duration,
+                  direction: result.callLog.direction,
+                  from: result.callLog.fromNumber,
+                  to: result.callLog.toNumber,
+                  customerId: result.callLog.customer?.id,
+                  saleId: result.callLog.sale?.id,
+                  agentId: result.callLog.agent?.id,
+                  callPurpose: result.callLog.callPurpose,
+                  twilioData: result.callLog.twilioData || {}
+                };
+                
+                const statusUpdateEvent = new CustomEvent('callStatusUpdate', {
+                  detail: { callStatusData }
+                });
+                window.dispatchEvent(statusUpdateEvent);
+                
+                console.log('📞 Dispatched status update event via polling:', callStatusData);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('❌ Error polling call status:', err);
+        }
+      }, 3000); // Poll every 3 seconds when ringing
+    } else if (callStatus !== 'ringing' && statusPollInterval.current) {
+      // Stop polling when call is no longer ringing
+      console.log('📞 Stopping status polling - call status:', callStatus);
+      clearInterval(statusPollInterval.current);
+      statusPollInterval.current = null;
+    }
+
+    return () => {
+      if (statusPollInterval.current) {
+        clearInterval(statusPollInterval.current);
+        statusPollInterval.current = null;
+      }
+    };
+  }, [currentCallStatus?.status, currentCallSid]);
 
   // Play ringing sound effect
   const playRingingSound = () => {
@@ -412,6 +542,8 @@ const CallButton = ({
     setIsWebCallConnected(false);
     setShowWebInterface(false);
     setError(null);
+    setIsMuted(false);
+    setIsOnHold(false);
     
     // Clear intervals
     if (ringingInterval.current) {
@@ -421,6 +553,10 @@ const CallButton = ({
     if (timerInterval.current) {
       clearInterval(timerInterval.current);
       timerInterval.current = null;
+    }
+    if (stateSyncInterval.current) {
+      clearInterval(stateSyncInterval.current);
+      stateSyncInterval.current = null;
     }
     
     // Reset timer after showing final duration
@@ -475,32 +611,42 @@ const CallButton = ({
   
   // Determine if call is active (in-progress or web call connected)
   const isCallActiveState = (currentCallStatus?.status === 'in-progress' || isWebCallConnected) && !isCallCompleted();
+  
+  // Determine if customer has picked up (call is in-progress, not just ringing)
+  const isCallInProgress = currentCallStatus?.status === 'in-progress' && !isCallCompleted();
 
   return (
-    <div className="inline-flex flex-col gap-2">
+    <div className="inline-flex flex-col gap-3">
+      {/* Call Status Display */}
       <div className="inline-flex items-center gap-2">
         {/* Status indicator */}
         {getStatusText() && (
-          <div className={`px-2 py-1 rounded text-xs font-medium ${
-            isRinging ? 'bg-blue-100 text-blue-800' :
-            isCallActiveState ? 'bg-green-100 text-green-800' :
-            currentCallStatus?.status === 'completed' ? 'bg-gray-100 text-gray-800' :
-            currentCallStatus?.status === 'failed' ? 'bg-red-100 text-red-800' :
-            currentCallStatus?.status === 'busy' ? 'bg-yellow-100 text-yellow-800' :
-            currentCallStatus?.status === 'no-answer' ? 'bg-orange-100 text-orange-800' :
-            isCalling ? 'bg-orange-100 text-orange-800' :
-            'bg-gray-100 text-gray-800'
+          <div className={`px-3 py-1.5 rounded-lg text-sm font-semibold shadow-sm ${
+            isRinging ? 'bg-blue-100 text-blue-700 border border-blue-200' :
+            isCallActiveState ? 'bg-green-100 text-green-700 border border-green-200' :
+            currentCallStatus?.status === 'completed' ? 'bg-gray-100 text-gray-700 border border-gray-200' :
+            currentCallStatus?.status === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' :
+            currentCallStatus?.status === 'busy' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+            currentCallStatus?.status === 'no-answer' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+            isCalling ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+            'bg-gray-100 text-gray-700 border border-gray-200'
           }`}>
+            {isRinging && <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>}
+            {isCallActiveState && <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>}
             {getStatusText()}
           </div>
         )}
         
-        {/* Call button - shows "Ringing" when connecting, or "Call" when idle */}
+        {/* Call button - shows "Call" when idle */}
         {!isCallActiveState && !isRinging && (
           <button
             onClick={handleCall}
             disabled={isCalling}
-            className={getButtonClasses()}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg ${
+              isCalling 
+                ? 'bg-blue-400 text-white cursor-not-allowed' 
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
             title={`Call ${customerName || phoneNumber}`}
           >
             <PhoneIcon isCalling={isCalling} />
@@ -508,86 +654,160 @@ const CallButton = ({
           </button>
         )}
         
-        {/* Call status button - shows "Ringing..." or timer when call is active */}
+        {/* Call status display - shows timer when call is active */}
         {(isRinging || isCallActiveState) && (
-          <button
-            disabled
-            className={getButtonClasses()}
-            title="Call Status"
-          >
+          <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold ${
+            isRinging ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-green-50 text-green-700 border border-green-200'
+          }`}>
             <PhoneIcon isCalling={isRinging || isCallActiveState} />
             {getButtonText()}
-          </button>
-        )}
-        
-        {/* Call Control Buttons - shows when call is in-progress */}
-        {isCallActiveState && (
-          <>
-            {/* Mute/Unmute button */}
-            <button
-              onClick={() => {
-                if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.toggleMute === 'function') {
-                  webCallInterfaceRef.current.toggleMute();
-                }
-              }}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md font-medium transition-colors duration-200 bg-gray-500 hover:bg-gray-600 text-white"
-              title={webCallInterfaceRef.current?.isMuted?.() ? "Unmute" : "Mute"}
-            >
-              {webCallInterfaceRef.current?.isMuted?.() ? (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                </svg>
-              )}
-              {webCallInterfaceRef.current?.isMuted?.() ? "Unmute" : "Mute"}
-            </button>
-
-            {/* Hold/Resume button */}
-            <button
-              onClick={() => {
-                if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.toggleHold === 'function') {
-                  webCallInterfaceRef.current.toggleHold();
-                }
-              }}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md font-medium transition-colors duration-200 bg-yellow-500 hover:bg-yellow-600 text-white"
-              title={webCallInterfaceRef.current?.isOnHold?.() ? "Resume" : "Hold"}
-            >
-              {webCallInterfaceRef.current?.isOnHold?.() ? (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              )}
-              {webCallInterfaceRef.current?.isOnHold?.() ? "Resume" : "Hold"}
-            </button>
-          </>
-        )}
-
-        {/* End Call button - shows when call is ringing or in-progress */}
-        {(isRinging || isCallActiveState) && (
-          <button
-            onClick={handleEndCall}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-md font-medium transition-colors duration-200 bg-red-500 hover:bg-red-600 text-white"
-            title="End Call"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-            End Call
-          </button>
+          </div>
         )}
       </div>
-      
+
+      {/* Call Control Buttons - shows when call is in-progress (customer picked up) */}
+      {isCallInProgress && (
+        <div className="inline-flex items-center gap-2 flex-wrap">
+          {/* Mute/Unmute button */}
+          <button
+            onClick={() => {
+              if (!webCallInterfaceRef.current) {
+                console.warn('⚠️ WebCallInterface ref not available');
+                return;
+              }
+              
+              if (typeof webCallInterfaceRef.current.toggleMute !== 'function') {
+                console.error('❌ toggleMute method not available');
+                return;
+              }
+              
+              try {
+                webCallInterfaceRef.current.toggleMute();
+                // Update local state after a brief delay to allow WebCallInterface to update
+                setTimeout(() => {
+                  if (webCallInterfaceRef.current?.getMutedState) {
+                    setIsMuted(webCallInterfaceRef.current.getMutedState());
+                  }
+                }, 100);
+              } catch (err) {
+                console.error('❌ Error toggling mute:', err);
+                setError('Failed to toggle mute. Please try again.');
+              }
+            }}
+            disabled={!isWebCallConnected || !webCallInterfaceRef.current}
+            className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg ${
+              isMuted 
+                ? 'bg-red-500 hover:bg-red-600 text-white' 
+                : 'bg-gray-600 hover:bg-gray-700 text-white'
+            } ${!isWebCallConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title={isMuted ? "Unmute" : "Mute"}
+          >
+            {isMuted ? (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+            )}
+            <span className="text-sm">{isMuted ? "Unmute" : "Mute"}</span>
+          </button>
+
+          {/* Hold/Resume button - only show when customer picked up */}
+          <button
+            onClick={() => {
+              if (!webCallInterfaceRef.current) {
+                console.warn('⚠️ WebCallInterface ref not available');
+                return;
+              }
+              
+              if (typeof webCallInterfaceRef.current.toggleHold !== 'function') {
+                console.error('❌ toggleHold method not available');
+                return;
+              }
+              
+              try {
+                webCallInterfaceRef.current.toggleHold();
+                // Update local state after a brief delay to allow WebCallInterface to update
+                setTimeout(() => {
+                  if (webCallInterfaceRef.current?.getHoldState) {
+                    setIsOnHold(webCallInterfaceRef.current.getHoldState());
+                  }
+                }, 100);
+              } catch (err) {
+                console.error('❌ Error toggling hold:', err);
+                setError('Failed to toggle hold. Please try again.');
+              }
+            }}
+            disabled={!isWebCallConnected || !webCallInterfaceRef.current}
+            className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg ${
+              isOnHold 
+                ? 'bg-green-500 hover:bg-green-600 text-white' 
+                : 'bg-yellow-500 hover:bg-yellow-600 text-white'
+            } ${!isWebCallConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title={isOnHold ? "Resume" : "Hold"}
+          >
+            {isOnHold ? (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            <span className="text-sm">{isOnHold ? "Resume" : "Hold"}</span>
+          </button>
+
+          {/* Transfer button */}
+          <button
+            onClick={async () => {
+              setShowTransferModal(true);
+              // Fetch available agents when opening modal
+              await fetchAvailableAgents();
+            }}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-purple-500 hover:bg-purple-600 text-white"
+            title="Transfer Call"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+            <span className="text-sm">Transfer</span>
+          </button>
+
+          {/* End Call button */}
+          <button
+            onClick={handleEndCall}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-red-500 hover:bg-red-600 text-white"
+            title="End Call"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            <span className="text-sm">End Call</span>
+          </button>
+        </div>
+      )}
+
+      {/* End Call button - shows when ringing (before customer picks up) */}
+      {isRinging && !isCallInProgress && (
+        <button
+          onClick={handleEndCall}
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-red-500 hover:bg-red-600 text-white"
+          title="End Call"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          <span className="text-sm">End Call</span>
+        </button>
+      )}
+
       {error && (
-        <div className="text-xs text-red-600">
+        <div className="text-xs text-red-600 mt-2">
           {error}
         </div>
       )}
@@ -595,27 +815,140 @@ const CallButton = ({
       {/* Transfer Modal */}
       {showTransferModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold mb-4">Transfer Call</h3>
+            
+            {/* Transfer Type Selection */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Phone Number to Transfer To
+                Transfer Type
               </label>
-              <input
-                type="tel"
-                value={transferPhoneNumber}
-                onChange={(e) => setTransferPhoneNumber(e.target.value)}
-                placeholder="+1234567890"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={isTransferring}
-              />
+              <div className="flex gap-4">
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    value="blind"
+                    checked={transferType === 'blind'}
+                    onChange={(e) => setTransferType(e.target.value)}
+                    className="mr-2"
+                    disabled={isTransferring}
+                  />
+                  <span className="text-sm">
+                    Blind Transfer
+                    <span className="text-xs text-gray-500 block">You leave the call</span>
+                  </span>
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    value="warm"
+                    checked={transferType === 'warm'}
+                    onChange={(e) => setTransferType(e.target.value)}
+                    className="mr-2"
+                    disabled={isTransferring}
+                  />
+                  <span className="text-sm">
+                    Warm Transfer
+                    <span className="text-xs text-gray-500 block">You stay in the call</span>
+                  </span>
+                </label>
+              </div>
             </div>
+
+            {/* Destination Type Selection */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Transfer To
+              </label>
+              <div className="flex gap-4">
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    value="agent"
+                    checked={transferDestinationType === 'agent'}
+                    onChange={(e) => {
+                      setTransferDestinationType(e.target.value);
+                      setSelectedAgentId(null);
+                      setTransferPhoneNumber('');
+                    }}
+                    className="mr-2"
+                    disabled={isTransferring}
+                  />
+                  <span className="text-sm">Agent</span>
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    value="phone"
+                    checked={transferDestinationType === 'phone'}
+                    onChange={(e) => {
+                      setTransferDestinationType(e.target.value);
+                      setSelectedAgentId(null);
+                    }}
+                    className="mr-2"
+                    disabled={isTransferring}
+                  />
+                  <span className="text-sm">Phone Number</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Agent Selection */}
+            {transferDestinationType === 'agent' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Agent
+                </label>
+                {loadingAgents ? (
+                  <div className="text-sm text-gray-500">Loading agents...</div>
+                ) : (
+                  <select
+                    value={selectedAgentId || ''}
+                    onChange={(e) => setSelectedAgentId(e.target.value ? parseInt(e.target.value) : null)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={isTransferring}
+                  >
+                    <option value="">Select an agent...</option>
+                    {availableAgents.map((agent) => (
+                      <option key={agent.id} value={agent.id}>
+                        {agent.name} {agent.phone ? `(${agent.phone})` : '(No phone)'} - {agent.status}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {availableAgents.length === 0 && !loadingAgents && (
+                  <div className="text-xs text-gray-500 mt-1">No available agents found</div>
+                )}
+              </div>
+            )}
+
+            {/* Phone Number Input */}
+            {transferDestinationType === 'phone' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Phone Number to Transfer To
+                </label>
+                <input
+                  type="tel"
+                  value={transferPhoneNumber}
+                  onChange={(e) => setTransferPhoneNumber(e.target.value)}
+                  placeholder="+1234567890"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={isTransferring}
+                />
+              </div>
+            )}
+
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => {
                   setShowTransferModal(false);
                   setTransferPhoneNumber('');
+                  setSelectedAgentId(null);
+                  setTransferType('blind');
+                  setTransferDestinationType('phone');
                   setIsTransferring(false);
+                  setError(null);
                 }}
                 className="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors"
                 disabled={isTransferring}
@@ -624,7 +957,12 @@ const CallButton = ({
               </button>
               <button
                 onClick={async () => {
-                  if (!transferPhoneNumber.trim()) {
+                  if (transferDestinationType === 'agent' && !selectedAgentId) {
+                    setError('Please select an agent');
+                    return;
+                  }
+
+                  if (transferDestinationType === 'phone' && !transferPhoneNumber.trim()) {
                     setError('Please enter a phone number');
                     return;
                   }
@@ -649,23 +987,37 @@ const CallButton = ({
                     }
 
                     const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+                    const requestBody = {
+                      callSid: currentCallSid,
+                      transferType: transferType
+                    };
+
+                    if (transferDestinationType === 'agent') {
+                      requestBody.agentId = selectedAgentId;
+                    } else {
+                      requestBody.transferTo = transferPhoneNumber.trim();
+                    }
+
                     const response = await fetch(`${baseUrl}/api/calls/transfer`, {
                       method: 'POST',
                       headers: headers,
-                      body: JSON.stringify({
-                        callSid: currentCallSid,
-                        transferTo: transferPhoneNumber.trim()
-                      })
+                      body: JSON.stringify(requestBody)
                     });
 
                     const result = await response.json();
 
                     if (result.success) {
-                      console.log('✅ Call transferred successfully');
+                      console.log('✅ Call transferred successfully:', result.data);
                       setShowTransferModal(false);
                       setTransferPhoneNumber('');
-                      // Optionally end the current call after transfer
-                      // handleEndCall();
+                      setSelectedAgentId(null);
+                      setTransferType('blind');
+                      setTransferDestinationType('phone');
+                      
+                      // For blind transfer, optionally end the current call
+                      if (transferType === 'blind') {
+                        // The call is redirected, agent can hang up
+                      }
                     } else {
                       setError(result.message || result.error || 'Failed to transfer call');
                     }
@@ -677,7 +1029,7 @@ const CallButton = ({
                   }
                 }}
                 className="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 transition-colors"
-                disabled={isTransferring || !transferPhoneNumber.trim()}
+                disabled={isTransferring || (transferDestinationType === 'agent' && !selectedAgentId) || (transferDestinationType === 'phone' && !transferPhoneNumber.trim())}
               >
                 {isTransferring ? 'Transferring...' : 'Transfer'}
               </button>
@@ -714,6 +1066,17 @@ const CallButton = ({
               }
               
               console.log('✅ Timer started immediately');
+              
+              // Set up interval to sync mute/hold state
+              if (stateSyncInterval.current) {
+                clearInterval(stateSyncInterval.current);
+              }
+              stateSyncInterval.current = setInterval(() => {
+                if (webCallInterfaceRef.current) {
+                  setIsMuted(webCallInterfaceRef.current.getMutedState?.() || false);
+                  setIsOnHold(webCallInterfaceRef.current.getHoldState?.() || false);
+                }
+              }, 200);
             }}
             onCallDisconnected={() => {
               console.log('📞 Web call disconnected');

@@ -64,6 +64,7 @@ const Carrier = require('./Carrier')(sequelize);
 const Receiver = require('./Receiver')(sequelize);
 const SalesLog = require('./SalesLog')(sequelize);
 const CallLog = require('./CallLog')(sequelize);
+const CallTransfer = require('./CallTransfer')(sequelize);
 const Notification = require('./Notification')(sequelize);
 const UserActivityLog = require('./UserActivityLog')(sequelize);
 const UserTimeSession = require('./UserTimeSession')(sequelize);
@@ -128,6 +129,7 @@ module.exports = {
   Receiver,
   SalesLog,
   CallLog,
+  CallTransfer,
   Notification,
   UserActivityLog,
   UserTimeSession,
