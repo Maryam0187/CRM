@@ -11,6 +11,8 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isOnHold, setIsOnHold] = useState(false);
   const activeConnection = useRef(null);
 
   const fetchToken = async () => {
@@ -385,9 +387,118 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     }
   };
 
-  // Expose hangUp method via ref
+  // Mute/Unmute functionality
+  const mute = () => {
+    try {
+      if (activeConnection.current && typeof activeConnection.current.mute === 'function') {
+        activeConnection.current.mute();
+        setIsMuted(true);
+        console.log('🔇 Call muted');
+      } else {
+        console.warn('⚠️ Mute method not available on call object');
+      }
+    } catch (err) {
+      console.error('❌ Error muting call:', err);
+    }
+  };
+
+  const unmute = () => {
+    try {
+      if (activeConnection.current && typeof activeConnection.current.unmute === 'function') {
+        activeConnection.current.unmute();
+        setIsMuted(false);
+        console.log('🔊 Call unmuted');
+      } else {
+        console.warn('⚠️ Unmute method not available on call object');
+      }
+    } catch (err) {
+      console.error('❌ Error unmuting call:', err);
+    }
+  };
+
+  const toggleMute = () => {
+    if (isMuted) {
+      unmute();
+    } else {
+      mute();
+    }
+  };
+
+  // Hold/Resume functionality
+  const hold = () => {
+    try {
+      if (activeConnection.current) {
+        // Twilio SDK 2.x uses getLocalStream() and disable/enable tracks for hold
+        // Check if call has getLocalStream method
+        if (typeof activeConnection.current.getLocalStream === 'function') {
+          const localStream = activeConnection.current.getLocalStream();
+          if (localStream) {
+            localStream.getAudioTracks().forEach(track => {
+              track.enabled = false;
+            });
+            setIsOnHold(true);
+            console.log('⏸️ Call on hold');
+          }
+        } else if (typeof activeConnection.current.mute === 'function') {
+          // Fallback: use mute as hold
+          activeConnection.current.mute();
+          setIsOnHold(true);
+          console.log('⏸️ Call on hold (using mute)');
+        } else {
+          console.warn('⚠️ Hold method not available on call object');
+        }
+      }
+    } catch (err) {
+      console.error('❌ Error holding call:', err);
+    }
+  };
+
+  const resume = () => {
+    try {
+      if (activeConnection.current) {
+        // Twilio SDK 2.x - re-enable audio tracks
+        if (typeof activeConnection.current.getLocalStream === 'function') {
+          const localStream = activeConnection.current.getLocalStream();
+          if (localStream) {
+            localStream.getAudioTracks().forEach(track => {
+              track.enabled = true;
+            });
+            setIsOnHold(false);
+            console.log('▶️ Call resumed');
+          }
+        } else if (typeof activeConnection.current.unmute === 'function') {
+          // Fallback: use unmute as resume
+          activeConnection.current.unmute();
+          setIsOnHold(false);
+          console.log('▶️ Call resumed (using unmute)');
+        } else {
+          console.warn('⚠️ Resume method not available on call object');
+        }
+      }
+    } catch (err) {
+      console.error('❌ Error resuming call:', err);
+    }
+  };
+
+  const toggleHold = () => {
+    if (isOnHold) {
+      resume();
+    } else {
+      hold();
+    }
+  };
+
+  // Expose methods via ref
   useImperativeHandle(ref, () => ({
-    hangUp
+    hangUp,
+    mute,
+    unmute,
+    toggleMute,
+    hold,
+    resume,
+    toggleHold,
+    isMuted: () => isMuted,
+    isOnHold: () => isOnHold
   }));
 
   if (!conferenceName) {

@@ -26,6 +26,9 @@ const CallButton = ({
   const [error, setError] = useState(null);
   const [callStartTime, setCallStartTime] = useState(null);
   const [callTimer, setCallTimer] = useState(0);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferPhoneNumber, setTransferPhoneNumber] = useState('');
+  const [isTransferring, setIsTransferring] = useState(false);
   const ringingInterval = useRef(null);
   const timerInterval = useRef(null);
   const hasNotifiedCompletion = useRef(false);
@@ -393,7 +396,6 @@ const CallButton = ({
             // The call might be terminated by Twilio when agent disconnects from conference
           }
         }
-      }
       
       // Then disconnect web call if connected
       if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.hangUp === 'function') {
@@ -518,6 +520,57 @@ const CallButton = ({
           </button>
         )}
         
+        {/* Call Control Buttons - shows when call is in-progress */}
+        {isCallActiveState && (
+          <>
+            {/* Mute/Unmute button */}
+            <button
+              onClick={() => {
+                if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.toggleMute === 'function') {
+                  webCallInterfaceRef.current.toggleMute();
+                }
+              }}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md font-medium transition-colors duration-200 bg-gray-500 hover:bg-gray-600 text-white"
+              title={webCallInterfaceRef.current?.isMuted?.() ? "Unmute" : "Mute"}
+            >
+              {webCallInterfaceRef.current?.isMuted?.() ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              )}
+              {webCallInterfaceRef.current?.isMuted?.() ? "Unmute" : "Mute"}
+            </button>
+
+            {/* Hold/Resume button */}
+            <button
+              onClick={() => {
+                if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.toggleHold === 'function') {
+                  webCallInterfaceRef.current.toggleHold();
+                }
+              }}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md font-medium transition-colors duration-200 bg-yellow-500 hover:bg-yellow-600 text-white"
+              title={webCallInterfaceRef.current?.isOnHold?.() ? "Resume" : "Hold"}
+            >
+              {webCallInterfaceRef.current?.isOnHold?.() ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              )}
+              {webCallInterfaceRef.current?.isOnHold?.() ? "Resume" : "Hold"}
+            </button>
+          </>
+        )}
+
         {/* End Call button - shows when call is ringing or in-progress */}
         {(isRinging || isCallActiveState) && (
           <button
@@ -536,6 +589,105 @@ const CallButton = ({
       {error && (
         <div className="text-xs text-red-600">
           {error}
+        </div>
+      )}
+
+      {/* Transfer Modal */}
+      {showTransferModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold mb-4">Transfer Call</h3>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Phone Number to Transfer To
+              </label>
+              <input
+                type="tel"
+                value={transferPhoneNumber}
+                onChange={(e) => setTransferPhoneNumber(e.target.value)}
+                placeholder="+1234567890"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={isTransferring}
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  setShowTransferModal(false);
+                  setTransferPhoneNumber('');
+                  setIsTransferring(false);
+                }}
+                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors"
+                disabled={isTransferring}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!transferPhoneNumber.trim()) {
+                    setError('Please enter a phone number');
+                    return;
+                  }
+
+                  if (!currentCallSid) {
+                    setError('No active call to transfer');
+                    setShowTransferModal(false);
+                    return;
+                  }
+
+                  setIsTransferring(true);
+                  setError(null);
+
+                  try {
+                    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+                    const headers = {
+                      'Content-Type': 'application/json',
+                    };
+                    
+                    if (token) {
+                      headers['Authorization'] = `Bearer ${token}`;
+                    }
+
+                    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+                    const response = await fetch(`${baseUrl}/api/calls/transfer`, {
+                      method: 'POST',
+                      headers: headers,
+                      body: JSON.stringify({
+                        callSid: currentCallSid,
+                        transferTo: transferPhoneNumber.trim()
+                      })
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                      console.log('✅ Call transferred successfully');
+                      setShowTransferModal(false);
+                      setTransferPhoneNumber('');
+                      // Optionally end the current call after transfer
+                      // handleEndCall();
+                    } else {
+                      setError(result.message || result.error || 'Failed to transfer call');
+                    }
+                  } catch (err) {
+                    console.error('❌ Error transferring call:', err);
+                    setError(err.message || 'Failed to transfer call');
+                  } finally {
+                    setIsTransferring(false);
+                  }
+                }}
+                className="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 transition-colors"
+                disabled={isTransferring || !transferPhoneNumber.trim()}
+              >
+                {isTransferring ? 'Transferring...' : 'Transfer'}
+              </button>
+            </div>
+            {error && (
+              <div className="mt-2 text-xs text-red-600">
+                {error}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
