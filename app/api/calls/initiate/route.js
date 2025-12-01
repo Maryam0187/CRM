@@ -71,9 +71,9 @@ export async function POST(request) {
       from: twilioPhoneNumber,
       statusCallback: statusCallbackUrl,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-      machineDetection: 'Enable',
-      machineDetectionTimeout: 30,
-      answerOnMedia: false
+      // Disable machine detection to eliminate delay - connect immediately when customer answers
+      // machineDetection: 'Enable', // REMOVED - causes ~10 second delay
+      answerOnMedia: false // Connect immediately, don't wait for media
       // Note: record option is NOT set - calls will NOT be recorded
     };
     

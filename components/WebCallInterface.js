@@ -163,30 +163,35 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
       console.log('📞 Connecting with params:', params);
       
-      // Request audio permissions IMMEDIATELY before connecting
+      // Request audio permissions IMMEDIATELY before connecting (non-blocking)
       // This ensures audio is ready when connection is established (reduces delay)
-      try {
-        console.log('📞 Requesting audio permissions immediately...');
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }, 
-          video: false 
-        });
+      const audioPermissionPromise = navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }, 
+        video: false 
+      }).then(stream => {
         console.log('✅ Audio permissions granted immediately');
         // Keep stream active briefly to ensure permissions are set
         // Twilio SDK will use these permissions
         setTimeout(() => {
           stream.getTracks().forEach(track => track.stop());
           console.log('📞 Released test audio stream');
-        }, 100);
-      } catch (audioErr) {
+        }, 50); // Reduced from 100ms to 50ms
+        return stream;
+      }).catch(audioErr => {
         console.warn('⚠️ Audio permission request failed (Twilio SDK will request):', audioErr);
-        // Continue - Twilio SDK will request permissions during connection
-      }
+        return null;
+      });
       
+      // Start audio permission request in parallel (don't wait)
+      console.log('📞 Requesting audio permissions in parallel...');
+      audioPermissionPromise.catch(() => {}); // Suppress unhandled promise rejection
+      
+      // Connect immediately - don't wait for audio permissions
+      // Audio permissions will be ready by the time connection is established
       const call = deviceInstance.connect({ params });
       
       if (!call) {

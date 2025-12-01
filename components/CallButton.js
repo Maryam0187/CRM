@@ -340,12 +340,9 @@ const CallButton = ({
       // First, hang up the customer's call via API
       if (completedCallSid) {
         console.log('📞 Hanging up customer call via API:', completedCallSid);
-        // Hang up the customer's call via API
-        if (completedCallSid) {
-          console.log('📞 Attempting to hang up customer call via API:', completedCallSid);
-          
-          // Use fetch directly with proper error handling
-          try {
+        
+        // Use fetch directly with proper error handling
+        try {
             const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
             const headers = {
               'Content-Type': 'application/json',
@@ -355,10 +352,18 @@ const CallButton = ({
               headers['Authorization'] = `Bearer ${token}`;
             }
             
-            const response = await fetch('/api/calls/hangup', {
+            // Use absolute URL to avoid fetch issues
+            const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+            const hangupUrl = `${baseUrl}/api/calls/hangup`;
+            
+            console.log('📞 Calling hangup API:', hangupUrl, { callSid: completedCallSid });
+            
+            const response = await fetch(hangupUrl, {
               method: 'POST',
               headers: headers,
-              body: JSON.stringify({ callSid: completedCallSid })
+              body: JSON.stringify({ callSid: completedCallSid }),
+              // Add timeout to prevent hanging
+              signal: AbortSignal.timeout(5000) // 5 second timeout
             });
             
             if (response.ok) {
@@ -373,11 +378,17 @@ const CallButton = ({
               console.error('❌ Hangup API returned error:', response.status, errorText);
             }
           } catch (err) {
-            console.error('❌ Error calling hangup API:', err);
-            console.error('❌ Error details:', {
-              message: err.message,
-              callSid: completedCallSid
-            });
+            // Handle AbortError (timeout) and other errors gracefully
+            if (err.name === 'AbortError') {
+              console.warn('⚠️ Hangup API call timed out (call may still be terminated)');
+            } else {
+              console.error('❌ Error calling hangup API:', err);
+              console.error('❌ Error details:', {
+                message: err.message,
+                name: err.name,
+                callSid: completedCallSid
+              });
+            }
             // Continue with cleanup even if API call fails
             // The call might be terminated by Twilio when agent disconnects from conference
           }

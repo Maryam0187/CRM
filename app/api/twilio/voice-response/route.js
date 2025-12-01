@@ -56,9 +56,11 @@ async function handleVoiceResponse(request) {
         // Place customer in conference room
         // Agent should already be connected via web interface (connected immediately when call initiated)
         // Recording is DISABLED
-        // Optimize for immediate connection - no waitUrl to reduce delay
-        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false">`;
-        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST" maxParticipants="2" muted="false">${conferenceName}</Conference>`;
+        // Optimize for immediate connection - no waitUrl, no beep, connect instantly
+        // answerOnMedia="false" = connect immediately when answered, don't wait for media
+        // startConferenceOnEnter="true" = conference already started by agent (first participant)
+        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
+        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST" maxParticipants="2" muted="false" trim="do-not-trim">${conferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
         // If agent has phone, we'll call them separately to join the conference
