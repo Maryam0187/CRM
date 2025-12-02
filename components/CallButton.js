@@ -36,30 +36,51 @@ const CallButton = ({
   // Fetch available agents for transfer
   const fetchAvailableAgents = async () => {
     setLoadingAgents(true);
+    // Don't clear error state here - it might be set for other reasons
+    
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-      const headers = {
-        'Content-Type': 'application/json',
-      };
-      
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-      const response = await fetch(`${baseUrl}/api/calls/agents`, {
-        method: 'GET',
-        headers: headers
+      // Use apiClient for better error handling and automatic token management
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Request timeout')), 10000); // 10 second timeout
       });
-
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          setAvailableAgents(result.data || []);
+      
+      const fetchPromise = apiClient.get('/api/calls/agents');
+      const response = await Promise.race([fetchPromise, timeoutPromise]);
+      
+      if (response && response.ok) {
+        try {
+          const result = await response.json();
+          if (result.success) {
+            setAvailableAgents(result.data || []);
+            console.log('✅ Agents fetched successfully:', result.data?.length || 0);
+          } else {
+            console.warn('⚠️ Agents API returned unsuccessful response:', result.message);
+            setAvailableAgents([]); // Set empty array on failure
+          }
+        } catch (jsonErr) {
+          console.warn('⚠️ Error parsing agents response:', jsonErr);
+          setAvailableAgents([]);
         }
+      } else {
+        const status = response?.status || 'Unknown';
+        console.warn('⚠️ Agents API returned non-OK response:', status);
+        setAvailableAgents([]); // Set empty array on failure
       }
     } catch (err) {
-      console.error('❌ Error fetching agents:', err);
+      // Don't let errors crash the component or end the call
+      // Network errors, timeouts, etc. should be handled gracefully
+      if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+        console.warn('⚠️ Network error fetching agents - check your connection');
+      } else if (err.message === 'Request timeout') {
+        console.warn('⚠️ Request timeout while fetching agents');
+      } else {
+        console.error('❌ Error fetching agents:', err);
+      }
+      
+      setAvailableAgents([]); // Set empty array on error
+      // Don't set error state - just log it, so it doesn't interfere with the call
+      // The transfer modal will still work, just without agent list
     } finally {
       setLoadingAgents(false);
     }
@@ -581,33 +602,57 @@ const CallButton = ({
         )}
       </div>
 
-      {/* Call Control Buttons - shows when call is in-progress (customer picked up) */}
-      {isCallInProgress && (
-        <div className="inline-flex items-center gap-2 flex-wrap">
+      {/* Call Control Buttons - shows when call is in-progress or web call is connected */}
+      {isCallActiveState && (
+        <div className="inline-flex items-center gap-2 flex-wrap relative z-10">
           {/* Mute/Unmute button */}
           <button
-            onClick={() => {
-              if (!webCallInterfaceRef.current) {
-                console.warn('⚠️ WebCallInterface ref not available');
-                return;
-              }
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
               
-              if (typeof webCallInterfaceRef.current.toggleMute !== 'function') {
-                console.error('❌ toggleMute method not available');
-                return;
-              }
-              
+              // Wrap in try-catch to prevent errors from ending the call
               try {
+                console.log('🔇 Mute button clicked', {
+                  isWebCallConnected,
+                  hasRef: !!webCallInterfaceRef.current,
+                  isCallActiveState,
+                  currentCallSid
+                });
+                
+                if (!webCallInterfaceRef.current) {
+                  console.warn('⚠️ WebCallInterface ref not available');
+                  setError('Web call interface not ready. Please wait...');
+                  return;
+                }
+                
+                if (typeof webCallInterfaceRef.current.toggleMute !== 'function') {
+                  console.error('❌ toggleMute method not available');
+                  setError('Mute function not available. Please refresh the page.');
+                  return;
+                }
+                
                 webCallInterfaceRef.current.toggleMute();
+                console.log('✅ Toggle mute called');
+                
                 // Update local state after a brief delay to allow WebCallInterface to update
                 setTimeout(() => {
-                  if (webCallInterfaceRef.current?.getMutedState) {
-                    setIsMuted(webCallInterfaceRef.current.getMutedState());
+                  try {
+                    if (webCallInterfaceRef.current?.getMutedState) {
+                      const mutedState = webCallInterfaceRef.current.getMutedState();
+                      setIsMuted(mutedState);
+                      console.log('✅ Mute state updated:', mutedState);
+                    }
+                  } catch (stateErr) {
+                    console.warn('⚠️ Could not update mute state:', stateErr);
+                    // Don't set error - just log it
                   }
                 }, 100);
               } catch (err) {
+                // Prevent errors from crashing the component or ending the call
                 console.error('❌ Error toggling mute:', err);
                 setError('Failed to toggle mute. Please try again.');
+                // Don't re-throw - just show error message
               }
             }}
             disabled={!isWebCallConnected || !webCallInterfaceRef.current}
@@ -633,10 +678,27 @@ const CallButton = ({
 
           {/* Transfer button */}
           <button
-            onClick={async () => {
+            onClick={async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('🔄 Transfer button clicked', { currentCallSid });
+              
+              if (!currentCallSid) {
+                setError('No active call to transfer');
+                return;
+              }
+              
+              // Open modal first
               setShowTransferModal(true);
-              // Fetch available agents when opening modal
-              await fetchAvailableAgents();
+              
+              // Fetch available agents in background - don't block modal opening
+              // Use try-catch to prevent errors from affecting the call
+              try {
+                await fetchAvailableAgents();
+              } catch (err) {
+                // Silently handle errors - modal will still open, just without agents
+                console.warn('⚠️ Could not fetch agents, but transfer modal will still work:', err);
+              }
             }}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-purple-500 hover:bg-purple-600 text-white"
             title="Transfer Call"
@@ -649,7 +711,20 @@ const CallButton = ({
 
           {/* End Call button */}
           <button
-            onClick={handleEndCall}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              
+              // Wrap in try-catch to prevent errors from causing issues
+              try {
+                console.log('📞 End Call button clicked');
+                handleEndCall();
+              } catch (err) {
+                console.error('❌ Error in end call handler:', err);
+                // Even if there's an error, try to end the call
+                // The handleEndCall function should handle its own errors
+              }
+            }}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-red-500 hover:bg-red-600 text-white"
             title="End Call"
           >
@@ -683,8 +758,20 @@ const CallButton = ({
 
       {/* Transfer Modal */}
       {showTransferModal && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.5)' }}>
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div 
+          className="fixed inset-0 flex items-center justify-center z-50" 
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={(e) => {
+            // Close modal when clicking outside
+            if (e.target === e.currentTarget && !isTransferring) {
+              setShowTransferModal(false);
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="text-lg font-semibold mb-4">Transfer Call</h3>
             
             {/* Transfer Type Selection */}
