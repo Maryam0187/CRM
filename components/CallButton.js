@@ -296,15 +296,13 @@ const CallButton = ({
     // setCallTimer(0);
     
     try {
-      // Disconnect web call first (immediate) - but handle gracefully if not connected
+      // Disconnect web call first (immediate) - always try to hang up, even during ringing
       if (webCallInterfaceRef.current?.hangUp) {
         try {
-          // Only hang up if call is actually connected
-          if (isWebCallConnected || isInProgress) {
-            webCallInterfaceRef.current.hangUp();
-          }
+          // Always try to hang up - works for ringing, in-progress, or any state
+          webCallInterfaceRef.current.hangUp();
         } catch (err) {
-          // Ignore errors during ringing - call might not be fully connected
+          // Ignore errors - call might be in any state (ringing, connecting, etc.)
           console.warn('Web call hangup error (ignored):', err.message);
         }
       }
@@ -401,6 +399,7 @@ const CallButton = ({
       if (callStatus === 'failed') return 'Failed';
       if (callStatus === 'busy') return 'Busy';
       if (callStatus === 'no-answer') return 'No Answer';
+      if (callStatus === 'canceled') return 'Canceled';
     }
     return 'Call';
   };
@@ -411,6 +410,7 @@ const CallButton = ({
     if (callStatus === 'failed') return 'Failed';
     if (callStatus === 'busy') return 'Busy';
     if (callStatus === 'no-answer') return 'No Answer';
+    if (callStatus === 'canceled') return 'Canceled';
     return null;
   };
 
@@ -433,6 +433,7 @@ const CallButton = ({
             callStatus === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' :
             callStatus === 'busy' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
             callStatus === 'no-answer' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+            callStatus === 'canceled' ? 'bg-gray-100 text-gray-700 border border-gray-200' :
             'bg-gray-100 text-gray-700 border border-gray-200'
           }`}>
             {getStatusBadgeText()}

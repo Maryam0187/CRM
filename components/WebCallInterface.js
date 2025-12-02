@@ -157,20 +157,49 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           // Disconnect any active calls first
           if (activeConnection.current) {
             try {
-              activeConnection.current.disconnect();
+              // Try to disconnect the call
+              if (typeof activeConnection.current.disconnect === 'function') {
+                activeConnection.current.disconnect();
+              }
             } catch (e) {
-              // Ignore disconnect errors
+              // Ignore disconnect errors - call might already be disconnected
             }
             activeConnection.current = null;
           }
-          // Unregister and destroy device
-          device.unregister();
-          device.destroy();
+          
+          // Try to disconnect all calls on device
+          try {
+            if (typeof device.disconnectAll === 'function') {
+              device.disconnectAll();
+            }
+          } catch (e) {
+            // Ignore - might already be disconnected
+          }
+          
+          // Unregister and destroy device (with error handling)
+          try {
+            if (device && typeof device.unregister === 'function') {
+              device.unregister();
+            }
+          } catch (e) {
+            // Ignore unregister errors
+          }
+          
+          try {
+            if (device && typeof device.destroy === 'function') {
+              device.destroy();
+            }
+          } catch (e) {
+            // Ignore destroy errors - device might already be destroyed
+          }
+          
           setDevice(null);
           setIsConnected(false);
           setIsConnecting(false);
+          localMediaStream.current = null;
         } catch (e) {
-          console.error('Error cleaning up device:', e);
+          // Ignore all cleanup errors
+          console.warn('⚠️ Error during device cleanup (ignored):', e.message);
         }
       }
     };
@@ -220,11 +249,19 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         // Continue anyway - Twilio SDK will request permissions
       }
       
-      // Connect to conference (Twilio SDK will handle audio stream)
-      const call = deviceInstance.connect({ params });
+      // Connect to conference (Twilio SDK 2.x returns a Promise)
+      // Await the Promise to get the actual Call object
+      const callPromise = deviceInstance.connect({ params });
+      
+      if (!callPromise) {
+        throw new Error('Failed to create call');
+      }
+
+      // Await the Promise to get the Call object
+      const call = await callPromise;
       
       if (!call) {
-        throw new Error('Failed to create call');
+        throw new Error('Failed to get call object from promise');
       }
 
       console.log('📞 Call object created:', call);
@@ -403,15 +440,6 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           if (typeof call.disconnect === 'function') {
             console.log('📞 Disconnecting call using call.disconnect()');
             call.disconnect();
-          } 
-          // Fallback: try device disconnectAll
-          else if (device && typeof device.disconnectAll === 'function') {
-            console.log('📞 Disconnecting all calls using device.disconnectAll()');
-            device.disconnectAll();
-          }
-          // If call is already disconnected/errored, just clear the reference
-          else {
-            console.log('📞 Call object exists but no disconnect method available - clearing reference');
           }
         } catch (callErr) {
           // Ignore errors during disconnect - call might be in ringing state or not fully connected
@@ -421,9 +449,11 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         activeConnection.current = null;
       }
       
-      // Also try device-level disconnect if available (handles ringing calls)
+      // Also try device-level disconnect if available (handles ringing calls and any state)
+      // This is the most reliable way to disconnect calls in any state
       if (device && typeof device.disconnectAll === 'function') {
         try {
+          console.log('📞 Disconnecting all calls using device.disconnectAll()');
           device.disconnectAll();
         } catch (e) {
           // Ignore errors - call might already be disconnected or in ringing state
