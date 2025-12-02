@@ -172,6 +172,23 @@ const CallButton = ({
   useEffect(() => {
     const callStatus = currentCallStatus?.status;
     
+    // Define end states that should stop the timer immediately
+    const endStates = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
+    const isEndState = endStates.includes(callStatus);
+    
+    // Stop timer immediately if call is in an end state
+    if (isEndState && timerInterval.current) {
+      console.log('📞 Call ended, stopping timer immediately:', callStatus);
+      clearInterval(timerInterval.current);
+      timerInterval.current = null;
+      // Preserve final timer value briefly, then reset
+      setTimeout(() => {
+        setCallStartTime(null);
+        setCallTimer(0);
+      }, 2000);
+      return; // Exit early - don't start timer for ended calls
+    }
+    
     // Start timer immediately when call becomes in-progress (customer answers)
     // Don't wait for web call to connect - the call has already started
     if (callStatus === 'in-progress' && !callStartTime) {
@@ -190,21 +207,9 @@ const CallButton = ({
       timerInterval.current = setInterval(() => {
         setCallTimer(prev => prev + 1);
       }, 1000);
-    } else if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'busy' || callStatus === 'no-answer') {
-      // Call ended - preserve final timer value before clearing
-      const finalDuration = callTimer;
-      if (timerInterval.current) {
-        clearInterval(timerInterval.current);
-        timerInterval.current = null;
-      }
-      // Don't reset timer immediately - let it show final duration briefly
-      // Reset after a delay to allow UI to show final duration
-      setTimeout(() => {
-        setCallStartTime(null);
-        setCallTimer(0);
-      }, 2000);
-    } else if ((callStatus !== 'in-progress' && !isWebCallConnected) && timerInterval.current) {
-      // Call ended for other reasons, stop timer
+    } else if (callStatus !== 'in-progress' && timerInterval.current && !isEndState) {
+      // Call is not in-progress and not ended (e.g., ringing, queued) - stop timer
+      console.log('📞 Call status changed to non-in-progress, stopping timer:', callStatus);
       clearInterval(timerInterval.current);
       timerInterval.current = null;
       setCallStartTime(null);
@@ -736,8 +741,8 @@ const CallButton = ({
         </div>
       )}
 
-      {/* End Call button - shows when ringing (before customer picks up) */}
-      {isRinging && !isCallInProgress && (
+      {/* End Call button - shows when ringing (before customer picks up) but NOT when call is active */}
+      {isRinging && !isCallActiveState && (
         <button
           onClick={handleEndCall}
           className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-red-500 hover:bg-red-600 text-white"

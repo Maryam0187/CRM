@@ -458,54 +458,111 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     try {
       if (!activeConnection.current || !isConnected) {
         console.warn('⚠️ Cannot mute: call not connected');
-        return;
+        return false;
       }
 
       const call = activeConnection.current;
       let muted = false;
 
-      // Try direct mute method first (if available in SDK)
-      if (typeof call.mute === 'function') {
-        call.mute(true);
-        setIsMuted(true);
-        muted = true;
-        console.log('✅ Call muted using call.mute(true)');
-      } else {
-        // Access tracks through peer connection
-        const { local } = getCallStreams();
-        if (local && local.getAudioTracks().length > 0) {
-          local.getAudioTracks().forEach(track => {
-            track.enabled = false;
+      console.log('🔇 Attempting to mute call...');
+      console.log('📞 Call object:', call);
+      console.log('📞 Call methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(call)));
+
+      // Try to get peer connection first (most reliable method)
+      let pc = null;
+      
+      // Try multiple ways to get peer connection
+      if (typeof call.getPeerConnection === 'function') {
+        try {
+          pc = call.getPeerConnection();
+          console.log('✅ Got peer connection via getPeerConnection()');
+        } catch (e) {
+          console.warn('⚠️ getPeerConnection() failed:', e);
+        }
+      }
+      
+      if (!pc) {
+        // Try accessing internal properties
+        pc = call._peerConnection || call._pc || call.peerConnection || null;
+        if (pc) {
+          console.log('✅ Got peer connection via internal property');
+        }
+      }
+
+      if (pc) {
+        // Method 1: Access tracks through peer connection senders (most reliable)
+        try {
+          const senders = pc.getSenders();
+          console.log('📞 Found', senders.length, 'senders');
+          
+          senders.forEach((sender, index) => {
+            if (sender.track && sender.track.kind === 'audio') {
+              console.log(`🔇 Muting sender ${index}:`, sender.track.id);
+              sender.track.enabled = false;
+              muted = true;
+            }
           });
+          
+          if (muted) {
+            setIsMuted(true);
+            console.log('✅ Call muted via peer connection senders');
+            return true;
+          }
+        } catch (err) {
+          console.warn('⚠️ Error accessing senders:', err);
+        }
+      }
+
+      // Method 2: Try direct mute method (if available in SDK)
+      if (typeof call.mute === 'function') {
+        try {
+          call.mute(true);
           setIsMuted(true);
           muted = true;
-          console.log('✅ Call muted by disabling audio tracks');
-        } else {
-          // Try accessing peer connection directly
-          const pc = call.getPeerConnection ? call.getPeerConnection() : 
-                      (call._peerConnection || call._pc || null);
-          if (pc) {
-            pc.getSenders().forEach(sender => {
-              if (sender.track && sender.track.kind === 'audio') {
-                sender.track.enabled = false;
-                muted = true;
-              }
+          console.log('✅ Call muted using call.mute(true)');
+          return true;
+        } catch (err) {
+          console.warn('⚠️ call.mute() failed:', err);
+        }
+      }
+
+      // Method 3: Try getCallStreams helper
+      if (!muted) {
+        try {
+          const { local } = getCallStreams();
+          if (local && local.getAudioTracks().length > 0) {
+            local.getAudioTracks().forEach(track => {
+              console.log('🔇 Muting track:', track.id);
+              track.enabled = false;
             });
-            if (muted) {
-              setIsMuted(true);
-              console.log('✅ Call muted via peer connection');
-            }
+            setIsMuted(true);
+            muted = true;
+            console.log('✅ Call muted by disabling audio tracks from getCallStreams');
+            return true;
           }
+        } catch (err) {
+          console.warn('⚠️ Error using getCallStreams:', err);
         }
       }
 
       if (!muted) {
         console.error('❌ Cannot mute: no method available');
+        console.error('📞 Call object details:', {
+          hasMute: typeof call.mute === 'function',
+          hasGetPeerConnection: typeof call.getPeerConnection === 'function',
+          hasPeerConnection: !!pc,
+          callStatus: call.status,
+          callState: call.state
+        });
         setError('Unable to mute call. Please try again.');
+        return false;
       }
+
+      return true;
     } catch (err) {
       console.error('❌ Error muting call:', err);
       setError('Failed to mute call. Please try again.');
+      return false;
     }
   };
 
@@ -513,54 +570,96 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     try {
       if (!activeConnection.current || !isConnected) {
         console.warn('⚠️ Cannot unmute: call not connected');
-        return;
+        return false;
       }
 
       const call = activeConnection.current;
       let unmuted = false;
 
-      // Try direct unmute method first (if available in SDK)
-      if (typeof call.mute === 'function') {
-        call.mute(false);
-        setIsMuted(false);
-        unmuted = true;
-        console.log('✅ Call unmuted using call.mute(false)');
-      } else {
-        // Access tracks through peer connection
-        const { local } = getCallStreams();
-        if (local && local.getAudioTracks().length > 0) {
-          local.getAudioTracks().forEach(track => {
-            track.enabled = true;
+      console.log('🔊 Attempting to unmute call...');
+
+      // Try to get peer connection first (most reliable method)
+      let pc = null;
+      
+      if (typeof call.getPeerConnection === 'function') {
+        try {
+          pc = call.getPeerConnection();
+        } catch (e) {
+          console.warn('⚠️ getPeerConnection() failed:', e);
+        }
+      }
+      
+      if (!pc) {
+        pc = call._peerConnection || call._pc || call.peerConnection || null;
+      }
+
+      if (pc) {
+        // Method 1: Access tracks through peer connection senders
+        try {
+          const senders = pc.getSenders();
+          console.log('📞 Found', senders.length, 'senders');
+          
+          senders.forEach((sender, index) => {
+            if (sender.track && sender.track.kind === 'audio') {
+              console.log(`🔊 Unmuting sender ${index}:`, sender.track.id);
+              sender.track.enabled = true;
+              unmuted = true;
+            }
           });
+          
+          if (unmuted) {
+            setIsMuted(false);
+            console.log('✅ Call unmuted via peer connection senders');
+            return true;
+          }
+        } catch (err) {
+          console.warn('⚠️ Error accessing senders:', err);
+        }
+      }
+
+      // Method 2: Try direct unmute method
+      if (typeof call.mute === 'function') {
+        try {
+          call.mute(false);
           setIsMuted(false);
           unmuted = true;
-          console.log('✅ Call unmuted by enabling audio tracks');
-        } else {
-          // Try accessing peer connection directly
-          const pc = call.getPeerConnection ? call.getPeerConnection() : 
-                      (call._peerConnection || call._pc || null);
-          if (pc) {
-            pc.getSenders().forEach(sender => {
-              if (sender.track && sender.track.kind === 'audio') {
-                sender.track.enabled = true;
-                unmuted = true;
-              }
+          console.log('✅ Call unmuted using call.mute(false)');
+          return true;
+        } catch (err) {
+          console.warn('⚠️ call.mute(false) failed:', err);
+        }
+      }
+
+      // Method 3: Try getCallStreams helper
+      if (!unmuted) {
+        try {
+          const { local } = getCallStreams();
+          if (local && local.getAudioTracks().length > 0) {
+            local.getAudioTracks().forEach(track => {
+              console.log('🔊 Unmuting track:', track.id);
+              track.enabled = true;
             });
-            if (unmuted) {
-              setIsMuted(false);
-              console.log('✅ Call unmuted via peer connection');
-            }
+            setIsMuted(false);
+            unmuted = true;
+            console.log('✅ Call unmuted by enabling audio tracks from getCallStreams');
+            return true;
           }
+        } catch (err) {
+          console.warn('⚠️ Error using getCallStreams:', err);
         }
       }
 
       if (!unmuted) {
         console.error('❌ Cannot unmute: no method available');
         setError('Unable to unmute call. Please try again.');
+        return false;
       }
+
+      return true;
     } catch (err) {
       console.error('❌ Error unmuting call:', err);
       setError('Failed to unmute call. Please try again.');
+      return false;
     }
   };
 
