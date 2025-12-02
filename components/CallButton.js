@@ -474,58 +474,56 @@ const CallButton = ({
       if (completedCallSid) {
         console.log('📞 Hanging up customer call via API:', completedCallSid);
         
-        // Use fetch directly with proper error handling
+        // Use apiClient with proper timeout and error handling
         try {
-            const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-            const headers = {
-              'Content-Type': 'application/json',
-            };
-            
-            if (token) {
-              headers['Authorization'] = `Bearer ${token}`;
-            }
-            
-            // Use absolute URL to avoid fetch issues
-            const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-            const hangupUrl = `${baseUrl}/api/calls/hangup`;
-            
-            console.log('📞 Calling hangup API:', hangupUrl, { callSid: completedCallSid });
-            
-            const response = await fetch(hangupUrl, {
-              method: 'POST',
-              headers: headers,
-              body: JSON.stringify({ callSid: completedCallSid }),
-              // Add timeout to prevent hanging
-              signal: AbortSignal.timeout(5000) // 5 second timeout
-            });
-            
-            if (response.ok) {
-              const result = await response.json();
-              if (result.success) {
-                console.log('✅ Customer call hung up successfully');
-              } else {
-                console.error('❌ Failed to hang up customer call:', result.message || result.error);
-              }
+          // Create a promise that will timeout after 5 seconds
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('TIMEOUT')), 5000);
+          });
+          
+          // Call hangup API using apiClient
+          const apiCallPromise = apiClient.post('/api/calls/hangup', {
+            callSid: completedCallSid
+          }).catch(err => {
+            // Re-throw network errors so they can be handled properly
+            throw err;
+          });
+          
+          // Race between API call and timeout
+          const response = await Promise.race([apiCallPromise, timeoutPromise]);
+          
+          if (response && response.ok) {
+            const result = await response.json().catch(() => ({}));
+            if (result.success) {
+              console.log('✅ Customer call hung up successfully');
             } else {
-              const errorText = await response.text().catch(() => 'Unknown error');
-              console.error('❌ Hangup API returned error:', response.status, errorText);
+              console.error('❌ Failed to hang up customer call:', result.message || result.error || 'Unknown error');
             }
-          } catch (err) {
-            // Handle AbortError (timeout) and other errors gracefully
-            if (err.name === 'AbortError') {
-              console.warn('⚠️ Hangup API call timed out (call may still be terminated)');
-            } else {
-              console.error('❌ Error calling hangup API:', err);
-              console.error('❌ Error details:', {
-                message: err.message,
-                name: err.name,
-                callSid: completedCallSid
-              });
-            }
-            // Continue with cleanup even if API call fails
-            // The call might be terminated by Twilio when agent disconnects from conference
+          } else if (response) {
+            const status = response.status || 'Unknown';
+            const errorText = await response.text().catch(() => 'Unknown error');
+            console.error('❌ Hangup API returned error:', status, errorText);
           }
+        } catch (err) {
+          // Handle timeout and network errors gracefully
+          if (err.message === 'TIMEOUT') {
+            console.warn('⚠️ Hangup API call timed out after 5 seconds (call may still be terminated by Twilio)');
+          } else if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+            console.warn('⚠️ Hangup API call failed to connect. Network error - call may still be terminated by Twilio.');
+          } else if (err.name === 'AbortError') {
+            console.warn('⚠️ Hangup API call was aborted (call may still be terminated by Twilio)');
+          } else {
+            console.error('❌ Error calling hangup API:', err);
+            console.error('❌ Error details:', {
+              message: err.message || 'Unknown error',
+              name: err.name || 'Unknown',
+              callSid: completedCallSid
+            });
+          }
+          // Continue with cleanup even if API call fails
+          // The call might be terminated by Twilio when agent disconnects from conference
         }
+      }
       
       // Then disconnect web call if connected
       if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.hangUp === 'function') {
@@ -619,11 +617,9 @@ const CallButton = ({
     <div className="inline-flex flex-col gap-3">
       {/* Call Status Display */}
       <div className="inline-flex items-center gap-2">
-        {/* Status indicator */}
-        {getStatusText() && (
+        {/* Status indicator - only show for completed/failed/busy/no-answer states, not for active calls */}
+        {getStatusText() && !isRinging && !isCallActiveState && (
           <div className={`px-3 py-1.5 rounded-lg text-sm font-semibold shadow-sm ${
-            isRinging ? 'bg-blue-100 text-blue-700 border border-blue-200' :
-            isCallActiveState ? 'bg-green-100 text-green-700 border border-green-200' :
             currentCallStatus?.status === 'completed' ? 'bg-gray-100 text-gray-700 border border-gray-200' :
             currentCallStatus?.status === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' :
             currentCallStatus?.status === 'busy' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
@@ -631,8 +627,6 @@ const CallButton = ({
             isCalling ? 'bg-orange-100 text-orange-700 border border-orange-200' :
             'bg-gray-100 text-gray-700 border border-gray-200'
           }`}>
-            {isRinging && <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>}
-            {isCallActiveState && <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>}
             {getStatusText()}
           </div>
         )}
@@ -654,11 +648,13 @@ const CallButton = ({
           </button>
         )}
         
-        {/* Call status display - shows timer when call is active */}
+        {/* Call status display - shows timer when call is active or ringing */}
         {(isRinging || isCallActiveState) && (
           <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold ${
             isRinging ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-green-50 text-green-700 border border-green-200'
           }`}>
+            {isRinging && <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>}
+            {isCallActiveState && <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>}
             <PhoneIcon isCalling={isRinging || isCallActiveState} />
             {getButtonText()}
           </div>

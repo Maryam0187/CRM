@@ -10,7 +10,7 @@ export default function ConditionalLayout({ children }) {
   const pathname = usePathname();
   
   // Routes that should not show navbar and footer
-  const authRoutes = ['/signin', '/signup', '/forgot-password'];
+  const authRoutes = ['/signin', '/signup', '/forgot-password', '/marketing'];
   const isAuthRoute = authRoutes.includes(pathname);
 
   if (isAuthRoute) {
