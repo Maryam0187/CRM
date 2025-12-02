@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 import { useCallStatus } from '../lib/useCallStatus';
 import apiClient from '../lib/apiClient';
 import WebCallInterface from './WebCallInterface';
@@ -16,111 +17,69 @@ const CallButton = ({
   size = 'default'
 }) => {
   const { user } = useAuth();
+  const { getCallStatus } = useSocket();
+  
+  // Core call state
   const [isCalling, setIsCalling] = useState(false);
   const [currentCallSid, setCurrentCallSid] = useState(null);
   const [conferenceName, setConferenceName] = useState(null);
   const [showWebInterface, setShowWebInterface] = useState(false);
   const [isWebCallConnected, setIsWebCallConnected] = useState(false);
   const [error, setError] = useState(null);
-  const [callStartTime, setCallStartTime] = useState(null);
+  
+  // Timer state
   const [callTimer, setCallTimer] = useState(0);
+  
+  // Transfer modal state
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferPhoneNumber, setTransferPhoneNumber] = useState('');
-  const [transferType, setTransferType] = useState('blind'); // 'blind' or 'warm'
-  const [transferDestinationType, setTransferDestinationType] = useState('phone'); // 'phone' or 'agent'
+  const [transferType, setTransferType] = useState('blind');
+  const [transferDestinationType, setTransferDestinationType] = useState('phone');
   const [selectedAgentId, setSelectedAgentId] = useState(null);
   const [availableAgents, setAvailableAgents] = useState([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [isTransferring, setIsTransferring] = useState(false);
-
-  // Fetch available agents for transfer
-  const fetchAvailableAgents = async () => {
-    setLoadingAgents(true);
-    // Don't clear error state here - it might be set for other reasons
-    
-    try {
-      // Use apiClient for better error handling and automatic token management
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Request timeout')), 10000); // 10 second timeout
-      });
-      
-      const fetchPromise = apiClient.get('/api/calls/agents');
-      const response = await Promise.race([fetchPromise, timeoutPromise]);
-      
-      if (response && response.ok) {
-        try {
-          const result = await response.json();
-          if (result.success) {
-            setAvailableAgents(result.data || []);
-            console.log('✅ Agents fetched successfully:', result.data?.length || 0);
-          } else {
-            console.warn('⚠️ Agents API returned unsuccessful response:', result.message);
-            setAvailableAgents([]); // Set empty array on failure
-          }
-        } catch (jsonErr) {
-          console.warn('⚠️ Error parsing agents response:', jsonErr);
-          setAvailableAgents([]);
-        }
-      } else {
-        const status = response?.status || 'Unknown';
-        console.warn('⚠️ Agents API returned non-OK response:', status);
-        setAvailableAgents([]); // Set empty array on failure
-      }
-    } catch (err) {
-      // Don't let errors crash the component or end the call
-      // Network errors, timeouts, etc. should be handled gracefully
-      if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
-        console.warn('⚠️ Network error fetching agents - check your connection');
-      } else if (err.message === 'Request timeout') {
-        console.warn('⚠️ Request timeout while fetching agents');
-      } else {
-        console.error('❌ Error fetching agents:', err);
-      }
-      
-      setAvailableAgents([]); // Set empty array on error
-      // Don't set error state - just log it, so it doesn't interfere with the call
-      // The transfer modal will still work, just without agent list
-    } finally {
-      setLoadingAgents(false);
-    }
-  };
+  
+  // Mute state
   const [isMuted, setIsMuted] = useState(false);
+  
+  // Refs
   const ringingInterval = useRef(null);
   const timerInterval = useRef(null);
-  const stateSyncInterval = useRef(null);
+  const muteSyncInterval = useRef(null);
   const hasNotifiedCompletion = useRef(false);
   const webCallInterfaceRef = useRef(null);
   const previousCallSid = useRef(null);
   
-  // Use the custom hook for call status management
-  const { 
-    currentCallStatus, 
-    isCallActive, 
-    isCallCompleted, 
-    formatDuration 
-  } = useCallStatus(currentCallSid);
+  // Get call status - use socket context directly for immediate updates
+  const { currentCallStatus, isCallCompleted } = useCallStatus(currentCallSid);
+  
+  // Get latest status directly from socket context (immediate, no delay)
+  const getLatestStatus = () => {
+    if (currentCallSid) {
+      return getCallStatus(currentCallSid) || currentCallStatus;
+    }
+    return currentCallStatus;
+  };
+  
+  // Get current call status - always use latest from socket context
+  const callStatus = getLatestStatus()?.status || null;
+  
+  // Simple state flags - clear and direct
+  const isRinging = callStatus === 'ringing';
+  const isInProgress = callStatus === 'in-progress';
+  const isEnded = callStatus === 'completed' || callStatus === 'failed' || callStatus === 'busy' || callStatus === 'no-answer' || callStatus === 'canceled';
 
-  // Clean up intervals on unmount
+  // Clean up all intervals on unmount
   useEffect(() => {
     return () => {
-      if (ringingInterval.current) {
-        clearInterval(ringingInterval.current);
-      }
-      if (timerInterval.current) {
-        clearInterval(timerInterval.current);
-      }
-      if (stateSyncInterval.current) {
-        clearInterval(stateSyncInterval.current);
-      }
+      if (ringingInterval.current) clearInterval(ringingInterval.current);
+      if (timerInterval.current) clearInterval(timerInterval.current);
+      if (muteSyncInterval.current) clearInterval(muteSyncInterval.current);
     };
   }, []);
 
-  // Note: Call status updates are handled via Socket.IO in real-time
-  // The useCallStatus hook listens to 'callStatusUpdate' events dispatched by SocketContext
-  // No polling needed - Socket.IO provides instant updates when Twilio webhooks arrive
-
-  // Play ringing sound effect
+  // Play ringing sound
   const playRingingSound = () => {
     try {
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -130,7 +89,6 @@ const CallButton = ({
       oscillator.connect(gainNode);
       gainNode.connect(audioContext.destination);
       
-      // Create a two-tone ringing sound
       oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
       oscillator.frequency.setValueAtTime(1000, audioContext.currentTime + 0.2);
       oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.4);
@@ -147,107 +105,72 @@ const CallButton = ({
     }
   };
 
-  // Start ringing sound when call is ringing
+  // Handle ringing sound
   useEffect(() => {
-    const callStatus = currentCallStatus?.status;
-    console.log('📞 Call status changed to:', callStatus, 'for callSid:', currentCallSid);
-    console.log('📞 Full call status object:', currentCallStatus);
-    console.log('📞 Current callSid state:', currentCallSid);
-    console.log('📞 Call status callSid:', currentCallStatus?.callSid);
-    
-    if (callStatus === 'ringing' && !ringingInterval.current) {
-      console.log('📞 Starting ringing sound');
-      // Play initial ring
+    if (isRinging && !ringingInterval.current) {
       playRingingSound();
-      // Set up repeating ring every 2 seconds
       ringingInterval.current = setInterval(playRingingSound, 2000);
-    } else if (callStatus !== 'ringing' && ringingInterval.current) {
-      console.log('📞 Stopping ringing sound');
+    } else if (!isRinging && ringingInterval.current) {
       clearInterval(ringingInterval.current);
       ringingInterval.current = null;
     }
-  }, [currentCallStatus?.status, currentCallSid]);
+  }, [isRinging]);
 
-  // Handle call timer for in-progress calls (from Twilio status updates)
+  // Handle timer - start when in-progress, stop when ended
   useEffect(() => {
-    const callStatus = currentCallStatus?.status;
-    
-    // Define end states that should stop the timer immediately
-    const endStates = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
-    const isEndState = endStates.includes(callStatus);
-    
-    // Stop timer immediately if call is in an end state
-    if (isEndState && timerInterval.current) {
-      console.log('📞 Call ended, stopping timer immediately:', callStatus);
-      clearInterval(timerInterval.current);
-      timerInterval.current = null;
-      // Preserve final timer value briefly, then reset
-      setTimeout(() => {
-        setCallStartTime(null);
-        setCallTimer(0);
-      }, 2000);
-      return; // Exit early - don't start timer for ended calls
-    }
-    
-    // Start timer immediately when call becomes in-progress (customer answers)
-    // Don't wait for web call to connect - the call has already started
-    if (callStatus === 'in-progress' && !callStartTime) {
-      // Call just started via Twilio status update, set start time immediately
-      console.log('📞 Call in-progress detected, starting timer immediately');
-      const now = Date.now();
-      setCallStartTime(now);
-      setCallTimer(0);
-      
-      // Clear any existing timer first
-      if (timerInterval.current) {
-        clearInterval(timerInterval.current);
-      }
-      
-      // Start timer interval immediately - no delay
-      timerInterval.current = setInterval(() => {
-        setCallTimer(prev => prev + 1);
-      }, 1000);
-    } else if (callStatus !== 'in-progress' && timerInterval.current && !isEndState) {
-      // Call is not in-progress and not ended (e.g., ringing, queued) - stop timer
-      console.log('📞 Call status changed to non-in-progress, stopping timer:', callStatus);
-      clearInterval(timerInterval.current);
-      timerInterval.current = null;
-      setCallStartTime(null);
-      setCallTimer(0);
-    }
-  }, [currentCallStatus?.status, callStartTime, isWebCallConnected]);
-
-  // Handle call completion - when customer hangs up or call ends
-  useEffect(() => {
-    const callStatus = currentCallStatus?.status;
-    const isCompleted = callStatus === 'completed' || callStatus === 'failed' || callStatus === 'busy' || callStatus === 'no-answer';
-    
-    // Only handle if call is completed AND we haven't already notified AND we have a callSid
-    if (isCompleted && currentCallSid && !hasNotifiedCompletion.current) {
-      console.log('📞 Call completed by customer or system, cleaning up:', callStatus);
-      
-      // Mark as notified immediately to prevent loops
-      hasNotifiedCompletion.current = true;
-      
-      // Stop timer but preserve final value briefly
+    // Stop timer immediately for any end state
+    if (isEnded) {
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
         timerInterval.current = null;
       }
+      setCallTimer(0);
+      return;
+    }
+    
+    // Start timer when call becomes in-progress
+    if (isInProgress) {
+      if (!timerInterval.current) {
+        setCallTimer(0);
+        timerInterval.current = setInterval(() => {
+          setCallTimer(prev => prev + 1);
+        }, 1000);
+      }
+    } else {
+      // Not in progress - stop timer
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
+        timerInterval.current = null;
+        setCallTimer(0);
+      }
+    }
+  }, [isInProgress, isEnded]);
+
+  // Handle call completion - triggered when call ends (by customer or agent)
+  useEffect(() => {
+    if (isEnded && currentCallSid && !hasNotifiedCompletion.current) {
+      hasNotifiedCompletion.current = true;
       
-      // Stop ringing if still playing
+      // Stop all intervals immediately
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
+        timerInterval.current = null;
+      }
       if (ringingInterval.current) {
         clearInterval(ringingInterval.current);
         ringingInterval.current = null;
       }
+      if (muteSyncInterval.current) {
+        clearInterval(muteSyncInterval.current);
+        muteSyncInterval.current = null;
+      }
       
-      // Save callSid before clearing
-      const completedCallSid = currentCallSid;
+      setCallTimer(0);
       
-      // Notify parent component that call is completed (only once)
-      if (onCallCompleted && completedCallSid) {
+      // Notify parent
+      if (onCallCompleted && currentCallSid) {
         onCallCompleted({
-          callSid: completedCallSid,
+          callSid: currentCallSid,
           status: callStatus,
           customerId,
           saleId,
@@ -256,37 +179,31 @@ const CallButton = ({
         });
       }
       
-      // Reset state after showing final duration (2 seconds)
+      // Reset state after showing status (2 seconds)
       setTimeout(() => {
         setIsCalling(false);
         setIsWebCallConnected(false);
         setShowWebInterface(false);
-        setCallStartTime(null);
-        setCallTimer(0);
-        // Clear callSid and conferenceName after notification
         setTimeout(() => {
           setCurrentCallSid(null);
           setConferenceName(null);
         }, 100);
       }, 2000);
     }
-  }, [currentCallStatus?.status, currentCallSid, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
+  }, [isEnded, currentCallSid, callStatus, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
 
-  // Reset completion notification flag when a new call starts (different callSid)
+  // Reset completion flag for new calls
   useEffect(() => {
-    if (currentCallSid) {
-      // Only reset if this is a different call (new callSid)
-      if (previousCallSid.current !== currentCallSid) {
-        hasNotifiedCompletion.current = false;
-        previousCallSid.current = currentCallSid;
-      }
-    } else {
-      // No active call, reset the flag
+    if (currentCallSid && previousCallSid.current !== currentCallSid) {
+      hasNotifiedCompletion.current = false;
+      previousCallSid.current = currentCallSid;
+    } else if (!currentCallSid) {
       hasNotifiedCompletion.current = false;
       previousCallSid.current = null;
     }
   }, [currentCallSid]);
 
+  // Initiate call
   const handleCall = async () => {
     if (!phoneNumber || !user?.id) {
       setError('Phone number or user information missing');
@@ -309,16 +226,9 @@ const CallButton = ({
       const result = await response.json();
 
       if (result.success) {
-        // Call initiated successfully
         setCurrentCallSid(result.data.callSid);
-        // Set conference name from response or generate it
-        const confName = result.data.conferenceName || `call-${user.id}`;
-        setConferenceName(confName);
+        setConferenceName(result.data.conferenceName || `call-${user.id}`);
         setShowWebInterface(true);
-        console.log('📞 Call initiated successfully:', result.data);
-        console.log('📞 Conference name:', confName);
-        console.log('📞 showWebInterface set to:', true);
-        console.log('📞 conferenceName set to:', confName);
         
         if (onCallInitiated) {
           onCallInitiated(result.data);
@@ -334,191 +244,66 @@ const CallButton = ({
     }
   };
 
-  if (!phoneNumber) {
-    return (
-      <button
-        disabled
-        className={`${getButtonClasses()} opacity-50 cursor-not-allowed`}
-        title="No phone number available"
-      >
-        <PhoneIcon />
-        No Number
-      </button>
-    );
-  }
-
-  const getButtonClasses = () => {
-    const baseClasses = 'inline-flex items-center gap-2 px-3 py-2 rounded-md font-medium transition-colors duration-200';
-    const sizeClasses = {
-      small: 'px-2 py-1 text-sm',
-      default: 'px-3 py-2',
-      large: 'px-4 py-3 text-lg'
-    };
-    
-    // Determine ringing state (including web interface connecting)
-    const isRingingState = currentCallStatus?.status === 'ringing' || 
-                          (showWebInterface && !isWebCallConnected && !error);
-    
-    let colorClasses;
-    if (isRingingState) {
-      colorClasses = 'bg-blue-500 hover:bg-blue-600 text-white animate-pulse';
-    } else if (isCallActiveState) {
-      colorClasses = 'bg-green-500 hover:bg-green-600 text-white';
-    } else if (isCalling) {
-      colorClasses = 'bg-orange-500 hover:bg-orange-600 text-white';
-    } else {
-      colorClasses = 'bg-green-500 hover:bg-green-600 text-white';
-    }
-    
-    return `${baseClasses} ${sizeClasses[size]} ${colorClasses} ${className}`;
-  };
-
-  // Format timer display
-  const formatTimer = (seconds) => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
-
-  const getButtonText = () => {
-    const callStatus = currentCallStatus?.status;
-    // Show "Ringing" when call is ringing or when web interface is connecting
-    if (callStatus === 'ringing' || (showWebInterface && !isWebCallConnected && !error)) {
-      return 'Ringing...';
-    } else if (callStatus === 'in-progress' || isWebCallConnected) {
-      return formatTimer(callTimer);
-    } else if (isCalling) {
-      return 'Calling...';
-    } else {
-      return 'Call';
-    }
-  };
-
+  // End call - called when agent clicks "End Call" button
   const handleEndCall = async () => {
-    console.log('📞 End call button clicked');
+    if (hasNotifiedCompletion.current) return;
     
-    // Prevent multiple calls to onCallCompleted
-    if (hasNotifiedCompletion.current) {
-      console.log('📞 Already notified completion, skipping');
-      return;
-    }
-    
-    // Mark as completed immediately to prevent loops
     hasNotifiedCompletion.current = true;
-    
-    // Save callSid before clearing state
     const completedCallSid = currentCallSid;
-    const callStatus = currentCallStatus?.status;
     
-    // Stop timer IMMEDIATELY when end call is clicked (regardless of status)
-    console.log('📞 Stopping timer immediately on end call');
+    // Stop all intervals immediately
     if (timerInterval.current) {
       clearInterval(timerInterval.current);
       timerInterval.current = null;
     }
-    // Reset timer state immediately
-    setCallStartTime(null);
-    setCallTimer(0);
-    
-    // Stop ringing if still playing
     if (ringingInterval.current) {
       clearInterval(ringingInterval.current);
       ringingInterval.current = null;
     }
-    
-    // Stop state sync interval
-    if (stateSyncInterval.current) {
-      clearInterval(stateSyncInterval.current);
-      stateSyncInterval.current = null;
+    if (muteSyncInterval.current) {
+      clearInterval(muteSyncInterval.current);
+      muteSyncInterval.current = null;
     }
+    
+    setCallTimer(0);
     
     try {
-      // First, hang up the customer's call via API (only if callSid exists)
-      if (completedCallSid) {
-        console.log('📞 Hanging up customer call via API:', completedCallSid, 'Status:', callStatus);
-        
-        // Use apiClient with proper timeout and error handling
+      // Disconnect web call first (immediate)
+      if (webCallInterfaceRef.current?.hangUp) {
         try {
-          // Create a promise that will timeout after 5 seconds
-          const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('TIMEOUT')), 5000);
-          });
-          
-          // Call hangup API using apiClient
-          const apiCallPromise = apiClient.post('/api/calls/hangup', {
-            callSid: completedCallSid
-          }).catch(err => {
-            // Re-throw network errors so they can be handled properly
-            throw err;
-          });
-          
-          // Race between API call and timeout
-          const response = await Promise.race([apiCallPromise, timeoutPromise]);
-          
-          if (response && response.ok) {
-            const result = await response.json().catch(() => ({}));
-            if (result.success) {
-              console.log('✅ Customer call hung up successfully');
-            } else {
-              console.error('❌ Failed to hang up customer call:', result.message || result.error || 'Unknown error');
-            }
-          } else if (response) {
-            const status = response.status || 'Unknown';
-            const errorText = await response.text().catch(() => 'Unknown error');
-            console.error('❌ Hangup API returned error:', status, errorText);
-          }
-        } catch (err) {
-          // Handle timeout and network errors gracefully
-          // For ringing calls, it's normal for hangup to fail - the call might not be fully established
-          if (callStatus === 'ringing' || callStatus === 'queued') {
-            console.log('ℹ️ Call was ringing/queued - hangup API may not be needed');
-          } else if (err.message === 'TIMEOUT') {
-            console.warn('⚠️ Hangup API call timed out after 5 seconds (call may still be terminated by Twilio)');
-          } else if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
-            console.warn('⚠️ Hangup API call failed to connect. Network error - call may still be terminated by Twilio.');
-          } else if (err.name === 'AbortError') {
-            console.warn('⚠️ Hangup API call was aborted (call may still be terminated by Twilio)');
-          } else {
-            console.error('❌ Error calling hangup API:', err);
-            console.error('❌ Error details:', {
-              message: err.message || 'Unknown error',
-              name: err.name || 'Unknown',
-              callSid: completedCallSid,
-              callStatus: callStatus
-            });
-          }
-          // Continue with cleanup even if API call fails
-          // The call might be terminated by Twilio when agent disconnects from conference
-        }
-      } else {
-        console.log('ℹ️ No callSid available - skipping hangup API call');
-      }
-      
-      // Then disconnect web call if connected
-      if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.hangUp === 'function') {
-        try {
-          console.log('📞 Disconnecting web interface');
           webCallInterfaceRef.current.hangUp();
         } catch (err) {
-          console.warn('⚠️ Error disconnecting web interface:', err);
-          // Continue with cleanup even if hangUp fails
+          console.warn('Web call hangup error:', err);
         }
-      } else {
-        console.log('ℹ️ Web call interface not available or not connected');
+      }
+      
+      // Hang up via API (with timeout)
+      if (completedCallSid) {
+        try {
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('TIMEOUT')), 5000)
+          );
+          const apiCallPromise = apiClient.post('/api/calls/hangup', {
+            callSid: completedCallSid
+          });
+          await Promise.race([apiCallPromise, timeoutPromise]);
+        } catch (err) {
+          // Ignore errors - call will be terminated by Twilio
+          console.warn('Hangup API error (ignored):', err.message);
+        }
       }
     } catch (err) {
-      console.error('❌ Error in handleEndCall:', err);
-      // Continue with cleanup even if there's an error
+      console.error('Error in handleEndCall:', err);
     }
     
-    // Reset all call state immediately
+    // Reset state immediately
     setIsCalling(false);
     setIsWebCallConnected(false);
     setShowWebInterface(false);
     setError(null);
     setIsMuted(false);
     
-    // Notify parent ONCE
+    // Notify parent
     if (onCallCompleted && completedCallSid) {
       onCallCompleted({
         callSid: completedCallSid,
@@ -530,157 +315,149 @@ const CallButton = ({
       });
     }
     
-    // Clear callSid and conferenceName after a delay to prevent re-triggering
     setTimeout(() => {
       setCurrentCallSid(null);
       setConferenceName(null);
     }, 100);
   };
 
-  const getStatusText = () => {
-    const callStatus = currentCallStatus?.status;
-    if (callStatus === 'ringing') {
-      return 'Ringing';
-    } else if (callStatus === 'in-progress') {
-      return 'In Progress';
-    } else if (callStatus === 'completed') {
-      return 'Completed';
-    } else if (callStatus === 'failed') {
-      return 'Failed';
-    } else if (callStatus === 'busy') {
-      return 'Busy';
-    } else if (callStatus === 'no-answer') {
-      return 'No Answer';
-    } else if (isCalling) {
-      return 'Calling';
+  // Fetch agents for transfer
+  const fetchAvailableAgents = async () => {
+    setLoadingAgents(true);
+    try {
+      const response = await apiClient.get('/api/calls/agents');
+      if (response?.ok) {
+        const result = await response.json();
+        if (result.success) {
+          setAvailableAgents(result.data || []);
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching agents:', err);
+      setAvailableAgents([]);
+    } finally {
+      setLoadingAgents(false);
     }
+  };
+
+  // Format timer
+  const formatTimer = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Get display text - simple flow: Calling -> Ringing -> Timer -> Status
+  const getDisplayText = () => {
+    // Show "Calling..." immediately when button is clicked (before any status)
+    if (isCalling && !callStatus) return 'Calling...';
+    // Show "Ringing..." when status is ringing
+    if (isRinging) return 'Ringing...';
+    // Show timer when in-progress
+    if (isInProgress) return formatTimer(callTimer);
+    // Show status when ended
+    if (isEnded) {
+      if (callStatus === 'completed') return 'Completed';
+      if (callStatus === 'failed') return 'Failed';
+      if (callStatus === 'busy') return 'Busy';
+      if (callStatus === 'no-answer') return 'No Answer';
+    }
+    return 'Call';
+  };
+
+  // Get status badge text
+  const getStatusBadgeText = () => {
+    if (callStatus === 'completed') return 'Completed';
+    if (callStatus === 'failed') return 'Failed';
+    if (callStatus === 'busy') return 'Busy';
+    if (callStatus === 'no-answer') return 'No Answer';
     return null;
   };
 
-  // Determine if call is in ringing state (including web interface connecting)
-  // Show "Ringing" when: call status is ringing OR web interface is shown but not connected yet
-  const isRinging = currentCallStatus?.status === 'ringing' || 
-                    (showWebInterface && !isWebCallConnected && !error && !isCallCompleted());
-  
-  // Determine if call is active (in-progress or web call connected)
-  const isCallActiveState = (currentCallStatus?.status === 'in-progress' || isWebCallConnected) && !isCallCompleted();
-  
-  // Determine if customer has picked up (call is in-progress, not just ringing)
-  const isCallInProgress = currentCallStatus?.status === 'in-progress' && !isCallCompleted();
+  if (!phoneNumber) {
+    return (
+      <button disabled className="opacity-50 cursor-not-allowed" title="No phone number available">
+        <PhoneIcon /> No Number
+      </button>
+    );
+  }
 
   return (
     <div className="inline-flex flex-col gap-3">
-      {/* Call Status Display */}
+      {/* Status Display */}
       <div className="inline-flex items-center gap-2">
-        {/* Status indicator - only show for completed/failed/busy/no-answer states */}
-        {(() => {
-          const callStatus = currentCallStatus?.status;
-          const shouldShowStatus = callStatus === 'completed' || 
-                                  callStatus === 'failed' || 
-                                  callStatus === 'busy' || 
-                                  callStatus === 'no-answer';
-          
-          return shouldShowStatus && getStatusText() ? (
-            <div className={`px-3 py-1.5 rounded-lg text-sm font-semibold shadow-sm ${
-              callStatus === 'completed' ? 'bg-gray-100 text-gray-700 border border-gray-200' :
-              callStatus === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' :
-              callStatus === 'busy' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
-              callStatus === 'no-answer' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
-              'bg-gray-100 text-gray-700 border border-gray-200'
-            }`}>
-              {getStatusText()}
-            </div>
-          ) : null;
-        })()}
+        {/* Status Badge - only for end states */}
+        {isEnded && getStatusBadgeText() && (
+          <div className={`px-3 py-1.5 rounded-lg text-sm font-semibold shadow-sm ${
+            callStatus === 'completed' ? 'bg-gray-100 text-gray-700 border border-gray-200' :
+            callStatus === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' :
+            callStatus === 'busy' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+            callStatus === 'no-answer' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+            'bg-gray-100 text-gray-700 border border-gray-200'
+          }`}>
+            {getStatusBadgeText()}
+          </div>
+        )}
         
-        {/* Call button - shows "Call" when idle */}
-        {!isCallActiveState && !isRinging && (
+        {/* Call Button - shows when idle */}
+        {!isRinging && !isInProgress && !isEnded && !isCalling && (
           <button
             onClick={handleCall}
-            disabled={isCalling}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg ${
-              isCalling 
-                ? 'bg-blue-400 text-white cursor-not-allowed' 
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
-            }`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-blue-600 hover:bg-blue-700 text-white"
             title={`Call ${customerName || phoneNumber}`}
           >
-            <PhoneIcon isCalling={isCalling} />
-            {getButtonText()}
+            <PhoneIcon isCalling={false} />
+            {getDisplayText()}
           </button>
         )}
         
-        {/* Call status display - shows timer when call is active or ringing */}
-        {(isRinging || isCallActiveState) && (
-          <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold ${
-            isRinging ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-green-50 text-green-700 border border-green-200'
-          }`}>
-            {isRinging && <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>}
-            {isCallActiveState && <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>}
-            <PhoneIcon isCalling={isRinging || isCallActiveState} />
-            {getButtonText()}
+        {/* Calling State */}
+        {isCalling && !isRinging && !isInProgress && !isEnded && (
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-orange-50 text-orange-700 border border-orange-200">
+            <span className="inline-block w-2 h-2 bg-orange-500 rounded-full mr-2 animate-pulse"></span>
+            <PhoneIcon isCalling={true} />
+            {getDisplayText()}
+          </div>
+        )}
+        
+        {/* Ringing State */}
+        {isRinging && !isEnded && (
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+            <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>
+            <PhoneIcon isCalling={true} />
+            {getDisplayText()}
+          </div>
+        )}
+        
+        {/* In-Progress State - shows timer */}
+        {isInProgress && !isEnded && (
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-green-50 text-green-700 border border-green-200">
+            <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
+            <PhoneIcon isCalling={true} />
+            {getDisplayText()}
           </div>
         )}
       </div>
 
-      {/* Call Control Buttons - shows when call is in-progress or web call is connected */}
-      {isCallActiveState && (
+      {/* Call Controls - only when in-progress */}
+      {isInProgress && (
         <div className="inline-flex items-center gap-2 flex-wrap relative z-10">
-          {/* Mute/Unmute button */}
+          {/* Mute Button */}
           <button
-            onClick={(e) => {
+            onClick={async (e) => {
               e.preventDefault();
               e.stopPropagation();
-              
-              // Wrap in try-catch to prevent errors from ending the call
-              try {
-                console.log('🔇 Mute button clicked', {
-                  isWebCallConnected,
-                  hasRef: !!webCallInterfaceRef.current,
-                  isCallActiveState,
-                  currentCallSid
-                });
-                
-                if (!webCallInterfaceRef.current) {
-                  console.warn('⚠️ WebCallInterface ref not available');
-                  setError('Web call interface not ready. Please wait...');
-                  return;
+              if (webCallInterfaceRef.current?.toggleMute) {
+                const success = await webCallInterfaceRef.current.toggleMute();
+                if (success !== false && webCallInterfaceRef.current?.getMutedState) {
+                  // Update state immediately
+                  setIsMuted(webCallInterfaceRef.current.getMutedState());
                 }
-                
-                if (typeof webCallInterfaceRef.current.toggleMute !== 'function') {
-                  console.error('❌ toggleMute method not available');
-                  setError('Mute function not available. Please refresh the page.');
-                  return;
-                }
-                
-                webCallInterfaceRef.current.toggleMute();
-                console.log('✅ Toggle mute called');
-                
-                // Update local state after a brief delay to allow WebCallInterface to update
-                setTimeout(() => {
-                  try {
-                    if (webCallInterfaceRef.current?.getMutedState) {
-                      const mutedState = webCallInterfaceRef.current.getMutedState();
-                      setIsMuted(mutedState);
-                      console.log('✅ Mute state updated:', mutedState);
-                    }
-                  } catch (stateErr) {
-                    console.warn('⚠️ Could not update mute state:', stateErr);
-                    // Don't set error - just log it
-                  }
-                }, 100);
-              } catch (err) {
-                // Prevent errors from crashing the component or ending the call
-                console.error('❌ Error toggling mute:', err);
-                setError('Failed to toggle mute. Please try again.');
-                // Don't re-throw - just show error message
               }
             }}
             disabled={!isWebCallConnected || !webCallInterfaceRef.current}
             className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg ${
-              isMuted 
-                ? 'bg-red-500 hover:bg-red-600 text-white' 
-                : 'bg-gray-600 hover:bg-gray-700 text-white'
+              isMuted ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-gray-600 hover:bg-gray-700 text-white'
             } ${!isWebCallConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
             title={isMuted ? "Unmute" : "Mute"}
           >
@@ -697,28 +474,20 @@ const CallButton = ({
             <span className="text-sm">{isMuted ? "Unmute" : "Mute"}</span>
           </button>
 
-          {/* Transfer button */}
+          {/* Transfer Button */}
           <button
             onClick={async (e) => {
               e.preventDefault();
               e.stopPropagation();
-              console.log('🔄 Transfer button clicked', { currentCallSid });
-              
               if (!currentCallSid) {
                 setError('No active call to transfer');
                 return;
               }
-              
-              // Open modal first
               setShowTransferModal(true);
-              
-              // Fetch available agents in background - don't block modal opening
-              // Use try-catch to prevent errors from affecting the call
               try {
                 await fetchAvailableAgents();
               } catch (err) {
-                // Silently handle errors - modal will still open, just without agents
-                console.warn('⚠️ Could not fetch agents, but transfer modal will still work:', err);
+                console.warn('Could not fetch agents:', err);
               }
             }}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-purple-500 hover:bg-purple-600 text-white"
@@ -730,21 +499,12 @@ const CallButton = ({
             <span className="text-sm">Transfer</span>
           </button>
 
-          {/* End Call button */}
+          {/* End Call Button */}
           <button
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              
-              // Wrap in try-catch to prevent errors from causing issues
-              try {
-                console.log('📞 End Call button clicked');
-                handleEndCall();
-              } catch (err) {
-                console.error('❌ Error in end call handler:', err);
-                // Even if there's an error, try to end the call
-                // The handleEndCall function should handle its own errors
-              }
+              handleEndCall();
             }}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-red-500 hover:bg-red-600 text-white"
             title="End Call"
@@ -757,8 +517,8 @@ const CallButton = ({
         </div>
       )}
 
-      {/* End Call button - shows when ringing (before customer picks up) but NOT when call is active */}
-      {isRinging && !isCallActiveState && (
+      {/* End Call Button - when ringing */}
+      {isRinging && (
         <button
           onClick={handleEndCall}
           className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-red-500 hover:bg-red-600 text-white"
@@ -772,9 +532,7 @@ const CallButton = ({
       )}
 
       {error && (
-        <div className="text-xs text-red-600 mt-2">
-          {error}
-        </div>
+        <div className="text-xs text-red-600 mt-2">{error}</div>
       )}
 
       {/* Transfer Modal */}
@@ -783,7 +541,6 @@ const CallButton = ({
           className="fixed inset-0 flex items-center justify-center z-50" 
           style={{ background: 'rgba(0,0,0,0.5)' }}
           onClick={(e) => {
-            // Close modal when clicking outside
             if (e.target === e.currentTarget && !isTransferring) {
               setShowTransferModal(false);
             }
@@ -795,11 +552,8 @@ const CallButton = ({
           >
             <h3 className="text-lg font-semibold mb-4">Transfer Call</h3>
             
-            {/* Transfer Type Selection */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Transfer Type
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Transfer Type</label>
               <div className="flex gap-4">
                 <label className="flex items-center">
                   <input
@@ -832,11 +586,8 @@ const CallButton = ({
               </div>
             </div>
 
-            {/* Destination Type Selection */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Transfer To
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Transfer To</label>
               <div className="flex gap-4">
                 <label className="flex items-center">
                   <input
@@ -870,12 +621,9 @@ const CallButton = ({
               </div>
             </div>
 
-            {/* Agent Selection */}
             {transferDestinationType === 'agent' && (
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Agent
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Select Agent</label>
                 {loadingAgents ? (
                   <div className="text-sm text-gray-500">Loading agents...</div>
                 ) : (
@@ -899,12 +647,9 @@ const CallButton = ({
               </div>
             )}
 
-            {/* Phone Number Input */}
             {transferDestinationType === 'phone' && (
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Phone Number to Transfer To
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
                 <input
                   type="tel"
                   value={transferPhoneNumber}
@@ -938,12 +683,10 @@ const CallButton = ({
                     setError('Please select an agent');
                     return;
                   }
-
                   if (transferDestinationType === 'phone' && !transferPhoneNumber.trim()) {
                     setError('Please enter a phone number');
                     return;
                   }
-
                   if (!currentCallSid) {
                     setError('No active call to transfer');
                     setShowTransferModal(false);
@@ -954,16 +697,6 @@ const CallButton = ({
                   setError(null);
 
                   try {
-                    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-                    const headers = {
-                      'Content-Type': 'application/json',
-                    };
-                    
-                    if (token) {
-                      headers['Authorization'] = `Bearer ${token}`;
-                    }
-
-                    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
                     const requestBody = {
                       callSid: currentCallSid,
                       transferType: transferType
@@ -975,40 +708,25 @@ const CallButton = ({
                       requestBody.transferTo = transferPhoneNumber.trim();
                     }
 
-                    // Use apiClient for better error handling
                     const response = await apiClient.post('/api/calls/transfer', requestBody);
                     
-                    if (response && response.ok) {
+                    if (response?.ok) {
                       const result = await response.json();
-                      
                       if (result.success) {
-                        console.log('✅ Call transferred successfully:', result.data);
                         setShowTransferModal(false);
                         setTransferPhoneNumber('');
                         setSelectedAgentId(null);
                         setTransferType('blind');
                         setTransferDestinationType('phone');
-                        
-                        // For blind transfer, optionally end the current call
-                        if (transferType === 'blind') {
-                          // The call is redirected, agent can hang up
-                        }
                       } else {
                         setError(result.message || result.error || 'Failed to transfer call');
                       }
                     } else {
-                      const errorText = response ? await response.text().catch(() => 'Unknown error') : 'No response';
-                      setError(`Transfer failed: ${errorText}`);
+                      setError('Transfer failed');
                     }
                   } catch (err) {
-                    console.error('❌ Error transferring call:', err);
-                    
-                    // Handle network errors gracefully
-                    if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
-                      setError('Network error. Please check your connection and try again.');
-                    } else {
-                      setError(err.message || 'Failed to transfer call');
-                    }
+                    console.error('Error transferring call:', err);
+                    setError(err.message || 'Failed to transfer call');
                   } finally {
                     setIsTransferring(false);
                   }
@@ -1020,9 +738,7 @@ const CallButton = ({
               </button>
             </div>
             {error && (
-              <div className="mt-2 text-xs text-red-600">
-                {error}
-              </div>
+              <div className="mt-2 text-xs text-red-600">{error}</div>
             )}
           </div>
         </div>
@@ -1035,35 +751,16 @@ const CallButton = ({
             ref={webCallInterfaceRef}
             conferenceName={conferenceName}
             onCallConnected={() => {
-              console.log('✅ Web call connected');
               setIsWebCallConnected(true);
-              
-              // Timer should already be running from when call status became "in-progress"
-              // Only start timer if it's not already running (fallback)
-              if (!callStartTime && !timerInterval.current) {
-                console.log('📞 Starting timer from web call connection (fallback)');
-                const now = Date.now();
-                setCallStartTime(now);
-                setCallTimer(0);
-                timerInterval.current = setInterval(() => {
-                  setCallTimer(prev => prev + 1);
-                }, 1000);
-              }
-              
-              console.log('✅ Timer started immediately');
-              
-              // Set up interval to sync mute state
-              if (stateSyncInterval.current) {
-                clearInterval(stateSyncInterval.current);
-              }
-              stateSyncInterval.current = setInterval(() => {
-                if (webCallInterfaceRef.current) {
-                  setIsMuted(webCallInterfaceRef.current.getMutedState?.() || false);
+              // Sync mute state periodically
+              if (muteSyncInterval.current) clearInterval(muteSyncInterval.current);
+              muteSyncInterval.current = setInterval(() => {
+                if (webCallInterfaceRef.current?.getMutedState) {
+                  setIsMuted(webCallInterfaceRef.current.getMutedState());
                 }
-              }, 200);
+              }, 500);
             }}
             onCallDisconnected={() => {
-              console.log('📞 Web call disconnected');
               setIsWebCallConnected(false);
               handleEndCall();
             }}
@@ -1091,4 +788,3 @@ const PhoneIcon = ({ isCalling = false }) => (
 );
 
 export default CallButton;
-
