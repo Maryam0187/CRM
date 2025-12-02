@@ -466,34 +466,90 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
       console.log('🔇 Attempting to mute call...');
       console.log('📞 Call object:', call);
-      console.log('📞 Call methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(call)));
-
-      // Try to get peer connection first (most reliable method)
-      let pc = null;
+      console.log('📞 Call object type:', typeof call);
+      console.log('📞 Call object keys:', Object.keys(call || {}));
       
-      // Try multiple ways to get peer connection
-      if (typeof call.getPeerConnection === 'function') {
+      // Try to get all properties (including non-enumerable)
+      if (call) {
+        const allProps = [];
+        let obj = call;
+        while (obj && obj !== Object.prototype) {
+          allProps.push(...Object.getOwnPropertyNames(obj));
+          obj = Object.getPrototypeOf(obj);
+        }
+        console.log('📞 All call properties:', [...new Set(allProps)]);
+      }
+
+      // Method 1: Try device's active calls (Twilio SDK 2.x might store calls on device)
+      if (device) {
         try {
-          pc = call.getPeerConnection();
-          console.log('✅ Got peer connection via getPeerConnection()');
-        } catch (e) {
-          console.warn('⚠️ getPeerConnection() failed:', e);
+          // Check if device has activeCalls or calls property
+          const activeCalls = device.activeCalls || device.calls || device._calls || null;
+          if (activeCalls && activeCalls.size > 0) {
+            console.log('📞 Found active calls on device:', activeCalls.size);
+            // Get the first active call
+            const deviceCall = Array.from(activeCalls.values())[0];
+            if (deviceCall) {
+              console.log('📞 Using call from device.activeCalls');
+              // Try to get peer connection from device call
+              const pc = deviceCall.getPeerConnection?.() || 
+                        deviceCall._peerConnection || 
+                        deviceCall._pc || 
+                        deviceCall.peerConnection || null;
+              
+              if (pc) {
+                const senders = pc.getSenders();
+                senders.forEach(sender => {
+                  if (sender.track && sender.track.kind === 'audio') {
+                    sender.track.enabled = false;
+                    muted = true;
+                  }
+                });
+                if (muted) {
+                  setIsMuted(true);
+                  console.log('✅ Call muted via device active call peer connection');
+                  return true;
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('⚠️ Error accessing device active calls:', err);
         }
       }
+
+      // Method 2: Try to get peer connection from call object (multiple approaches)
+      let pc = null;
       
-      if (!pc) {
-        // Try accessing internal properties
-        pc = call._peerConnection || call._pc || call.peerConnection || null;
-        if (pc) {
-          console.log('✅ Got peer connection via internal property');
+      // Try all possible ways to get peer connection
+      const pcGetters = [
+        () => call.getPeerConnection?.(),
+        () => call._peerConnection,
+        () => call._pc,
+        () => call.peerConnection,
+        () => call.connection?.getPeerConnection?.(),
+        () => call.connection?._peerConnection,
+        () => call.mediaStream?.getTracks?.[0]?.getSettings?.()?.peerConnection,
+      ];
+      
+      for (const getter of pcGetters) {
+        try {
+          const result = getter();
+          if (result) {
+            pc = result;
+            console.log('✅ Got peer connection via:', getter.toString().substring(0, 50));
+            break;
+          }
+        } catch (e) {
+          // Continue trying
         }
       }
 
       if (pc) {
-        // Method 1: Access tracks through peer connection senders (most reliable)
+        // Access tracks through peer connection senders
         try {
           const senders = pc.getSenders();
-          console.log('📞 Found', senders.length, 'senders');
+          console.log('📞 Found', senders.length, 'senders in peer connection');
           
           senders.forEach((sender, index) => {
             if (sender.track && sender.track.kind === 'audio') {
@@ -513,7 +569,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         }
       }
 
-      // Method 2: Try direct mute method (if available in SDK)
+      // Method 3: Try direct mute method (if available in SDK)
       if (typeof call.mute === 'function') {
         try {
           call.mute(true);
@@ -526,7 +582,29 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         }
       }
 
-      // Method 3: Try getCallStreams helper
+      // Method 4: Try accessing the call's internal media stream
+      try {
+        // Check if call has a mediaStream or stream property
+        const mediaStream = call.mediaStream || call.stream || call._mediaStream || null;
+        if (mediaStream && mediaStream.getAudioTracks) {
+          const tracks = mediaStream.getAudioTracks();
+          tracks.forEach(track => {
+            if (track.kind === 'audio') {
+              track.enabled = false;
+              muted = true;
+            }
+          });
+          if (muted) {
+            setIsMuted(true);
+            console.log('✅ Call muted via call mediaStream');
+            return true;
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ Error accessing call mediaStream:', err);
+      }
+
+      // Method 5: Try getCallStreams helper
       if (!muted) {
         try {
           const { local } = getCallStreams();
@@ -552,7 +630,8 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           hasGetPeerConnection: typeof call.getPeerConnection === 'function',
           hasPeerConnection: !!pc,
           callStatus: call.status,
-          callState: call.state
+          callState: call.state,
+          deviceHasActiveCalls: device ? !!(device.activeCalls || device.calls) : false
         });
         setError('Unable to mute call. Please try again.');
         return false;

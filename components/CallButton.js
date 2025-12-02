@@ -408,11 +408,34 @@ const CallButton = ({
     
     // Save callSid before clearing state
     const completedCallSid = currentCallSid;
+    const callStatus = currentCallStatus?.status;
+    
+    // Stop timer IMMEDIATELY when end call is clicked (regardless of status)
+    console.log('📞 Stopping timer immediately on end call');
+    if (timerInterval.current) {
+      clearInterval(timerInterval.current);
+      timerInterval.current = null;
+    }
+    // Reset timer state immediately
+    setCallStartTime(null);
+    setCallTimer(0);
+    
+    // Stop ringing if still playing
+    if (ringingInterval.current) {
+      clearInterval(ringingInterval.current);
+      ringingInterval.current = null;
+    }
+    
+    // Stop state sync interval
+    if (stateSyncInterval.current) {
+      clearInterval(stateSyncInterval.current);
+      stateSyncInterval.current = null;
+    }
     
     try {
-      // First, hang up the customer's call via API
+      // First, hang up the customer's call via API (only if callSid exists)
       if (completedCallSid) {
-        console.log('📞 Hanging up customer call via API:', completedCallSid);
+        console.log('📞 Hanging up customer call via API:', completedCallSid, 'Status:', callStatus);
         
         // Use apiClient with proper timeout and error handling
         try {
@@ -446,7 +469,10 @@ const CallButton = ({
           }
         } catch (err) {
           // Handle timeout and network errors gracefully
-          if (err.message === 'TIMEOUT') {
+          // For ringing calls, it's normal for hangup to fail - the call might not be fully established
+          if (callStatus === 'ringing' || callStatus === 'queued') {
+            console.log('ℹ️ Call was ringing/queued - hangup API may not be needed');
+          } else if (err.message === 'TIMEOUT') {
             console.warn('⚠️ Hangup API call timed out after 5 seconds (call may still be terminated by Twilio)');
           } else if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
             console.warn('⚠️ Hangup API call failed to connect. Network error - call may still be terminated by Twilio.');
@@ -457,21 +483,31 @@ const CallButton = ({
             console.error('❌ Error details:', {
               message: err.message || 'Unknown error',
               name: err.name || 'Unknown',
-              callSid: completedCallSid
+              callSid: completedCallSid,
+              callStatus: callStatus
             });
           }
           // Continue with cleanup even if API call fails
           // The call might be terminated by Twilio when agent disconnects from conference
         }
+      } else {
+        console.log('ℹ️ No callSid available - skipping hangup API call');
       }
       
       // Then disconnect web call if connected
       if (webCallInterfaceRef.current && typeof webCallInterfaceRef.current.hangUp === 'function') {
-        console.log('📞 Disconnecting web interface');
-        webCallInterfaceRef.current.hangUp();
+        try {
+          console.log('📞 Disconnecting web interface');
+          webCallInterfaceRef.current.hangUp();
+        } catch (err) {
+          console.warn('⚠️ Error disconnecting web interface:', err);
+          // Continue with cleanup even if hangUp fails
+        }
+      } else {
+        console.log('ℹ️ Web call interface not available or not connected');
       }
     } catch (err) {
-      console.error('Error in handleEndCall:', err);
+      console.error('❌ Error in handleEndCall:', err);
       // Continue with cleanup even if there's an error
     }
     
@@ -481,26 +517,6 @@ const CallButton = ({
     setShowWebInterface(false);
     setError(null);
     setIsMuted(false);
-    
-    // Clear intervals
-    if (ringingInterval.current) {
-      clearInterval(ringingInterval.current);
-      ringingInterval.current = null;
-    }
-    if (timerInterval.current) {
-      clearInterval(timerInterval.current);
-      timerInterval.current = null;
-    }
-    if (stateSyncInterval.current) {
-      clearInterval(stateSyncInterval.current);
-      stateSyncInterval.current = null;
-    }
-    
-    // Reset timer after showing final duration
-    setTimeout(() => {
-      setCallStartTime(null);
-      setCallTimer(0);
-    }, 1000);
     
     // Notify parent ONCE
     if (onCallCompleted && completedCallSid) {
