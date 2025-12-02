@@ -13,6 +13,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   const [error, setError] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const activeConnection = useRef(null);
+  const localMediaStream = useRef(null); // Store local media stream for muting
 
   const fetchToken = async () => {
     try {
@@ -30,8 +31,28 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     }
   };
 
+  // Setup device only when conferenceName is provided and user is available
   useEffect(() => {
-    if (!conferenceName || !user) return;
+    if (!conferenceName || !user) {
+      // Clean up device if conferenceName or user is removed
+      if (device) {
+        console.log('🧹 Cleaning up device: conferenceName or user removed');
+        try {
+          if (activeConnection.current) {
+            activeConnection.current.disconnect();
+            activeConnection.current = null;
+          }
+          device.unregister();
+          device.destroy();
+          setDevice(null);
+          setIsConnected(false);
+          setIsConnecting(false);
+        } catch (e) {
+          console.error('Error cleaning up device:', e);
+        }
+      }
+      return;
+    }
 
     const setupDevice = async () => {
       try {
@@ -45,14 +66,13 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         console.log('📞 Setting up Twilio Device (SDK 2.x)...');
         
         const twilioDevice = new Device(token, {
-          logLevel: 0, // Reduce log level to suppress warnings
+          logLevel: 1, // Set to 1 to reduce verbose logging (0 = silent, 1 = errors only)
           codecPreferences: ['opus', 'pcmu'],
-          // Suppress insights errors
           allowIncomingWhileBusy: false,
-          // Enable audio immediately
           enableRTCStats: false,
-          // Optimize for faster connection
           closeProtection: false,
+          // Don't request audio permissions during registration
+          // Audio will be requested only when joining conference
         });
         
         // Suppress console warnings for insights errors
@@ -64,7 +84,9 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           const message = args.join(' ');
           if (!message.includes('Cannot connect to insights') && 
               !message.includes('Unable to post') &&
-              !message.includes('Failed to fetch')) {
+              !message.includes('Failed to fetch') &&
+              !message.includes('heartbeat') &&
+              !message.includes('WSTransport')) {
             originalWarn.apply(console, args);
           }
         };
@@ -88,7 +110,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           console.log('✅ Twilio Device registered');
           setDevice(twilioDevice);
           setError(null);
-          // Auto-join conference IMMEDIATELY when device is registered (no delay)
+          // Auto-join conference IMMEDIATELY when device is registered
           // This ensures agent is in conference BEFORE customer answers
           if (conferenceName && !isConnected) {
             console.log('📞 Auto-joining conference immediately:', conferenceName);
@@ -116,6 +138,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           }
         });
 
+        // Register device (this will connect to Twilio but won't request mic yet)
         twilioDevice.register();
         setDevice(twilioDevice);
 
@@ -129,9 +152,23 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
     return () => {
       if (device) {
+        console.log('🧹 Cleaning up device on unmount');
         try {
+          // Disconnect any active calls first
+          if (activeConnection.current) {
+            try {
+              activeConnection.current.disconnect();
+            } catch (e) {
+              // Ignore disconnect errors
+            }
+            activeConnection.current = null;
+          }
+          // Unregister and destroy device
           device.unregister();
           device.destroy();
+          setDevice(null);
+          setIsConnected(false);
+          setIsConnecting(false);
         } catch (e) {
           console.error('Error cleaning up device:', e);
         }
@@ -164,35 +201,26 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
       console.log('📞 Connecting with params:', params);
       
-      // Request audio permissions IMMEDIATELY before connecting (non-blocking)
-      // This ensures audio is ready when connection is established (reduces delay)
-      const audioPermissionPromise = navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }, 
-        video: false 
-      }).then(stream => {
-        console.log('✅ Audio permissions granted immediately');
-        // Keep stream active briefly to ensure permissions are set
-        // Twilio SDK will use these permissions
-        setTimeout(() => {
-          stream.getTracks().forEach(track => track.stop());
-          console.log('📞 Released test audio stream');
-        }, 50); // Reduced from 100ms to 50ms
-        return stream;
-      }).catch(audioErr => {
+      // Request audio permissions ONLY when actually joining the call
+      // This prevents unnecessary mic access when device is just registered
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }, 
+          video: false 
+        });
+        console.log('✅ Audio permissions granted');
+        // Release the test stream immediately - Twilio SDK will request its own
+        stream.getTracks().forEach(track => track.stop());
+      } catch (audioErr) {
         console.warn('⚠️ Audio permission request failed (Twilio SDK will request):', audioErr);
-        return null;
-      });
+        // Continue anyway - Twilio SDK will request permissions
+      }
       
-      // Start audio permission request in parallel (don't wait)
-      console.log('📞 Requesting audio permissions in parallel...');
-      audioPermissionPromise.catch(() => {}); // Suppress unhandled promise rejection
-      
-      // Connect immediately - don't wait for audio permissions
-      // Audio permissions will be ready by the time connection is established
+      // Connect to conference (Twilio SDK will handle audio stream)
       const call = deviceInstance.connect({ params });
       
       if (!call) {
@@ -226,7 +254,11 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             // Get and store media streams for mute functionality
             try {
               setTimeout(() => {
-                getCallStreams();
+                const streams = getCallStreams();
+                if (streams.local) {
+                  localMediaStream.current = streams.local;
+                  console.log('📞 Local media stream captured for mute');
+                }
                 console.log('📞 Media streams captured for mute');
               }, 500); // Wait a bit for streams to be ready
             } catch (err) {
@@ -241,6 +273,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(false);
             setIsConnecting(false);
             activeConnection.current = null;
+            localMediaStream.current = null; // Clear stored stream
             onCallDisconnected && onCallDisconnected();
           });
 
@@ -281,7 +314,11 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             // Get and store media streams for mute functionality
             try {
               setTimeout(() => {
-                getCallStreams();
+                const streams = getCallStreams();
+                if (streams.local) {
+                  localMediaStream.current = streams.local;
+                  console.log('📞 Local media stream captured for mute');
+                }
                 console.log('📞 Media streams captured for mute');
               }, 500); // Wait a bit for streams to be ready
             } catch (err) {
@@ -296,6 +333,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(false);
             setIsConnecting(false);
             activeConnection.current = null;
+            localMediaStream.current = null; // Clear stored stream
             onCallDisconnected && onCallDisconnected();
           });
 
@@ -351,12 +389,11 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     console.log('📞 hangUp called');
     
     try {
+      // Try to disconnect active connection if it exists
       if (activeConnection.current) {
         const call = activeConnection.current;
         
-        // SDK 2.x - Call object should have disconnect() method
-        // But we'll try multiple approaches in case the call is in an error state
-        if (call) {
+        try {
           // Check if call has status property (indicates it's a valid Call object)
           if (call.status) {
             console.log('📞 Call status before disconnect:', call.status);
@@ -376,25 +413,31 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           else {
             console.log('📞 Call object exists but no disconnect method available - clearing reference');
           }
+        } catch (callErr) {
+          // Ignore errors during disconnect - call might be in ringing state or not fully connected
+          console.warn('⚠️ Error disconnecting call (ignored):', callErr.message);
         }
         
         activeConnection.current = null;
       }
       
-      // Also try device-level disconnect if available
+      // Also try device-level disconnect if available (handles ringing calls)
       if (device && typeof device.disconnectAll === 'function') {
         try {
           device.disconnectAll();
         } catch (e) {
-          // Ignore errors - call might already be disconnected
+          // Ignore errors - call might already be disconnected or in ringing state
+          console.warn('⚠️ Error in device.disconnectAll (ignored):', e.message);
         }
       }
     } catch (err) {
-      console.error('❌ Error in hangUp:', err);
+      // Ignore all errors - call might be in any state (ringing, connecting, etc.)
+      console.warn('⚠️ Error in hangUp (ignored):', err.message);
     } finally {
       // Always update state regardless of disconnect success
       setIsConnected(false);
       setIsConnecting(false);
+      localMediaStream.current = null; // Clear stored stream
       onCallDisconnected && onCallDisconnected();
     }
   };
@@ -470,86 +513,91 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       let muted = false;
 
       console.log('🔇 Attempting to mute call...');
-
-      // Method 1: Try device's active calls (Twilio SDK 2.x stores calls on device)
-      // Wait a bit for call to be stored in device.calls (up to 1 second)
-      let deviceCall = null;
-      for (let attempt = 0; attempt < 10; attempt++) {
-        try {
-          // Try multiple ways to access device calls
-          let deviceCalls = null;
-          if (device.calls && device.calls instanceof Map) {
-            deviceCalls = device.calls;
-          } else if (device.activeCalls && device.activeCalls instanceof Map) {
-            deviceCalls = device.activeCalls;
-          } else if (device._calls && device._calls instanceof Map) {
-            deviceCalls = device._calls;
-          } else if (typeof device.getCalls === 'function') {
-            deviceCalls = device.getCalls();
-          }
-          
-          if (deviceCalls && deviceCalls.size > 0) {
-            deviceCall = Array.from(deviceCalls.values())[0];
-            if (deviceCall) {
-              console.log('✅ Found call in device.calls');
-              break;
-            }
-          }
-          
-          if (attempt < 9) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-        } catch (err) {
-          console.warn('⚠️ Error accessing device calls:', err);
+      console.log('📞 Call object:', call);
+      console.log('📞 Call object keys:', Object.keys(call || {}));
+      
+      // Log all properties (including non-enumerable) for debugging
+      if (call) {
+        const allProps = [];
+        let obj = call;
+        while (obj && obj !== Object.prototype) {
+          allProps.push(...Object.getOwnPropertyNames(obj));
+          obj = Object.getPrototypeOf(obj);
         }
+        console.log('📞 All call properties:', [...new Set(allProps)].filter(p => !p.startsWith('__')));
+        
+        // Log specific properties that might contain peer connection
+        console.log('📞 call._peerConnection:', call._peerConnection);
+        console.log('📞 call._pc:', call._pc);
+        console.log('📞 call.connection:', call.connection);
+        console.log('📞 call._connection:', call._connection);
+        console.log('📞 call._signaling:', call._signaling);
+        console.log('📞 call._mediaStream:', call._mediaStream);
+        console.log('📞 call._localStream:', call._localStream);
       }
 
-      // Use device call if available, otherwise use activeConnection
-      const callToMute = deviceCall || call;
-      
-      // Try to get peer connection
+      // Method 1: Try to access peer connection through call's internal properties
+      // Twilio SDK 2.x stores peer connection in various places
       let pc = null;
       
-      // First try from device call
-      if (deviceCall) {
-        if (typeof deviceCall.getPeerConnection === 'function') {
+      // Try all possible ways to get peer connection from the call object
+      const pcGetters = [
+        () => call.getPeerConnection?.(),
+        () => call._peerConnection,
+        () => call._pc,
+        () => call.peerConnection,
+        () => call.connection?.getPeerConnection?.(),
+        () => call.connection?._peerConnection,
+        () => call.connection?._pc,
+        () => call._signaling?.getPeerConnection?.(),
+        () => call._signaling?._peerConnection,
+        // Try accessing through device's internal state
+        () => {
           try {
-            pc = deviceCall.getPeerConnection();
-          } catch (e) {
-            console.warn('⚠️ getPeerConnection() failed:', e);
-          }
-        }
-        
-        if (!pc) {
-          pc = deviceCall._peerConnection || 
-               deviceCall._pc || 
-               deviceCall.peerConnection ||
-               deviceCall.connection?._peerConnection ||
-               null;
-        }
-      }
-      
-      // Fallback: try from activeConnection call
-      if (!pc) {
-        const pcGetters = [
-          () => call.getPeerConnection?.(),
-          () => call._peerConnection,
-          () => call._pc,
-          () => call.peerConnection,
-          () => call.connection?.getPeerConnection?.(),
-          () => call.connection?._peerConnection,
-        ];
-        
-        for (const getter of pcGetters) {
-          try {
-            const result = getter();
-            if (result) {
-              pc = result;
-              break;
+            if (device._calls && device._calls instanceof Map && device._calls.size > 0) {
+              const deviceCall = Array.from(device._calls.values())[0];
+              return deviceCall?._peerConnection || deviceCall?._pc || deviceCall?.getPeerConnection?.();
             }
           } catch (e) {
-            // Continue trying
+            return null;
           }
+        },
+        // Try accessing through device's connection manager
+        () => {
+          try {
+            if (device._connectionManager) {
+              const connections = device._connectionManager._connections;
+              if (connections && connections.size > 0) {
+                const conn = Array.from(connections.values())[0];
+                return conn?._peerConnection || conn?._pc || conn?.getPeerConnection?.();
+              }
+            }
+          } catch (e) {
+            return null;
+          }
+        },
+        // Try accessing through device's signaling
+        () => {
+          try {
+            if (device._signaling) {
+              return device._signaling._peerConnection || device._signaling.getPeerConnection?.();
+            }
+          } catch (e) {
+            return null;
+          }
+        }
+      ];
+      
+      for (const getter of pcGetters) {
+        try {
+          const result = getter();
+          if (result && result.getSenders) {
+            pc = result;
+            console.log('✅ Got peer connection via:', getter.toString().substring(0, 80));
+            break;
+          }
+        } catch (e) {
+          // Continue trying
         }
       }
 
@@ -577,7 +625,73 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         }
       }
 
-      // Method 2: Try getCallStreams helper
+      // Method 2: Try to use stored local media stream (most reliable if available)
+      if (!muted && localMediaStream.current) {
+        try {
+          const tracks = localMediaStream.current.getAudioTracks();
+          if (tracks.length > 0) {
+            console.log('📞 Found', tracks.length, 'audio tracks in stored local stream');
+            tracks.forEach(track => {
+              console.log('🔇 Muting track:', track.id);
+              track.enabled = false;
+              muted = true;
+            });
+            if (muted) {
+              setIsMuted(true);
+              console.log('✅ Call muted via stored local media stream');
+              return true;
+            }
+          }
+        } catch (err) {
+          console.warn('⚠️ Error accessing stored local media stream:', err);
+        }
+      }
+
+      // Method 3: Try to access audio tracks directly from call's media stream
+      if (!muted) {
+        try {
+          // Try multiple ways to get the media stream
+          const streamGetters = [
+            () => call.getLocalStream?.(),
+            () => call._localStream,
+            () => call._mediaStream,
+            () => call.mediaStream,
+            () => call.stream,
+            () => call.connection?.getLocalStream?.(),
+            () => call.connection?._localStream,
+          ];
+          
+          for (const getter of streamGetters) {
+            try {
+              const stream = getter();
+              if (stream && stream.getAudioTracks) {
+                const tracks = stream.getAudioTracks();
+                if (tracks.length > 0) {
+                  console.log('📞 Found', tracks.length, 'audio tracks in stream');
+                  // Store it for future use
+                  localMediaStream.current = stream;
+                  tracks.forEach(track => {
+                    console.log('🔇 Muting track:', track.id);
+                    track.enabled = false;
+                    muted = true;
+                  });
+                  if (muted) {
+                    setIsMuted(true);
+                    console.log('✅ Call muted via call media stream');
+                    return true;
+                  }
+                }
+              }
+            } catch (e) {
+              // Continue trying
+            }
+          }
+        } catch (err) {
+          console.warn('⚠️ Error accessing call media stream:', err);
+        }
+      }
+
+      // Method 4: Try getCallStreams helper
       if (!muted) {
         try {
           const { local } = getCallStreams();
@@ -596,10 +710,10 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         }
       }
 
-      // Method 3: Try direct mute method (if available in SDK)
-      if (!muted && typeof callToMute.mute === 'function') {
+      // Method 5: Try direct mute method (if available in SDK)
+      if (!muted && typeof call.mute === 'function') {
         try {
-          callToMute.mute(true);
+          call.mute(true);
           setIsMuted(true);
           muted = true;
           console.log('✅ Call muted using call.mute(true)');
@@ -609,14 +723,42 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         }
       }
 
+      // Method 6: Try accessing call's internal connection manager
+      if (!muted) {
+        try {
+          // Try to access through call's internal connection
+          if (call._connection) {
+            const connection = call._connection;
+            const connectionPc = connection._peerConnection || connection._pc || connection.getPeerConnection?.();
+            if (connectionPc) {
+              const senders = connectionPc.getSenders();
+              senders.forEach((sender) => {
+                if (sender.track && sender.track.kind === 'audio') {
+                  sender.track.enabled = false;
+                  muted = true;
+                }
+              });
+              if (muted) {
+                setIsMuted(true);
+                console.log('✅ Call muted via call._connection peer connection');
+                return true;
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('⚠️ Error accessing call._connection:', err);
+        }
+      }
+
       if (!muted) {
         console.error('❌ Cannot mute: no method available');
         console.error('📞 Call object details:', {
           hasDevice: !!device,
-          hasDeviceCall: !!deviceCall,
           hasActiveConnection: !!activeConnection.current,
           hasPeerConnection: !!pc,
-          deviceCallsSize: device ? (device.calls?.size || device.activeCalls?.size || 0) : 0
+          callKeys: Object.keys(call || {}),
+          callType: typeof call,
+          deviceCallsSize: device ? (device.calls?.size || device.activeCalls?.size || device._calls?.size || 0) : 0
         });
         setError('Unable to mute call. Please try again.');
         return false;
@@ -646,6 +788,28 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       let unmuted = false;
 
       console.log('🔊 Attempting to unmute call...');
+
+      // Method 1: Try to use stored local media stream (most reliable if available)
+      if (localMediaStream.current) {
+        try {
+          const tracks = localMediaStream.current.getAudioTracks();
+          if (tracks.length > 0) {
+            console.log('📞 Found', tracks.length, 'audio tracks in stored local stream');
+            tracks.forEach(track => {
+              console.log('🔊 Unmuting track:', track.id);
+              track.enabled = true;
+              unmuted = true;
+            });
+            if (unmuted) {
+              setIsMuted(false);
+              console.log('✅ Call unmuted via stored local media stream');
+              return true;
+            }
+          }
+        } catch (err) {
+          console.warn('⚠️ Error accessing stored local media stream:', err);
+        }
+      }
 
       // Try to get call from device first
       let deviceCall = null;

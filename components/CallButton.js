@@ -29,6 +29,7 @@ const CallButton = ({
   
   // Timer state
   const [callTimer, setCallTimer] = useState(0);
+  const [finalDuration, setFinalDuration] = useState(null); // Store final duration when call ends
   
   // Transfer modal state
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -151,6 +152,19 @@ const CallButton = ({
     if (isEnded && currentCallSid && !hasNotifiedCompletion.current) {
       hasNotifiedCompletion.current = true;
       
+      // Get duration from call status update or use current timer
+      const latestStatus = getLatestStatus();
+      const durationFromStatus = latestStatus?.duration || 0;
+      
+      // Preserve duration - use status duration if available, otherwise use timer
+      if (durationFromStatus > 0) {
+        setFinalDuration(durationFromStatus);
+        setCallTimer(durationFromStatus);
+      } else if (callTimer > 0 && !finalDuration) {
+        // Use current timer if status doesn't have duration yet
+        setFinalDuration(callTimer);
+      }
+      
       // Stop all intervals immediately
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
@@ -165,13 +179,15 @@ const CallButton = ({
         muteSyncInterval.current = null;
       }
       
-      setCallTimer(0);
+      // Don't reset timer - keep it for display
+      // setCallTimer(0);
       
       // Notify parent
       if (onCallCompleted && currentCallSid) {
         onCallCompleted({
           callSid: currentCallSid,
           status: callStatus,
+          duration: durationFromStatus || callTimer,
           customerId,
           saleId,
           phoneNumber,
@@ -184,22 +200,28 @@ const CallButton = ({
         setIsCalling(false);
         setIsWebCallConnected(false);
         setShowWebInterface(false);
+        // Clear conference name to trigger device cleanup
+        setConferenceName(null);
         setTimeout(() => {
           setCurrentCallSid(null);
-          setConferenceName(null);
+          setCallTimer(0);
+          setFinalDuration(null);
         }, 100);
       }, 2000);
     }
-  }, [isEnded, currentCallSid, callStatus, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
+  }, [isEnded, currentCallSid, callStatus, callTimer, finalDuration, getLatestStatus, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
 
-  // Reset completion flag for new calls
+  // Reset completion flag and duration for new calls
   useEffect(() => {
     if (currentCallSid && previousCallSid.current !== currentCallSid) {
       hasNotifiedCompletion.current = false;
       previousCallSid.current = currentCallSid;
+      setFinalDuration(null); // Reset final duration for new call
     } else if (!currentCallSid) {
       hasNotifiedCompletion.current = false;
       previousCallSid.current = null;
+      setFinalDuration(null);
+      setCallTimer(0);
     }
   }, [currentCallSid]);
 
@@ -251,6 +273,11 @@ const CallButton = ({
     hasNotifiedCompletion.current = true;
     const completedCallSid = currentCallSid;
     
+    // Preserve current timer value if call was in progress
+    if (isInProgress && callTimer > 0) {
+      setFinalDuration(callTimer);
+    }
+    
     // Stop all intervals immediately
     if (timerInterval.current) {
       clearInterval(timerInterval.current);
@@ -265,15 +292,20 @@ const CallButton = ({
       muteSyncInterval.current = null;
     }
     
-    setCallTimer(0);
+    // Don't reset timer yet - preserve it for display
+    // setCallTimer(0);
     
     try {
-      // Disconnect web call first (immediate)
+      // Disconnect web call first (immediate) - but handle gracefully if not connected
       if (webCallInterfaceRef.current?.hangUp) {
         try {
-          webCallInterfaceRef.current.hangUp();
+          // Only hang up if call is actually connected
+          if (isWebCallConnected || isInProgress) {
+            webCallInterfaceRef.current.hangUp();
+          }
         } catch (err) {
-          console.warn('Web call hangup error:', err);
+          // Ignore errors during ringing - call might not be fully connected
+          console.warn('Web call hangup error (ignored):', err.message);
         }
       }
       
@@ -303,6 +335,9 @@ const CallButton = ({
     setError(null);
     setIsMuted(false);
     
+    // Clear conference name to trigger device cleanup
+    setConferenceName(null);
+    
     // Notify parent
     if (onCallCompleted && completedCallSid) {
       onCallCompleted({
@@ -317,7 +352,6 @@ const CallButton = ({
     
     setTimeout(() => {
       setCurrentCallSid(null);
-      setConferenceName(null);
     }, 100);
   };
 
@@ -347,7 +381,7 @@ const CallButton = ({
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
-  // Get display text - simple flow: Calling -> Ringing -> Timer -> Status
+  // Get display text - simple flow: Calling -> Ringing -> Timer -> Status with Duration
   const getDisplayText = () => {
     // Show "Calling..." immediately when button is clicked (before any status)
     if (isCalling && !callStatus) return 'Calling...';
@@ -355,8 +389,14 @@ const CallButton = ({
     if (isRinging) return 'Ringing...';
     // Show timer when in-progress
     if (isInProgress) return formatTimer(callTimer);
-    // Show status when ended
+    // Show status with duration when ended (if call was in-progress)
     if (isEnded) {
+      const durationToShow = finalDuration || callTimer;
+      // Show duration for completed calls that had time in-progress
+      if (durationToShow > 0 && callStatus === 'completed') {
+        return `${formatTimer(durationToShow)}`;
+      }
+      // Show status text for other end states
       if (callStatus === 'completed') return 'Completed';
       if (callStatus === 'failed') return 'Failed';
       if (callStatus === 'busy') return 'Busy';
@@ -434,6 +474,14 @@ const CallButton = ({
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-green-50 text-green-700 border border-green-200">
             <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
             <PhoneIcon isCalling={true} />
+            {getDisplayText()}
+          </div>
+        )}
+        
+        {/* Ended State - shows duration if call was in-progress */}
+        {isEnded && (finalDuration || callTimer > 0) && callStatus === 'completed' && (
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-gray-50 text-gray-700 border border-gray-200">
+            <PhoneIcon isCalling={false} />
             {getDisplayText()}
           </div>
         )}
