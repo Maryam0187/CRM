@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useSocket } from '../contexts/SocketContext';
 import { useCallStatus } from '../lib/useCallStatus';
 import apiClient from '../lib/apiClient';
 import WebCallInterface from './WebCallInterface';
@@ -17,7 +16,6 @@ const CallButton = ({
   size = 'default'
 }) => {
   const { user } = useAuth();
-  const { isConnected } = useSocket();
   const [isCalling, setIsCalling] = useState(false);
   const [currentCallSid, setCurrentCallSid] = useState(null);
   const [conferenceName, setConferenceName] = useState(null);
@@ -67,11 +65,9 @@ const CallButton = ({
     }
   };
   const [isMuted, setIsMuted] = useState(false);
-  const [isOnHold, setIsOnHold] = useState(false);
   const ringingInterval = useRef(null);
   const timerInterval = useRef(null);
   const stateSyncInterval = useRef(null);
-  const statusPollInterval = useRef(null);
   const hasNotifiedCompletion = useRef(false);
   const webCallInterfaceRef = useRef(null);
   const previousCallSid = useRef(null);
@@ -96,94 +92,12 @@ const CallButton = ({
       if (stateSyncInterval.current) {
         clearInterval(stateSyncInterval.current);
       }
-      if (statusPollInterval.current) {
-        clearInterval(statusPollInterval.current);
-      }
     };
   }, []);
 
-  // Poll call status when ringing to catch no-answer/failed status updates
-  useEffect(() => {
-    const callStatus = currentCallStatus?.status;
-    
-    // Start polling when call is ringing
-    if (callStatus === 'ringing' && currentCallSid && !statusPollInterval.current) {
-      console.log('📞 Starting status polling for call:', currentCallSid);
-      
-      statusPollInterval.current = setInterval(async () => {
-        try {
-          const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-          const headers = {
-            'Content-Type': 'application/json',
-          };
-          
-          if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-          }
-
-          const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-          const response = await fetch(`${baseUrl}/api/calls/status/${currentCallSid}`, {
-            method: 'GET',
-            headers: headers
-          });
-
-          if (response.ok) {
-            const result = await response.json();
-            
-            if (result.success && result.callLog) {
-              const dbStatus = result.callLog.status;
-              
-              // If status changed from ringing to something else, trigger update
-              if (dbStatus !== 'ringing' && callStatus === 'ringing') {
-                console.log('📞 Status changed detected via polling:', {
-                  oldStatus: callStatus,
-                  newStatus: dbStatus,
-                  callSid: currentCallSid
-                });
-                
-                // Create a custom event to update the call status
-                // This matches the structure sent by Socket.IO in SocketContext
-                const callStatusData = {
-                  callSid: currentCallSid,
-                  status: dbStatus,
-                  duration: result.callLog.duration,
-                  direction: result.callLog.direction,
-                  from: result.callLog.fromNumber,
-                  to: result.callLog.toNumber,
-                  customerId: result.callLog.customer?.id,
-                  saleId: result.callLog.sale?.id,
-                  agentId: result.callLog.agent?.id,
-                  callPurpose: result.callLog.callPurpose,
-                  twilioData: result.callLog.twilioData || {}
-                };
-                
-                const statusUpdateEvent = new CustomEvent('callStatusUpdate', {
-                  detail: { callStatusData }
-                });
-                window.dispatchEvent(statusUpdateEvent);
-                
-                console.log('📞 Dispatched status update event via polling:', callStatusData);
-              }
-            }
-          }
-        } catch (err) {
-          console.error('❌ Error polling call status:', err);
-        }
-      }, 3000); // Poll every 3 seconds when ringing
-    } else if (callStatus !== 'ringing' && statusPollInterval.current) {
-      // Stop polling when call is no longer ringing
-      console.log('📞 Stopping status polling - call status:', callStatus);
-      clearInterval(statusPollInterval.current);
-      statusPollInterval.current = null;
-    }
-
-    return () => {
-      if (statusPollInterval.current) {
-        clearInterval(statusPollInterval.current);
-        statusPollInterval.current = null;
-      }
-    };
-  }, [currentCallStatus?.status, currentCallSid]);
+  // Note: Call status updates are handled via Socket.IO in real-time
+  // The useCallStatus hook listens to 'callStatusUpdate' events dispatched by SocketContext
+  // No polling needed - Socket.IO provides instant updates when Twilio webhooks arrive
 
   // Play ringing sound effect
   const playRingingSound = () => {
@@ -541,7 +455,6 @@ const CallButton = ({
     setShowWebInterface(false);
     setError(null);
     setIsMuted(false);
-    setIsOnHold(false);
     
     // Clear intervals
     if (ringingInterval.current) {
@@ -617,19 +530,26 @@ const CallButton = ({
     <div className="inline-flex flex-col gap-3">
       {/* Call Status Display */}
       <div className="inline-flex items-center gap-2">
-        {/* Status indicator - only show for completed/failed/busy/no-answer states, not for active calls */}
-        {getStatusText() && !isRinging && !isCallActiveState && (
-          <div className={`px-3 py-1.5 rounded-lg text-sm font-semibold shadow-sm ${
-            currentCallStatus?.status === 'completed' ? 'bg-gray-100 text-gray-700 border border-gray-200' :
-            currentCallStatus?.status === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' :
-            currentCallStatus?.status === 'busy' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
-            currentCallStatus?.status === 'no-answer' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
-            isCalling ? 'bg-orange-100 text-orange-700 border border-orange-200' :
-            'bg-gray-100 text-gray-700 border border-gray-200'
-          }`}>
-            {getStatusText()}
-          </div>
-        )}
+        {/* Status indicator - only show for completed/failed/busy/no-answer states */}
+        {(() => {
+          const callStatus = currentCallStatus?.status;
+          const shouldShowStatus = callStatus === 'completed' || 
+                                  callStatus === 'failed' || 
+                                  callStatus === 'busy' || 
+                                  callStatus === 'no-answer';
+          
+          return shouldShowStatus && getStatusText() ? (
+            <div className={`px-3 py-1.5 rounded-lg text-sm font-semibold shadow-sm ${
+              callStatus === 'completed' ? 'bg-gray-100 text-gray-700 border border-gray-200' :
+              callStatus === 'failed' ? 'bg-red-100 text-red-700 border border-red-200' :
+              callStatus === 'busy' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+              callStatus === 'no-answer' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+              'bg-gray-100 text-gray-700 border border-gray-200'
+            }`}>
+              {getStatusText()}
+            </div>
+          ) : null;
+        })()}
         
         {/* Call button - shows "Call" when idle */}
         {!isCallActiveState && !isRinging && (
@@ -711,53 +631,6 @@ const CallButton = ({
             <span className="text-sm">{isMuted ? "Unmute" : "Mute"}</span>
           </button>
 
-          {/* Hold/Resume button - only show when customer picked up */}
-          <button
-            onClick={() => {
-              if (!webCallInterfaceRef.current) {
-                console.warn('⚠️ WebCallInterface ref not available');
-                return;
-              }
-              
-              if (typeof webCallInterfaceRef.current.toggleHold !== 'function') {
-                console.error('❌ toggleHold method not available');
-                return;
-              }
-              
-              try {
-                webCallInterfaceRef.current.toggleHold();
-                // Update local state after a brief delay to allow WebCallInterface to update
-                setTimeout(() => {
-                  if (webCallInterfaceRef.current?.getHoldState) {
-                    setIsOnHold(webCallInterfaceRef.current.getHoldState());
-                  }
-                }, 100);
-              } catch (err) {
-                console.error('❌ Error toggling hold:', err);
-                setError('Failed to toggle hold. Please try again.');
-              }
-            }}
-            disabled={!isWebCallConnected || !webCallInterfaceRef.current}
-            className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg ${
-              isOnHold 
-                ? 'bg-green-500 hover:bg-green-600 text-white' 
-                : 'bg-yellow-500 hover:bg-yellow-600 text-white'
-            } ${!isWebCallConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
-            title={isOnHold ? "Resume" : "Hold"}
-          >
-            {isOnHold ? (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            )}
-            <span className="text-sm">{isOnHold ? "Resume" : "Hold"}</span>
-          </button>
-
           {/* Transfer button */}
           <button
             onClick={async () => {
@@ -810,7 +683,7 @@ const CallButton = ({
 
       {/* Transfer Modal */}
       {showTransferModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.5)' }}>
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold mb-4">Transfer Call</h3>
             
@@ -994,32 +867,40 @@ const CallButton = ({
                       requestBody.transferTo = transferPhoneNumber.trim();
                     }
 
-                    const response = await fetch(`${baseUrl}/api/calls/transfer`, {
-                      method: 'POST',
-                      headers: headers,
-                      body: JSON.stringify(requestBody)
-                    });
-
-                    const result = await response.json();
-
-                    if (result.success) {
-                      console.log('✅ Call transferred successfully:', result.data);
-                      setShowTransferModal(false);
-                      setTransferPhoneNumber('');
-                      setSelectedAgentId(null);
-                      setTransferType('blind');
-                      setTransferDestinationType('phone');
+                    // Use apiClient for better error handling
+                    const response = await apiClient.post('/api/calls/transfer', requestBody);
+                    
+                    if (response && response.ok) {
+                      const result = await response.json();
                       
-                      // For blind transfer, optionally end the current call
-                      if (transferType === 'blind') {
-                        // The call is redirected, agent can hang up
+                      if (result.success) {
+                        console.log('✅ Call transferred successfully:', result.data);
+                        setShowTransferModal(false);
+                        setTransferPhoneNumber('');
+                        setSelectedAgentId(null);
+                        setTransferType('blind');
+                        setTransferDestinationType('phone');
+                        
+                        // For blind transfer, optionally end the current call
+                        if (transferType === 'blind') {
+                          // The call is redirected, agent can hang up
+                        }
+                      } else {
+                        setError(result.message || result.error || 'Failed to transfer call');
                       }
                     } else {
-                      setError(result.message || result.error || 'Failed to transfer call');
+                      const errorText = response ? await response.text().catch(() => 'Unknown error') : 'No response';
+                      setError(`Transfer failed: ${errorText}`);
                     }
                   } catch (err) {
                     console.error('❌ Error transferring call:', err);
-                    setError(err.message || 'Failed to transfer call');
+                    
+                    // Handle network errors gracefully
+                    if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+                      setError('Network error. Please check your connection and try again.');
+                    } else {
+                      setError(err.message || 'Failed to transfer call');
+                    }
                   } finally {
                     setIsTransferring(false);
                   }
@@ -1063,14 +944,13 @@ const CallButton = ({
               
               console.log('✅ Timer started immediately');
               
-              // Set up interval to sync mute/hold state
+              // Set up interval to sync mute state
               if (stateSyncInterval.current) {
                 clearInterval(stateSyncInterval.current);
               }
               stateSyncInterval.current = setInterval(() => {
                 if (webCallInterfaceRef.current) {
                   setIsMuted(webCallInterfaceRef.current.getMutedState?.() || false);
-                  setIsOnHold(webCallInterfaceRef.current.getHoldState?.() || false);
                 }
               }, 200);
             }}

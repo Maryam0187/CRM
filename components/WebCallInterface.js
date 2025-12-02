@@ -12,7 +12,6 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [isOnHold, setIsOnHold] = useState(false);
   const activeConnection = useRef(null);
 
   const fetchToken = async () => {
@@ -224,12 +223,14 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(true);
             setIsConnecting(false);
             
-            // Ensure audio is enabled and playing
+            // Get and store media streams for mute functionality
             try {
-              // The call object should automatically handle audio, but we can verify
-              console.log('📞 Call accepted, audio should be active');
+              setTimeout(() => {
+                getCallStreams();
+                console.log('📞 Media streams captured for mute');
+              }, 500); // Wait a bit for streams to be ready
             } catch (err) {
-              console.error('❌ Error enabling audio:', err);
+              console.error('❌ Error capturing streams:', err);
             }
             
             onCallConnected && onCallConnected(call);
@@ -276,6 +277,17 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             console.log('✅ Call accepted - connected to conference');
             setIsConnected(true);
             setIsConnecting(false);
+            
+            // Get and store media streams for mute functionality
+            try {
+              setTimeout(() => {
+                getCallStreams();
+                console.log('📞 Media streams captured for mute');
+              }, 500); // Wait a bit for streams to be ready
+            } catch (err) {
+              console.error('❌ Error capturing streams:', err);
+            }
+            
             onCallConnected && onCallConnected(call);
           });
 
@@ -387,74 +399,168 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     }
   };
 
-  // Mute/Unmute functionality - using media stream tracks
+  // Get media streams from the call - simplified approach
+  const getCallStreams = () => {
+    if (!activeConnection.current) {
+      return { local: null, remote: null };
+    }
+
+    try {
+      const call = activeConnection.current;
+      let localStream = null;
+      let remoteStream = null;
+
+      // Try to get peer connection to access tracks
+      const pc = call.getPeerConnection ? call.getPeerConnection() : 
+                  (call._peerConnection || call._pc || null);
+
+      if (pc) {
+        // Get local audio tracks (agent's microphone)
+        const localTracks = [];
+        pc.getSenders().forEach(sender => {
+          if (sender.track && sender.track.kind === 'audio') {
+            localTracks.push(sender.track);
+          }
+        });
+        if (localTracks.length > 0) {
+          localStream = new MediaStream(localTracks);
+        }
+
+        // Get remote audio tracks (customer's audio)
+        const remoteTracks = [];
+        pc.getReceivers().forEach(receiver => {
+          if (receiver.track && receiver.track.kind === 'audio') {
+            remoteTracks.push(receiver.track);
+          }
+        });
+        if (remoteTracks.length > 0) {
+          remoteStream = new MediaStream(remoteTracks);
+        }
+      }
+
+      // Fallback: Try direct methods if available
+      if (!localStream && typeof call.getLocalStream === 'function') {
+        localStream = call.getLocalStream();
+      }
+      if (!remoteStream && typeof call.getRemoteStream === 'function') {
+        remoteStream = call.getRemoteStream();
+      }
+
+      return { local: localStream, remote: remoteStream };
+    } catch (err) {
+      console.error('❌ Error getting call streams:', err);
+      return { local: null, remote: null };
+    }
+  };
+
+  // Mute/Unmute functionality - disable/enable local audio tracks
   const mute = () => {
     try {
-      if (activeConnection.current) {
-        // Try multiple approaches for muting
-        // Method 1: Use call's mute method if available (SDK 2.x)
-        if (typeof activeConnection.current.mute === 'function') {
-          activeConnection.current.mute();
+      if (!activeConnection.current || !isConnected) {
+        console.warn('⚠️ Cannot mute: call not connected');
+        return;
+      }
+
+      const call = activeConnection.current;
+      let muted = false;
+
+      // Try direct mute method first (if available in SDK)
+      if (typeof call.mute === 'function') {
+        call.mute(true);
+        setIsMuted(true);
+        muted = true;
+        console.log('✅ Call muted using call.mute(true)');
+      } else {
+        // Access tracks through peer connection
+        const { local } = getCallStreams();
+        if (local && local.getAudioTracks().length > 0) {
+          local.getAudioTracks().forEach(track => {
+            track.enabled = false;
+          });
           setIsMuted(true);
-          console.log('🔇 Call muted (using call.mute())');
-          return;
-        }
-        
-        // Method 2: Get local stream and disable audio tracks
-        if (typeof activeConnection.current.getLocalStream === 'function') {
-          const localStream = activeConnection.current.getLocalStream();
-          if (localStream) {
-            localStream.getAudioTracks().forEach(track => {
-              track.enabled = false;
+          muted = true;
+          console.log('✅ Call muted by disabling audio tracks');
+        } else {
+          // Try accessing peer connection directly
+          const pc = call.getPeerConnection ? call.getPeerConnection() : 
+                      (call._peerConnection || call._pc || null);
+          if (pc) {
+            pc.getSenders().forEach(sender => {
+              if (sender.track && sender.track.kind === 'audio') {
+                sender.track.enabled = false;
+                muted = true;
+              }
             });
-            setIsMuted(true);
-            console.log('🔇 Call muted (using track.enabled = false)');
-            return;
+            if (muted) {
+              setIsMuted(true);
+              console.log('✅ Call muted via peer connection');
+            }
           }
         }
-        
-        // Method 3: Try to get stream from device
-        if (device && typeof device.getAudioInputDevices === 'function') {
-          // This is a fallback - not ideal but might work
-          console.warn('⚠️ Using device-level mute (may not work)');
-        }
-        
-        console.warn('⚠️ Mute method not available - call object:', activeConnection.current);
+      }
+
+      if (!muted) {
+        console.error('❌ Cannot mute: no method available');
+        setError('Unable to mute call. Please try again.');
       }
     } catch (err) {
       console.error('❌ Error muting call:', err);
+      setError('Failed to mute call. Please try again.');
     }
   };
 
   const unmute = () => {
     try {
-      if (activeConnection.current) {
-        // Try multiple approaches for unmuting
-        // Method 1: Use call's unmute method if available (SDK 2.x)
-        if (typeof activeConnection.current.unmute === 'function') {
-          activeConnection.current.unmute();
+      if (!activeConnection.current || !isConnected) {
+        console.warn('⚠️ Cannot unmute: call not connected');
+        return;
+      }
+
+      const call = activeConnection.current;
+      let unmuted = false;
+
+      // Try direct unmute method first (if available in SDK)
+      if (typeof call.mute === 'function') {
+        call.mute(false);
+        setIsMuted(false);
+        unmuted = true;
+        console.log('✅ Call unmuted using call.mute(false)');
+      } else {
+        // Access tracks through peer connection
+        const { local } = getCallStreams();
+        if (local && local.getAudioTracks().length > 0) {
+          local.getAudioTracks().forEach(track => {
+            track.enabled = true;
+          });
           setIsMuted(false);
-          console.log('🔊 Call unmuted (using call.unmute())');
-          return;
-        }
-        
-        // Method 2: Get local stream and enable audio tracks
-        if (typeof activeConnection.current.getLocalStream === 'function') {
-          const localStream = activeConnection.current.getLocalStream();
-          if (localStream) {
-            localStream.getAudioTracks().forEach(track => {
-              track.enabled = true;
+          unmuted = true;
+          console.log('✅ Call unmuted by enabling audio tracks');
+        } else {
+          // Try accessing peer connection directly
+          const pc = call.getPeerConnection ? call.getPeerConnection() : 
+                      (call._peerConnection || call._pc || null);
+          if (pc) {
+            pc.getSenders().forEach(sender => {
+              if (sender.track && sender.track.kind === 'audio') {
+                sender.track.enabled = true;
+                unmuted = true;
+              }
             });
-            setIsMuted(false);
-            console.log('🔊 Call unmuted (using track.enabled = true)');
-            return;
+            if (unmuted) {
+              setIsMuted(false);
+              console.log('✅ Call unmuted via peer connection');
+            }
           }
         }
-        
-        console.warn('⚠️ Unmute method not available - call object:', activeConnection.current);
+      }
+
+      if (!unmuted) {
+        console.error('❌ Cannot unmute: no method available');
+        setError('Unable to unmute call. Please try again.');
       }
     } catch (err) {
       console.error('❌ Error unmuting call:', err);
+      setError('Failed to unmute call. Please try again.');
     }
   };
 
@@ -466,82 +572,6 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     }
   };
 
-  // Hold/Resume functionality - mute local and remote audio
-  const hold = () => {
-    try {
-      if (activeConnection.current) {
-        // Hold = mute local audio (agent can't hear customer, customer can't hear agent)
-        // Method 1: Use call's mute method
-        if (typeof activeConnection.current.mute === 'function') {
-          activeConnection.current.mute();
-          setIsOnHold(true);
-          setIsMuted(true); // Hold also mutes
-          console.log('⏸️ Call on hold (using call.mute())');
-          return;
-        }
-        
-        // Method 2: Disable local audio tracks
-        if (typeof activeConnection.current.getLocalStream === 'function') {
-          const localStream = activeConnection.current.getLocalStream();
-          if (localStream) {
-            localStream.getAudioTracks().forEach(track => {
-              track.enabled = false;
-            });
-            setIsOnHold(true);
-            setIsMuted(true); // Hold also mutes
-            console.log('⏸️ Call on hold (using track.enabled = false)');
-            return;
-          }
-        }
-        
-        console.warn('⚠️ Hold method not available - call object:', activeConnection.current);
-      }
-    } catch (err) {
-      console.error('❌ Error holding call:', err);
-    }
-  };
-
-  const resume = () => {
-    try {
-      if (activeConnection.current) {
-        // Resume = unmute local audio
-        // Method 1: Use call's unmute method
-        if (typeof activeConnection.current.unmute === 'function') {
-          activeConnection.current.unmute();
-          setIsOnHold(false);
-          setIsMuted(false); // Resume also unmutes
-          console.log('▶️ Call resumed (using call.unmute())');
-          return;
-        }
-        
-        // Method 2: Enable local audio tracks
-        if (typeof activeConnection.current.getLocalStream === 'function') {
-          const localStream = activeConnection.current.getLocalStream();
-          if (localStream) {
-            localStream.getAudioTracks().forEach(track => {
-              track.enabled = true;
-            });
-            setIsOnHold(false);
-            setIsMuted(false); // Resume also unmutes
-            console.log('▶️ Call resumed (using track.enabled = true)');
-            return;
-          }
-        }
-        
-        console.warn('⚠️ Resume method not available - call object:', activeConnection.current);
-      }
-    } catch (err) {
-      console.error('❌ Error resuming call:', err);
-    }
-  };
-
-  const toggleHold = () => {
-    if (isOnHold) {
-      resume();
-    } else {
-      hold();
-    }
-  };
 
   // Expose methods and state via ref
   useImperativeHandle(ref, () => ({
@@ -549,13 +579,8 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     mute,
     unmute,
     toggleMute,
-    hold,
-    resume,
-    toggleHold,
     isMuted: () => isMuted,
-    isOnHold: () => isOnHold,
-    getMutedState: () => isMuted,
-    getHoldState: () => isOnHold
+    getMutedState: () => isMuted
   }));
 
   if (!conferenceName) {
