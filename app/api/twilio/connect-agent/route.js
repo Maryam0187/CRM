@@ -41,6 +41,8 @@ export async function POST(request) {
     const joinConferenceUrl = `${getWebhookUrl('/api/twilio/join-conference')}?To=${encodeURIComponent(conferenceName)}`;
 
     console.log(`📞 Creating call for agent ${user.id} to join conference ${conferenceName}`);
+    console.log(`📞 From number: ${twilioPhoneNumber}`);
+    console.log(`📞 To number: client:${agentIdentity}`);
 
     // Use Twilio REST API to create a call using the TwiML App
     // This will use the TwiML App's Voice URL to connect to the conference
