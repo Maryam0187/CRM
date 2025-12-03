@@ -4,6 +4,9 @@ import sequelizeDb from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 
 export async function POST(request) {
+  let phoneNumber = null;
+  let formattedNumber = null;
+  
   try {
     // Validate JWT token
     const authResult = await requireJWTAuth(request);
@@ -23,11 +26,13 @@ export async function POST(request) {
       customerId,
       saleId,
       agentId, 
-      phoneNumber, 
+      phoneNumber: phoneNum, 
       callPurpose = 'follow_up',
       customMessage,
       recordCall = false // Ignored - recording is disabled
     } = body;
+    
+    phoneNumber = phoneNum;
     
     // Recording is always disabled
     const shouldRecord = false;
@@ -41,13 +46,21 @@ export async function POST(request) {
     }
 
     // Validate and format phone number
-    const formattedNumber = validatePhoneNumber(phoneNumber);
+    formattedNumber = validatePhoneNumber(phoneNumber);
     if (!formattedNumber) {
+      console.error('❌ Invalid phone number format:', phoneNumber);
       return NextResponse.json(
-        { success: false, message: 'Invalid phone number format' },
+        { success: false, message: `Invalid phone number format: ${phoneNumber}. Please use E.164 format (e.g., +1234567890)` },
         { status: 400 }
       );
     }
+    
+    console.log('📞 Phone number validation:', {
+      original: phoneNumber,
+      formatted: formattedNumber,
+      digitsOnly: phoneNumber.replace(/\D/g, ''),
+      length: phoneNumber.replace(/\D/g, '').length
+    });
 
     // Get Twilio client
     const client = getClient();
@@ -61,6 +74,11 @@ export async function POST(request) {
       );
     }
     
+    // Validate Twilio phone number format
+    const formattedTwilioNumber = validatePhoneNumber(twilioPhoneNumber);
+    if (!formattedTwilioNumber) {
+      console.warn('⚠️ Twilio phone number may not be in correct format:', twilioPhoneNumber);
+    }
 
     const statusCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
 
@@ -77,9 +95,31 @@ export async function POST(request) {
       // Note: record option is NOT set - calls will NOT be recorded
     };
     
+    console.log('📞 Call request details:', {
+      requestPayload: {
+        customerId,
+        saleId,
+        agentId,
+        phoneNumber,
+        callPurpose
+      },
+      twilioCallOptions: {
+        to: callOptions.to,
+        from: callOptions.from,
+        url: callOptions.url,
+        statusCallback: callOptions.statusCallback
+      },
+      validation: {
+        originalPhoneNumber: phoneNumber,
+        formattedPhoneNumber: formattedNumber,
+        twilioPhoneNumber: twilioPhoneNumber,
+        formattedTwilioNumber: formattedTwilioNumber || twilioPhoneNumber
+      }
+    });
+    
     const call = await client.calls.create(callOptions);
     
-    console.log('📞 Call created:', {
+    console.log('✅ Call created successfully:', {
       callSid: call.sid,
       status: call.status,
       to: call.to,
@@ -127,15 +167,49 @@ export async function POST(request) {
     });
 
   } catch (error) {
-    console.error('Error initiating call:', error);
+    console.error('❌ Error initiating call:', error);
+    console.error('❌ Error details:', {
+      code: error.code,
+      message: error.message,
+      status: error.status,
+      moreInfo: error.moreInfo,
+      stack: error.stack
+    });
+    
+    // Extract detailed error information
+    const errorCode = error.code;
+    const errorMessage = error.message || 'Failed to initiate call';
+    const errorStatus = error.status || 500;
+    
+    // Check for specific Twilio error patterns
+    let userMessage = errorMessage;
+    
+    if (errorMessage.includes('Account not allowed to call')) {
+      userMessage = `Account not allowed to call ${formattedNumber || phoneNumber}. This may be due to:
+- Geographic restrictions (check Twilio Console → Settings → Geo Permissions)
+- Number on deny list (high-risk for fraud)
+- Trial account limitations
+- Number verification required
+
+Please verify the number in Twilio Console or contact Twilio support.`;
+    } else if (errorCode === 21211) {
+      userMessage = `Invalid phone number format: ${formattedNumber || phoneNumber}. Please check the number and try again.`;
+    } else if (errorCode === 21212) {
+      userMessage = `Invalid destination number: ${formattedNumber || phoneNumber}. Please verify the number is correct.`;
+    } else if (errorMessage.includes('insufficient') || errorMessage.includes('balance')) {
+      userMessage = 'Insufficient account balance. Please add credits to your Twilio account.';
+    }
     
     return NextResponse.json(
       { 
         success: false, 
-        message: 'Failed to initiate call',
-        error: error.message 
+        message: userMessage,
+        error: errorMessage,
+        code: errorCode,
+        status: errorStatus,
+        moreInfo: error.moreInfo || null
       },
-      { status: 500 }
+      { status: errorStatus }
     );
   }
 }
