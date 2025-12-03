@@ -79,14 +79,17 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         const originalWarn = console.warn;
         const originalError = console.error;
         
-        // Filter out Twilio insights warnings
+        // Filter out Twilio insights warnings and errors
         console.warn = (...args) => {
           const message = args.join(' ');
           if (!message.includes('Cannot connect to insights') && 
               !message.includes('Unable to post') &&
               !message.includes('Failed to fetch') &&
               !message.includes('heartbeat') &&
-              !message.includes('WSTransport')) {
+              !message.includes('WSTransport') &&
+              !message.includes('dtls-transport-state') &&
+              !message.includes('connection disconnected') &&
+              !message.includes('quality-metrics')) {
             originalWarn.apply(console, args);
           }
         };
@@ -95,7 +98,10 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           const message = args.join(' ');
           if (!message.includes('Cannot connect to insights') && 
               !message.includes('Unable to post') &&
-              !message.includes('Failed to fetch')) {
+              !message.includes('Failed to fetch') &&
+              !message.includes('dtls-transport-state') &&
+              !message.includes('connection disconnected') &&
+              !message.includes('quality-metrics')) {
             originalError.apply(console, args);
           }
         };
