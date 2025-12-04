@@ -14,6 +14,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   const [isMuted, setIsMuted] = useState(false);
   const activeConnection = useRef(null);
   const localMediaStream = useRef(null); // Store local media stream for muting
+  const isCleaningUp = useRef(false); // Track if device cleanup is in progress
 
   const fetchToken = async () => {
     try {
@@ -79,37 +80,49 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         const originalWarn = console.warn;
         const originalError = console.error;
         
+        // Helper function to check if message should be filtered
+        const shouldFilterMessage = (message) => {
+          const lowerMessage = message.toLowerCase();
+          return lowerMessage.includes('cannot connect to insights') ||
+                 lowerMessage.includes('unable to post') ||
+                 (lowerMessage.includes('failed to fetch') && (lowerMessage.includes('insights') || lowerMessage.includes('eventpublisher'))) ||
+                 (lowerMessage.includes('heartbeat') && lowerMessage.includes('wstransport')) ||
+                 lowerMessage.includes('wstransport') ||
+                 lowerMessage.includes('dtls-transport-state') ||
+                 (lowerMessage.includes('connection disconnected') && lowerMessage.includes('insights')) ||
+                 lowerMessage.includes('quality-metrics') ||
+                 lowerMessage.includes('eventpublisher') ||
+                 (lowerMessage.includes('insights') && (lowerMessage.includes('error') || lowerMessage.includes('failed'))) ||
+                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('device') && (lowerMessage.includes('cannot') || lowerMessage.includes('failed')));
+        };
+        
         // Filter out Twilio insights warnings and errors
         console.warn = (...args) => {
           const message = args.join(' ');
-          if (!message.includes('Cannot connect to insights') && 
-              !message.includes('Unable to post') &&
-              !message.includes('Failed to fetch') &&
-              !message.includes('heartbeat') &&
-              !message.includes('WSTransport') &&
-              !message.includes('dtls-transport-state') &&
-              !message.includes('connection disconnected') &&
-              !message.includes('quality-metrics')) {
+          if (!shouldFilterMessage(message)) {
             originalWarn.apply(console, args);
           }
         };
         
         console.error = (...args) => {
           const message = args.join(' ');
-          if (!message.includes('Cannot connect to insights') && 
-              !message.includes('Unable to post') &&
-              !message.includes('Failed to fetch') &&
-              !message.includes('dtls-transport-state') &&
-              !message.includes('connection disconnected') &&
-              !message.includes('quality-metrics')) {
+          if (!shouldFilterMessage(message)) {
             originalError.apply(console, args);
           }
         };
         
-        // Restore console methods when device is destroyed
+        // Keep filtering active even after device is destroyed
+        // Don't restore console methods immediately - SDK may still send async insights
         twilioDevice.on('destroyed', () => {
-          console.warn = originalWarn;
-          console.error = originalError;
+          // Delay restoration to allow async SDK operations to complete
+          setTimeout(() => {
+            // Only restore if this device instance is still the current device
+            // This prevents restoring when a new device has been created
+            if (device === twilioDevice) {
+              console.warn = originalWarn;
+              console.error = originalError;
+            }
+          }, 2000); // Wait 2 seconds for async operations to complete
         });
 
         twilioDevice.on('registered', () => {
@@ -319,12 +332,19 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             localMediaStream.current = null; // Clear stored stream
             
             // Unregister device to stop heartbeat messages after call ends
-            if (device) {
+            // Only if not already cleaning up (to prevent double cleanup)
+            if (device && !isCleaningUp.current) {
               try {
+                isCleaningUp.current = true;
                 console.log('🧹 Unregistering device after call disconnect');
                 device.unregister();
               } catch (e) {
-                console.warn('⚠️ Error unregistering device (ignored):', e.message);
+                // Silently ignore - device might already be destroyed
+              } finally {
+                // Reset flag after a delay to allow for async operations
+                setTimeout(() => {
+                  isCleaningUp.current = false;
+                }, 1000);
               }
             }
             
@@ -493,6 +513,12 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   const hangUp = () => {
     console.log('📞 hangUp called');
     
+    // Prevent double cleanup
+    if (isCleaningUp.current) {
+      console.log('⚠️ Cleanup already in progress, skipping');
+      return;
+    }
+    
     let deviceDestroyed = false;
     let callDisconnected = false;
     
@@ -528,6 +554,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           console.log('📞 Disconnecting all calls using device.disconnectAll() (fallback)');
           device.disconnectAll();
           deviceDestroyed = true; // Mark that device is destroyed
+          isCleaningUp.current = true;
         } catch (e) {
           // Ignore errors - call might already be disconnected or in ringing state
           console.warn('⚠️ Error in device.disconnectAll (ignored):', e.message);
@@ -543,18 +570,31 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       localMediaStream.current = null; // Clear stored stream
       
       // Unregister device to stop heartbeat messages after hangup
-      // Only if device wasn't destroyed by disconnectAll()
-      if (device && !deviceDestroyed) {
-        try {
-          // Check if device is already destroyed before trying to unregister
-          // device.state might be 'destroyed' or we can check if unregister method exists
-          if (typeof device.unregister === 'function') {
-            console.log('🧹 Unregistering device after hangup');
-            device.unregister();
+      // Only if device wasn't destroyed by disconnectAll() and not already cleaning up
+      // Add a small delay to let disconnect operations complete first
+      if (device && !deviceDestroyed && !isCleaningUp.current) {
+        setTimeout(() => {
+          try {
+            isCleaningUp.current = true;
+            // Check if device is already destroyed before trying to unregister
+            if (device && typeof device.unregister === 'function') {
+              // Check device state if available
+              const deviceState = device.state || (device._state ? device._state() : null);
+              if (deviceState !== 'destroyed') {
+                console.log('🧹 Unregistering device after hangup');
+                device.unregister();
+              }
+            }
+          } catch (e) {
+            // Silently ignore - device might already be destroyed or unregistered
+            // These errors are harmless and expected during cleanup
+          } finally {
+            // Reset flag after cleanup completes
+            setTimeout(() => {
+              isCleaningUp.current = false;
+            }, 1000);
           }
-        } catch (e) {
-          console.warn('⚠️ Error unregistering device (ignored):', e.message);
-        }
+        }, 100); // Small delay to let disconnect complete
       }
       
       onCallDisconnected && onCallDisconnected();
