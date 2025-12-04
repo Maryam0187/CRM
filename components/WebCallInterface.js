@@ -317,6 +317,17 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnecting(false);
             activeConnection.current = null;
             localMediaStream.current = null; // Clear stored stream
+            
+            // Unregister device to stop heartbeat messages after call ends
+            if (device) {
+              try {
+                console.log('🧹 Unregistering device after call disconnect');
+                device.unregister();
+              } catch (e) {
+                console.warn('⚠️ Error unregistering device (ignored):', e.message);
+              }
+            }
+            
             onCallDisconnected && onCallDisconnected();
           });
 
@@ -337,6 +348,16 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(false);
             setIsConnecting(false);
             activeConnection.current = null;
+            
+            // Unregister device to stop heartbeat messages after call error
+            if (device) {
+              try {
+                console.log('🧹 Unregistering device after call error');
+                device.unregister();
+              } catch (e) {
+                console.warn('⚠️ Error unregistering device (ignored):', e.message);
+              }
+            }
           });
 
           call.addEventListener('reject', () => {
@@ -345,6 +366,16 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(false);
             setIsConnecting(false);
             activeConnection.current = null;
+            
+            // Unregister device to stop heartbeat messages after call rejection
+            if (device) {
+              try {
+                console.log('🧹 Unregistering device after call rejection');
+                device.unregister();
+              } catch (e) {
+                console.warn('⚠️ Error unregistering device (ignored):', e.message);
+              }
+            }
           });
         } else if (typeof call.on === 'function') {
           console.log('📞 Using .on() for events');
@@ -377,6 +408,17 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnecting(false);
             activeConnection.current = null;
             localMediaStream.current = null; // Clear stored stream
+            
+            // Unregister device to stop heartbeat messages after call ends
+            if (device) {
+              try {
+                console.log('🧹 Unregistering device after call disconnect');
+                device.unregister();
+              } catch (e) {
+                console.warn('⚠️ Error unregistering device (ignored):', e.message);
+              }
+            }
+            
             onCallDisconnected && onCallDisconnected();
           });
 
@@ -397,6 +439,16 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(false);
             setIsConnecting(false);
             activeConnection.current = null;
+            
+            // Unregister device to stop heartbeat messages after call error
+            if (device) {
+              try {
+                console.log('🧹 Unregistering device after call error');
+                device.unregister();
+              } catch (e) {
+                console.warn('⚠️ Error unregistering device (ignored):', e.message);
+              }
+            }
           });
 
           call.on('reject', () => {
@@ -405,6 +457,16 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(false);
             setIsConnecting(false);
             activeConnection.current = null;
+            
+            // Unregister device to stop heartbeat messages after call rejection
+            if (device) {
+              try {
+                console.log('🧹 Unregistering device after call rejection');
+                device.unregister();
+              } catch (e) {
+                console.warn('⚠️ Error unregistering device (ignored):', e.message);
+              }
+            }
           });
         } else {
           console.warn('⚠️ Call object does not support event listeners');
@@ -431,6 +493,9 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   const hangUp = () => {
     console.log('📞 hangUp called');
     
+    let deviceDestroyed = false;
+    let callDisconnected = false;
+    
     try {
       // Try to disconnect active connection if it exists
       if (activeConnection.current) {
@@ -446,6 +511,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           if (typeof call.disconnect === 'function') {
             console.log('📞 Disconnecting call using call.disconnect()');
             call.disconnect();
+            callDisconnected = true;
           }
         } catch (callErr) {
           // Ignore errors during disconnect - call might be in ringing state or not fully connected
@@ -455,12 +521,13 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         activeConnection.current = null;
       }
       
-      // Also try device-level disconnect if available (handles ringing calls and any state)
-      // This is the most reliable way to disconnect calls in any state
-      if (device && typeof device.disconnectAll === 'function') {
+      // Only use device.disconnectAll() as fallback if call.disconnect() failed or no active connection
+      // Note: disconnectAll() destroys the device, so we won't unregister afterwards
+      if (device && typeof device.disconnectAll === 'function' && !callDisconnected) {
         try {
-          console.log('📞 Disconnecting all calls using device.disconnectAll()');
+          console.log('📞 Disconnecting all calls using device.disconnectAll() (fallback)');
           device.disconnectAll();
+          deviceDestroyed = true; // Mark that device is destroyed
         } catch (e) {
           // Ignore errors - call might already be disconnected or in ringing state
           console.warn('⚠️ Error in device.disconnectAll (ignored):', e.message);
@@ -474,6 +541,22 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       setIsConnected(false);
       setIsConnecting(false);
       localMediaStream.current = null; // Clear stored stream
+      
+      // Unregister device to stop heartbeat messages after hangup
+      // Only if device wasn't destroyed by disconnectAll()
+      if (device && !deviceDestroyed) {
+        try {
+          // Check if device is already destroyed before trying to unregister
+          // device.state might be 'destroyed' or we can check if unregister method exists
+          if (typeof device.unregister === 'function') {
+            console.log('🧹 Unregistering device after hangup');
+            device.unregister();
+          }
+        } catch (e) {
+          console.warn('⚠️ Error unregistering device (ignored):', e.message);
+        }
+      }
+      
       onCallDisconnected && onCallDisconnected();
     }
   };
