@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import socketManager from '../../../../lib/socket';
+import { Op } from 'sequelize';
 
 export async function POST(request) {
   try {
@@ -85,6 +86,46 @@ export async function POST(request) {
     };
 
     await callLog.update(updateData);
+
+    // Update agent status based on call status
+    if (callLog.agentId) {
+      const agent = await sequelizeDb.User.findByPk(callLog.agentId);
+      if (agent) {
+        // Reset agent status to available when call ends
+        const endStatuses = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
+        if (endStatuses.includes(callStatus)) {
+          // Check if agent has other active calls
+          const activeCalls = await sequelizeDb.CallLog.count({
+            where: {
+              agentId: callLog.agentId,
+              status: {
+                [Op.in]: ['queued', 'ringing', 'in-progress']
+              }
+            }
+          });
+
+          // Only set to available if no other active calls
+          if (activeCalls === 0) {
+            await agent.update({ 
+              callStatus: 'available',
+              // Update total call time if call was completed
+              ...(callStatus === 'completed' && duration ? {
+                totalCallTime: (agent.totalCallTime || 0) + parseInt(duration)
+              } : {})
+            });
+            console.log(`✅ Agent ${callLog.agentId} status reset to 'available' - call ended`);
+          } else {
+            console.log(`⚠️ Agent ${callLog.agentId} still has ${activeCalls} active call(s), keeping status as 'busy'`);
+          }
+        } else if (callStatus === 'in-progress') {
+          // Ensure agent is marked as busy when call is in progress
+          if (agent.callStatus !== 'busy') {
+            await agent.update({ callStatus: 'busy' });
+            console.log(`📞 Agent ${callLog.agentId} status set to 'busy' - call in progress`);
+          }
+        }
+      }
+    }
 
     // If call is completed and has duration, update any related records
     if (callStatus === 'completed' && duration && duration > 0) {
