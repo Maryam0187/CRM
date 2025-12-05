@@ -18,11 +18,6 @@ export async function GET(request) {
 
     const users = await User.findAll({
       attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'cnic', 'phone', 'address', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'extension', 'sipUsername', 'sipDomain', 'callStatus', 'created_at', 'updated_at'],
-      where: {
-        role: {
-          [Op.ne]: 'admin' // Exclude admin users
-        }
-      },
       include: [
         {
           model: require('../../../models').SupervisorAgent,
