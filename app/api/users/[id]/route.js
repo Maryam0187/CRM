@@ -178,7 +178,18 @@ export async function PUT(request, { params }) {
     if (first_name) updateData.firstName = first_name;
     if (last_name) updateData.lastName = last_name;
     if (email) updateData.email = email.toLowerCase();
-    if (role) updateData.role = role;
+    
+    // Prevent changing admin role - if user is admin, don't allow role change
+    if (role && user.role !== 'admin') {
+      updateData.role = role;
+    } else if (role && user.role === 'admin' && role !== 'admin') {
+      // User is trying to change admin role - reject it
+      return NextResponse.json(
+        { error: 'Cannot change admin role. Admin role cannot be modified.' },
+        { status: 400 }
+      );
+    }
+    
     if (typeof is_active === 'boolean') updateData.isActive = is_active;
     
     // Handle optional phone field - clean and convert empty string to null

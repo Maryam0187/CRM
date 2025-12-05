@@ -50,7 +50,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
         last_name: user.last_name || '',
         email: user.email || '',
         password: '',
-        role: user.role || '',
+        role: user.role || '', // For admin users, this will be 'admin' and disabled
         phone: user.phone ? formatPhone(user.phone) : '',
         cnic: user.cnic ? formatCNIC(user.cnic) : '',
         address: user.address || '',
@@ -60,6 +60,14 @@ export default function UserForm({ user, onClose, onSuccess }) {
         sip_password: '', // Never show existing password
         sip_domain: user.sip_domain || ''
       });
+      
+      // Ensure admin role is always set for admin users
+      if (user.role === 'admin') {
+        setFormData(prev => ({
+          ...prev,
+          role: 'admin' // Force admin role
+        }));
+      }
       
       // If editing an agent user, fetch supervisors
       if (user.role === 'agent') {
@@ -353,7 +361,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
         first_name: formData.first_name,
         last_name: formData.last_name,
         email: formData.email,
-        role: formData.role,
+        role: isEditMode && user?.role === 'admin' ? 'admin' : formData.role, // Always keep admin role for admin users
         phone: formData.phone ? formData.phone.replace(/\D/g, '') : '',
         cnic: formData.cnic ? formData.cnic.replace(/\D/g, '') : '',
         address: formData.address
@@ -541,9 +549,11 @@ export default function UserForm({ user, onClose, onSuccess }) {
                   name="role"
                   value={formData.role}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                    isEditMode && user?.role === 'admin' ? 'bg-gray-100 cursor-not-allowed' : ''
+                  }`}
                   required
-                  disabled={loadingRoles}
+                  disabled={loadingRoles || (isEditMode && user?.role === 'admin')}
                 >
                   <option value="">Select Role</option>
                   {roles.map((role) => (
@@ -556,6 +566,9 @@ export default function UserForm({ user, onClose, onSuccess }) {
                   <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75">
                     <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
                   </div>
+                )}
+                {isEditMode && user?.role === 'admin' && (
+                  <p className="mt-1 text-xs text-gray-500">Admin role cannot be changed</p>
                 )}
               </div>
             </div>
