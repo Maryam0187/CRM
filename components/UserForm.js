@@ -19,7 +19,11 @@ export default function UserForm({ user, onClose, onSuccess }) {
     phone: '',
     cnic: '',
     address: '',
-    superiorId: ''
+    superiorId: '',
+    extension: '',
+    sip_username: '',
+    sip_password: '',
+    sip_domain: ''
   });
   
   const [roles, setRoles] = useState([]);
@@ -50,7 +54,11 @@ export default function UserForm({ user, onClose, onSuccess }) {
         phone: user.phone ? formatPhone(user.phone) : '',
         cnic: user.cnic ? formatCNIC(user.cnic) : '',
         address: user.address || '',
-        superiorId: user.superiorId || ''
+        superiorId: user.superiorId || '',
+        extension: user.extension || '',
+        sip_username: user.sip_username || '',
+        sip_password: '', // Never show existing password
+        sip_domain: user.sip_domain || ''
       });
       
       // If editing an agent user, fetch supervisors
@@ -70,7 +78,11 @@ export default function UserForm({ user, onClose, onSuccess }) {
         phone: '',
         cnic: '',
         address: '',
-        superiorId: ''
+        superiorId: '',
+        extension: '',
+        sip_username: '',
+        sip_password: '',
+        sip_domain: ''
       });
     }
   }, [user, isEditMode]);
@@ -88,7 +100,11 @@ export default function UserForm({ user, onClose, onSuccess }) {
         phone: '',
         cnic: '',
         address: '',
-        superiorId: ''
+        superiorId: '',
+        extension: '',
+        sip_username: '',
+        sip_password: '',
+        sip_domain: ''
       });
     }
   }, [isEditMode]);
@@ -189,7 +205,15 @@ export default function UserForm({ user, onClose, onSuccess }) {
         ...prev,
         [name]: formattedValue
       }));
-    } 
+    }
+    // Auto-fill sip_username when extension is entered
+    else if (name === 'extension') {
+      setFormData(prev => ({
+        ...prev,
+        extension: value,
+        sip_username: prev.sip_username || value // Auto-fill if sip_username is empty
+      }));
+    }
     else {
       setFormData(prev => ({
         ...prev,
@@ -343,6 +367,20 @@ export default function UserForm({ user, onClose, onSuccess }) {
       // Include superiorId for agents
       if (formData.role === 'agent' && formData.superiorId) {
         requestData.superiorId = formData.superiorId;
+      }
+
+      // Include SIP extension fields
+      if (formData.extension) {
+        requestData.extension = formData.extension;
+      }
+      if (formData.sip_username) {
+        requestData.sip_username = formData.sip_username;
+      }
+      if (formData.sip_password) {
+        requestData.sip_password = formData.sip_password;
+      }
+      if (formData.sip_domain) {
+        requestData.sip_domain = formData.sip_domain;
       }
 
       const response = method === 'POST' 
@@ -552,6 +590,82 @@ export default function UserForm({ user, onClose, onSuccess }) {
                 </div>
               </div>
             )}
+
+            {/* SIP Extension Section */}
+            <div className="md:col-span-2 border-t pt-4 mt-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">SIP Extension Configuration</h3>
+              
+              {/* Extension */}
+              <div className="mb-4">
+                <label htmlFor="extension" className="block mb-2 text-sm font-medium text-gray-900">
+                  Extension Number
+                </label>
+                <input
+                  type="text"
+                  id="extension"
+                  name="extension"
+                  value={formData.extension}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="201, 202, 203, etc."
+                  pattern="[0-9]+"
+                  title="Extension must be numbers only"
+                />
+                <p className="mt-1 text-xs text-gray-500">Unique extension number for this agent (e.g., 201, 202, 203)</p>
+              </div>
+
+              {/* SIP Username */}
+              <div className="mb-4">
+                <label htmlFor="sip_username" className="block mb-2 text-sm font-medium text-gray-900">
+                  SIP Username
+                </label>
+                <input
+                  type="text"
+                  id="sip_username"
+                  name="sip_username"
+                  value={formData.sip_username}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="201 (usually same as extension)"
+                />
+                <p className="mt-1 text-xs text-gray-500">SIP username (usually same as extension number)</p>
+              </div>
+
+              {/* SIP Password */}
+              <div className="mb-4">
+                <label htmlFor="sip_password" className="block mb-2 text-sm font-medium text-gray-900">
+                  SIP Password {isEditMode && <span className="text-gray-500 text-xs">(leave empty to keep current)</span>}
+                </label>
+                <input
+                  type="password"
+                  id="sip_password"
+                  name="sip_password"
+                  value={formData.sip_password}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder={isEditMode ? "Enter new password or leave empty" : "Enter SIP password"}
+                  autoComplete="new-password"
+                />
+                <p className="mt-1 text-xs text-gray-500">Password for SIP authentication (must match Twilio credential list)</p>
+              </div>
+
+              {/* SIP Domain */}
+              <div className="mb-4">
+                <label htmlFor="sip_domain" className="block mb-2 text-sm font-medium text-gray-900">
+                  SIP Domain
+                </label>
+                <input
+                  type="text"
+                  id="sip_domain"
+                  name="sip_domain"
+                  value={formData.sip_domain}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="crm-sip.sip.twilio.com"
+                />
+                <p className="mt-1 text-xs text-gray-500">SIP domain URL (defaults to environment variable if not set)</p>
+              </div>
+            </div>
 
             {/* Password Fields (only for new users) */}
             {!isEditMode && (

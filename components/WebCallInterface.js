@@ -32,12 +32,13 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     }
   };
 
-  // Setup device only when conferenceName is provided and user is available
+  // Setup device only when user is available
+  // Note: With SIP, conferenceName is not needed - calls route directly to agent extension
   useEffect(() => {
-    if (!conferenceName || !user) {
-      // Clean up device if conferenceName or user is removed
+    if (!user) {
+      // Clean up device if user is removed
       if (device) {
-        console.log('🧹 Cleaning up device: conferenceName or user removed');
+        console.log('🧹 Cleaning up device: user removed');
         try {
           if (activeConnection.current) {
             activeConnection.current.disconnect();
@@ -52,6 +53,13 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           console.error('Error cleaning up device:', e);
         }
       }
+      return;
+    }
+    
+    // With SIP, we don't need to join a conference - the call comes directly to the agent
+    // WebCallInterface is kept for potential future use or as fallback
+    if (!conferenceName) {
+      console.log('📞 SIP call - no conference needed, call routes directly to agent extension');
       return;
     }
 
@@ -1108,8 +1116,10 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     getMutedState: () => isMuted
   }));
 
+  // With SIP, conferenceName is not required - calls route directly to agent extension
+  // WebCallInterface is optional for SIP calls
   if (!conferenceName) {
-    return null;
+    return null; // Return null if no conference (SIP calls don't need it)
   }
 
   return (

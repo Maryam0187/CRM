@@ -22,7 +22,6 @@ const CallButton = ({
   // Core call state
   const [isCalling, setIsCalling] = useState(false);
   const [currentCallSid, setCurrentCallSid] = useState(null);
-  const [conferenceName, setConferenceName] = useState(null);
   const [showWebInterface, setShowWebInterface] = useState(false);
   const [isWebCallConnected, setIsWebCallConnected] = useState(false);
   const [error, setError] = useState(null);
@@ -200,8 +199,6 @@ const CallButton = ({
         setIsCalling(false);
         setIsWebCallConnected(false);
         setShowWebInterface(false);
-        // Clear conference name to trigger device cleanup
-        setConferenceName(null);
         setTimeout(() => {
           setCurrentCallSid(null);
           setCallTimer(0);
@@ -249,7 +246,7 @@ const CallButton = ({
 
       if (result.success) {
         setCurrentCallSid(result.data.callSid);
-        setConferenceName(result.data.conferenceName || `call-${user.id}`);
+        // SIP calls route directly to agent extension - no conference needed
         setShowWebInterface(true);
         
         if (onCallInitiated) {
@@ -332,9 +329,6 @@ const CallButton = ({
     setShowWebInterface(false);
     setError(null);
     setIsMuted(false);
-    
-    // Clear conference name to trigger device cleanup
-    setConferenceName(null);
     
     // Notify parent
     if (onCallCompleted && completedCallSid) {
@@ -794,11 +788,12 @@ const CallButton = ({
       )}
 
       {/* Web Call Interface - hidden, works in background */}
-      {showWebInterface && conferenceName && (
+      {/* Note: With SIP, calls route directly to agent extension - WebCallInterface may not be needed */}
+      {showWebInterface && (
         <div className="hidden">
           <WebCallInterface
             ref={webCallInterfaceRef}
-            conferenceName={conferenceName}
+            conferenceName={null}
             onCallConnected={() => {
               setIsWebCallConnected(true);
               // Sync mute state periodically

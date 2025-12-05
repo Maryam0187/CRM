@@ -2,6 +2,18 @@ import { NextResponse } from 'next/server';
 import { getClient, validatePhoneNumber, getWebhookUrl } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
+import crypto from 'crypto';
+
+// Helper to encrypt SIP password (not used here but kept for consistency)
+function encryptSipPassword(password) {
+  const algorithm = 'aes-256-cbc';
+  const key = Buffer.from(process.env.ENCRYPTION_KEY || 'default-key-32-chars-long!!', 'utf8');
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv(algorithm, key, iv);
+  let encrypted = cipher.update(password, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return iv.toString('hex') + ':' + encrypted;
+}
 
 export async function POST(request) {
   let phoneNumber = null;
@@ -17,26 +29,20 @@ export async function POST(request) {
       );
     }
 
+    const user = authResult.user;
     const body = await request.json();
-    
-    // Call recording is DISABLED - no calls will be recorded
-    const recordingEnabled = false;
     
     const {
       customerId,
       saleId,
-      agentId, 
-      phoneNumber: phoneNum, 
+      agentId = user.id,
+      phoneNumber: phoneNum,
       callPurpose = 'follow_up',
-      customMessage,
-      recordCall = false // Ignored - recording is disabled
+      customMessage
     } = body;
     
     phoneNumber = phoneNum;
     
-    // Recording is always disabled
-    const shouldRecord = false;
-
     // Validate required fields
     if (!agentId || !phoneNumber) {
       return NextResponse.json(
@@ -45,22 +51,48 @@ export async function POST(request) {
       );
     }
 
-    // Validate and format phone number
-    formattedNumber = validatePhoneNumber(phoneNumber);
-    if (!formattedNumber) {
-      console.error('❌ Invalid phone number format:', phoneNumber);
+    // Get agent with SIP extension
+    const agent = await sequelizeDb.User.findByPk(parseInt(agentId), {
+      attributes: ['id', 'firstName', 'lastName', 'extension', 'sipUsername', 'sipDomain', 'callStatus']
+    });
+
+    if (!agent) {
       return NextResponse.json(
-        { success: false, message: `Invalid phone number format: ${phoneNumber}. Please use E.164 format (e.g., +1234567890)` },
+        { success: false, message: 'Agent not found' },
+        { status: 404 }
+      );
+    }
+
+    // Check if agent has SIP extension configured
+    if (!agent.extension || !agent.sipUsername) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: 'Agent does not have SIP extension configured. Please assign an extension first.' 
+        },
         { status: 400 }
       );
     }
-    
-    console.log('📞 Phone number validation:', {
-      original: phoneNumber,
-      formatted: formattedNumber,
-      digitsOnly: phoneNumber.replace(/\D/g, ''),
-      length: phoneNumber.replace(/\D/g, '').length
-    });
+
+    // Check if agent is available
+    if (agent.callStatus === 'busy') {
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: 'Agent is currently busy on another call' 
+        },
+        { status: 409 }
+      );
+    }
+
+    // Validate and format phone number
+    formattedNumber = validatePhoneNumber(phoneNumber);
+    if (!formattedNumber) {
+      return NextResponse.json(
+        { success: false, message: `Invalid phone number format: ${phoneNumber}` },
+        { status: 400 }
+      );
+    }
 
     // Get Twilio client
     const client = getClient();
@@ -73,58 +105,56 @@ export async function POST(request) {
         { status: 500 }
       );
     }
-    
-    // Validate Twilio phone number format
-    const formattedTwilioNumber = validatePhoneNumber(twilioPhoneNumber);
-    if (!formattedTwilioNumber) {
-      console.warn('⚠️ Twilio phone number may not be in correct format:', twilioPhoneNumber);
+
+    // Get SIP domain from agent or environment
+    const sipDomain = agent.sipDomain || process.env.TWILIO_SIP_DOMAIN || process.env.TWILIO_SIP_DEFAULT_DOMAIN;
+    if (!sipDomain) {
+      return NextResponse.json(
+        { success: false, message: 'SIP domain not configured' },
+        { status: 500 }
+      );
     }
 
+    // Build SIP URI for agent extension
+    const agentSipUri = `sip:${agent.sipUsername}@${sipDomain}`;
+    
     const statusCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
-
     const voiceUrl = `${getWebhookUrl('/api/twilio/voice-response')}?agentId=${agentId}`;
+
+    console.log('📞 SIP Call Initiation:', {
+      agentId: agent.id,
+      extension: agent.extension,
+      sipUri: agentSipUri,
+      customerPhone: formattedNumber,
+      sipDomain: sipDomain
+    });
+
+    // Create call: Customer → Twilio → SIP Domain → Agent Extension
     const callOptions = {
       url: voiceUrl,
-      to: formattedNumber,
+      to: formattedNumber,  // Customer phone number
       from: twilioPhoneNumber,
       statusCallback: statusCallbackUrl,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-      // Disable machine detection to eliminate delay - connect immediately when customer answers
-      // machineDetection: 'Enable', // REMOVED - causes ~10 second delay
-      answerOnMedia: false // Connect immediately, don't wait for media
-      // Note: record option is NOT set - calls will NOT be recorded
+      // Route agent via SIP Domain
+      // We'll dial the customer first, then connect to agent via SIP in the voice response
+      answerOnMedia: false
     };
-    
-    console.log('📞 Call request details:', {
-      requestPayload: {
-        customerId,
-        saleId,
-        agentId,
-        phoneNumber,
-        callPurpose
-      },
-      twilioCallOptions: {
-        to: callOptions.to,
-        from: callOptions.from,
-        url: callOptions.url,
-        statusCallback: callOptions.statusCallback
-      },
-      validation: {
-        originalPhoneNumber: phoneNumber,
-        formattedPhoneNumber: formattedNumber,
-        twilioPhoneNumber: twilioPhoneNumber,
-        formattedTwilioNumber: formattedTwilioNumber || twilioPhoneNumber
-      }
-    });
-    
+
     const call = await client.calls.create(callOptions);
     
-    console.log('✅ Call created successfully:', {
+    console.log('✅ SIP Call created successfully:', {
       callSid: call.sid,
       status: call.status,
       to: call.to,
-      from: call.from,
-      direction: call.direction
+      from: call.from
+    });
+
+    // Update agent status to busy
+    await agent.update({ 
+      callStatus: 'busy',
+      lastCallTime: new Date(),
+      totalCalls: (agent.totalCalls || 0) + 1
     });
 
     // Create call log entry
@@ -145,14 +175,12 @@ export async function POST(request) {
         from: call.from,
         status: call.status,
         direction: call.direction,
-        startTime: call.startTime,
-        endTime: call.endTime
+        sipUri: agentSipUri,
+        extension: agent.extension
       }
     });
 
-    // Conference name for agent to join via web
-    const conferenceName = `call-${agentId}`;
-
+    // Return SIP connection info for agent
     return NextResponse.json({
       success: true,
       data: {
@@ -161,41 +189,27 @@ export async function POST(request) {
         to: call.to,
         from: call.from,
         callLogId: callLog.id,
-        conferenceName: conferenceName
+        extension: agent.extension,
+        sipUri: agentSipUri,
+        sipDomain: sipDomain,
+        message: 'Call initiated - agent should connect via SIP extension'
       },
-      message: 'Call initiated successfully - join via web interface'
+      message: 'Call initiated successfully via SIP trunking'
     });
 
   } catch (error) {
-    console.error('❌ Error initiating call:', error);
-    console.error('❌ Error details:', {
-      code: error.code,
-      message: error.message,
-      status: error.status,
-      moreInfo: error.moreInfo,
-      stack: error.stack
-    });
+    console.error('❌ Error initiating SIP call:', error);
     
-    // Extract detailed error information
     const errorCode = error.code;
     const errorMessage = error.message || 'Failed to initiate call';
     const errorStatus = error.status || 500;
     
-    // Check for specific Twilio error patterns
     let userMessage = errorMessage;
     
     if (errorMessage.includes('Account not allowed to call')) {
-      userMessage = `Account not allowed to call ${formattedNumber || phoneNumber}. This may be due to:
-- Geographic restrictions (check Twilio Console → Settings → Geo Permissions)
-- Number on deny list (high-risk for fraud)
-- Trial account limitations
-- Number verification required
-
-Please verify the number in Twilio Console or contact Twilio support.`;
+      userMessage = `Account not allowed to call ${formattedNumber || phoneNumber}. Please verify the number in Twilio Console.`;
     } else if (errorCode === 21211) {
-      userMessage = `Invalid phone number format: ${formattedNumber || phoneNumber}. Please check the number and try again.`;
-    } else if (errorCode === 21212) {
-      userMessage = `Invalid destination number: ${formattedNumber || phoneNumber}. Please verify the number is correct.`;
+      userMessage = `Invalid phone number format: ${formattedNumber || phoneNumber}`;
     } else if (errorMessage.includes('insufficient') || errorMessage.includes('balance')) {
       userMessage = 'Insufficient account balance. Please add credits to your Twilio account.';
     }
@@ -206,8 +220,7 @@ Please verify the number in Twilio Console or contact Twilio support.`;
         message: userMessage,
         error: errorMessage,
         code: errorCode,
-        status: errorStatus,
-        moreInfo: error.moreInfo || null
+        status: errorStatus
       },
       { status: errorStatus }
     );

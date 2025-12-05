@@ -105,6 +105,59 @@ module.exports = (sequelize) => {
       allowNull: true,
       defaultValue: 'not_set',
       field: 'location_permission'
+    },
+    // SIP Extension fields
+    extension: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+      unique: true,
+      comment: 'SIP extension number (e.g., 201, 202, 203)'
+    },
+    sipUsername: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      unique: true,
+      field: 'sip_username',
+      comment: 'SIP username (usually same as extension)'
+    },
+    sipPassword: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: 'sip_password',
+      comment: 'Encrypted SIP password'
+    },
+    sipDomain: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      field: 'sip_domain',
+      comment: 'SIP domain URL (e.g., crm-sip.sip.us1.twilio.com)'
+    },
+    callStatus: {
+      type: DataTypes.ENUM('available', 'busy', 'away', 'offline'),
+      allowNull: true,
+      defaultValue: 'offline',
+      field: 'call_status',
+      comment: 'Agent call status for routing'
+    },
+    lastCallTime: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'last_call_time',
+      comment: 'Timestamp of last call'
+    },
+    totalCalls: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 0,
+      field: 'total_calls',
+      comment: 'Total number of calls made by agent'
+    },
+    totalCallTime: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 0,
+      field: 'total_call_time',
+      comment: 'Total call time in seconds'
     }
   }, {
     tableName: 'users',
