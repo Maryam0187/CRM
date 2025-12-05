@@ -179,16 +179,12 @@ export async function PUT(request, { params }) {
     if (last_name) updateData.lastName = last_name;
     if (email) updateData.email = email.toLowerCase();
     
-    // Prevent changing admin role - if user is admin, don't allow role change
+    // Only update role if provided and user is not admin
+    // Admin role is never sent from frontend, so we don't need to check for role changes
     if (role && user.role !== 'admin') {
       updateData.role = role;
-    } else if (role && user.role === 'admin' && role !== 'admin') {
-      // User is trying to change admin role - reject it
-      return NextResponse.json(
-        { error: 'Cannot change admin role. Admin role cannot be modified.' },
-        { status: 400 }
-      );
     }
+    // If role is provided for admin user, ignore it (frontend shouldn't send it, but just in case)
     
     if (typeof is_active === 'boolean') updateData.isActive = is_active;
     

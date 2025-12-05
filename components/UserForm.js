@@ -361,11 +361,16 @@ export default function UserForm({ user, onClose, onSuccess }) {
         first_name: formData.first_name,
         last_name: formData.last_name,
         email: formData.email,
-        role: isEditMode && user?.role === 'admin' ? 'admin' : formData.role, // Always keep admin role for admin users
         phone: formData.phone ? formData.phone.replace(/\D/g, '') : '',
         cnic: formData.cnic ? formData.cnic.replace(/\D/g, '') : '',
         address: formData.address
       };
+
+      // Only include role if not editing an admin user
+      // Admin role cannot be changed, so don't send it in the request
+      if (!(isEditMode && user?.role === 'admin')) {
+        requestData.role = formData.role;
+      }
 
       // Only include password for new users
       if (!isEditMode) {
