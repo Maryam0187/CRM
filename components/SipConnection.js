@@ -355,18 +355,43 @@ export function SipConnectionProvider({ children }) {
 
   // Initialize when user logs in
   useEffect(() => {
+    if (user) {
+      // Debug: Log user object to see what fields are available
+      console.log('👤 User object for SIP connection:', {
+        id: user.id,
+        extension: user.extension,
+        sipUsername: user.sipUsername,
+        sipDomain: user.sipDomain,
+        hasExtension: !!user.extension,
+        hasSipUsername: !!user.sipUsername,
+        hasSipDomain: !!user.sipDomain,
+        allUserKeys: Object.keys(user).filter(k => k.includes('sip') || k.includes('extension') || k === 'id')
+      });
+    }
+
     if (user && hasSipConfig()) {
       console.log('👤 User logged in with SIP config, connecting to SIP domain...');
       connectToSip();
     } else {
-      console.log('⚠️ User not configured for SIP, skipping connection');
+      if (user) {
+        console.log('⚠️ User not configured for SIP - missing fields:', {
+          hasExtension: !!user.extension,
+          hasSipUsername: !!user.sipUsername,
+          hasSipDomain: !!user.sipDomain,
+          extension: user.extension,
+          sipUsername: user.sipUsername,
+          sipDomain: user.sipDomain
+        });
+      } else {
+        console.log('⚠️ User not configured for SIP - user is null');
+      }
       setIsRegistered(false);
     }
 
     return () => {
       disconnectFromSip();
     };
-  }, [user?.id, user?.extension, user?.sipUsername]);
+  }, [user?.id, user?.extension, user?.sipUsername, user?.sipDomain]);
 
   // Cleanup on unmount
   useEffect(() => {

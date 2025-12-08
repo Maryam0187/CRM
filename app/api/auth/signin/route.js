@@ -302,7 +302,11 @@ export async function POST(request) {
       location_timestamp: user.locationTimestamp,
       location_permission: user.locationPermission,
       supervisor: supervisorInfo,
-      supervisedAgents: supervisedAgents
+      supervisedAgents: supervisedAgents,
+      // SIP extension fields for SIP trunking
+      extension: user.extension || null,
+      sipUsername: user.sipUsername || null,
+      sipDomain: user.sipDomain || null
     };
 
     // Generate JWT tokens
