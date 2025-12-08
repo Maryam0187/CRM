@@ -146,7 +146,8 @@ export async function POST(request) {
     await callLog.update(updateData);
 
     // Update agent status based on call status
-    if (callLog.agentId) {
+    // IMPORTANT: Only update agent status for parent calls (customer leg), not child calls (agent SIP leg)
+    if (callLog.agentId && !parentCallSid) {
       const agent = await sequelizeDb.User.findByPk(callLog.agentId);
       if (agent) {
         // Reset agent status to available when call ends
@@ -156,6 +157,7 @@ export async function POST(request) {
           const activeCalls = await sequelizeDb.CallLog.count({
             where: {
               agentId: callLog.agentId,
+              callSid: { [Op.ne]: callSid }, // Exclude current call
               status: {
                 [Op.in]: ['queued', 'ringing', 'in-progress']
               }
@@ -171,7 +173,7 @@ export async function POST(request) {
                 totalCallTime: (agent.totalCallTime || 0) + parseInt(duration)
               } : {})
             });
-            console.log(`✅ Agent ${callLog.agentId} status reset to 'available' - call ended`);
+            console.log(`✅ Agent ${callLog.agentId} status reset to 'available' - call ended (no other active calls)`);
           } else {
             console.log(`⚠️ Agent ${callLog.agentId} still has ${activeCalls} active call(s), keeping status as 'busy'`);
           }
@@ -181,8 +183,16 @@ export async function POST(request) {
             await agent.update({ callStatus: 'busy' });
             console.log(`📞 Agent ${callLog.agentId} status set to 'busy' - call in progress`);
           }
+        } else if (callStatus === 'ringing') {
+          // Mark agent as busy when call is ringing
+          if (agent.callStatus !== 'busy') {
+            await agent.update({ callStatus: 'busy' });
+            console.log(`📞 Agent ${callLog.agentId} status set to 'busy' - call ringing`);
+          }
         }
       }
+    } else if (parentCallSid) {
+      console.log(`ℹ️ Skipping agent status update - this is a child call leg (agent SIP), only parent call updates agent status`);
     }
 
     // If call is completed and has duration, update any related records
