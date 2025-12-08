@@ -51,20 +51,36 @@ export function SipConnectionProvider({ children }) {
   // Get decrypted SIP password from API
   const getSipPassword = async () => {
     if (!user || !user.id) {
+      console.error('❌ Cannot get SIP password: user not available');
       return null;
     }
 
     try {
+      console.log('🔐 Fetching SIP password from API...');
       const response = await apiClient.get('/api/agents/sip-password');
       const data = await response.json();
       
-      if (data.success && data.data) {
+      if (!response.ok) {
+        console.error('❌ SIP password API error:', {
+          status: response.status,
+          statusText: response.statusText,
+          data: data
+        });
+        return null;
+      }
+      
+      if (data.success && data.data && data.data.password) {
+        console.log('✅ SIP password retrieved successfully');
         return data.data.password;
       }
       
+      console.error('❌ SIP password not in response:', data);
       return null;
     } catch (err) {
-      console.error('Error getting SIP password:', err);
+      console.error('❌ Error getting SIP password:', {
+        message: err.message,
+        stack: err.stack
+      });
       return null;
     }
   };
@@ -97,6 +113,11 @@ export function SipConnectionProvider({ children }) {
         throw new Error('SIP password not available. Please contact administrator.');
       }
 
+      // Validate SIP configuration
+      if (!user.sipDomain || !user.sipUsername) {
+        throw new Error('SIP configuration incomplete. Missing domain or username.');
+      }
+
       // Build SIP URI and WebSocket server
       const sipDomain = user.sipDomain;
       const sipUri = `sip:${user.sipUsername}@${sipDomain}`;
@@ -104,15 +125,17 @@ export function SipConnectionProvider({ children }) {
 
       console.log('📞 SIP URI:', sipUri);
       console.log('📞 Server:', server);
+      console.log('📞 Password length:', password ? password.length : 0);
+      console.log('📞 Username:', user.sipUsername);
 
       // Create SIP.js UserAgent
       const userAgentOptions = {
         uri: UserAgent.makeURI(sipUri),
         transportOptions: {
           server: server,
-          connectionTimeout: 30,
-          maxReconnectionAttempts: 10,
-          reconnectionTimeout: 4
+          connectionTimeout: 30
+          // Note: maxReconnectionAttempts and reconnectionTimeout are deprecated in SIP.js 0.16.0+
+          // Reconnection is now handled by the application logic in handleReconnect()
         },
         authorizationUsername: user.sipUsername,
         authorizationPassword: password,
@@ -150,6 +173,12 @@ export function SipConnectionProvider({ children }) {
         console.log('⚠️ SIP UserAgent disconnected', error);
         setIsRegistered(false);
         if (error) {
+          console.error('❌ Disconnect error details:', {
+            message: error.message,
+            code: error.code,
+            reason: error.reason,
+            cause: error.cause
+          });
           handleReconnect();
         }
       };
@@ -158,9 +187,38 @@ export function SipConnectionProvider({ children }) {
         console.log('📨 SIP message received:', message);
       };
 
-      // Start the UserAgent
-      await ua.start();
-      console.log('✅ SIP UserAgent started');
+      // Start the UserAgent with error handling
+      try {
+        await ua.start();
+        console.log('✅ SIP UserAgent started');
+        
+        // Handle transport errors after start (WebSocket connection issues)
+        // Transport is available after start() is called
+        if (ua.transport) {
+          ua.transport.onConnect = () => {
+            console.log('✅ WebSocket transport connected');
+          };
+
+          ua.transport.onDisconnect = (error) => {
+            console.error('❌ WebSocket transport disconnected:', {
+              error: error?.message || error,
+              code: error?.code,
+              reason: error?.reason
+            });
+          };
+
+          ua.transport.onMessage = (message) => {
+            console.log('📨 WebSocket message:', message);
+          };
+        }
+      } catch (startError) {
+        console.error('❌ Error starting UserAgent:', {
+          message: startError.message,
+          code: startError.code,
+          stack: startError.stack
+        });
+        throw new Error(`Failed to start SIP UserAgent: ${startError.message}`);
+      }
 
       // Create Registerer and register
       const registererOptions = {
@@ -200,7 +258,26 @@ export function SipConnectionProvider({ children }) {
 
     } catch (err) {
       console.error('❌ Error connecting to SIP:', err);
-      setError(err.message || 'Failed to connect to SIP domain');
+      console.error('❌ Error details:', {
+        message: err.message,
+        name: err.name,
+        code: err.code,
+        cause: err.cause,
+        stack: err.stack
+      });
+      
+      // Provide more specific error messages
+      let errorMessage = err.message || 'Failed to connect to SIP domain';
+      if (err.message?.includes('WebSocket') || err.message?.includes('1006')) {
+        errorMessage = 'WebSocket connection failed. This may be due to:\n' +
+          '1. Network connectivity issues\n' +
+          '2. Incorrect SIP domain or credentials\n' +
+          '3. Firewall blocking WebSocket connections\n' +
+          '4. Twilio SIP domain not properly configured\n' +
+          `Original error: ${err.message}`;
+      }
+      
+      setError(errorMessage);
       setIsConnecting(false);
       setIsRegistered(false);
       handleReconnect();
