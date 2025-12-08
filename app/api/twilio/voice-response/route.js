@@ -58,8 +58,14 @@ async function handleVoiceResponse(request) {
             const agentSipUri = `sip:${agent.sipUsername}@${sipDomain}`;
             console.log(`📞 Routing to agent via SIP Domain: ${agent.extension} (${agentSipUri})`);
             
-            // Dial agent via SIP Domain
-            twiml += `\n  <Dial timeout="30" timeLimit="3600" answerOnMedia="false" record="false">`;
+            // Dial agent via SIP Domain with proper error handling
+            // timeout: How long to ring before giving up (60 seconds to give agent time to connect)
+            // timeLimit: Maximum call duration (3600 seconds = 1 hour)
+            // answerOnMedia: false = connect immediately, don't wait for media
+            // hangupOnStar: false = don't hangup on *
+            // action: URL to call if dial fails (no-answer, busy, etc.)
+            const dialActionUrl = `${getWebhookUrl('/api/twilio/dial-status')}?agentId=${agentId}`;
+            twiml += `\n  <Dial timeout="60" timeLimit="3600" answerOnMedia="false" record="false" hangupOnStar="false" action="${dialActionUrl}">`;
             twiml += `\n    <Sip>${agentSipUri}</Sip>`;
             twiml += `\n  </Dial>`;
           } else {

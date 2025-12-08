@@ -9,6 +9,7 @@ export async function POST(request) {
     
     // Extract call data from Twilio webhook
     const callSid = formData.get('CallSid');
+    const parentCallSid = formData.get('ParentCallSid'); // Child call leg from <Dial>
     const callStatus = formData.get('CallStatus');
     const direction = formData.get('Direction');
     const from = formData.get('From');
@@ -21,6 +22,7 @@ export async function POST(request) {
 
     console.log('📞 Call status callback received:', {
       callSid,
+      parentCallSid,
       callStatus,
       direction,
       from,
@@ -38,12 +40,49 @@ export async function POST(request) {
       console.log('🔔 RINGING STATUS DETECTED - This should trigger the ringing state!');
     }
 
-    // Find the call log by call SID
-    const callLog = await sequelizeDb.CallLog.findOne({
+    // Find the call log by call SID (try parent first if this is a child call)
+    let callLog = await sequelizeDb.CallLog.findOne({
       where: { callSid }
     });
 
+    // If not found and this is a child call (has ParentCallSid), find by parent
+    if (!callLog && parentCallSid) {
+      console.log(`📞 Child call leg detected (CallSid: ${callSid}, ParentCallSid: ${parentCallSid})`);
+      callLog = await sequelizeDb.CallLog.findOne({
+        where: { callSid: parentCallSid }
+      });
+      
+      if (callLog) {
+        console.log(`✅ Found parent call log for child leg: ${parentCallSid}`);
+        // Update twilioData to include child call info
+        const twilioData = callLog.twilioData || {};
+        if (!twilioData.childCalls) {
+          twilioData.childCalls = [];
+        }
+        // Store child call info for reference
+        twilioData.childCalls.push({
+          callSid,
+          status: callStatus,
+          from,
+          to,
+          duration,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+
+    // If still not found, this might be a child call leg we should ignore
+    // (agent SIP leg) - we only track the parent customer call
     if (!callLog) {
+      // Check if this is a SIP call (child leg) - if so, ignore it
+      if (to && to.startsWith('sip:') || from && from.startsWith('sip:')) {
+        console.log(`ℹ️ Ignoring child SIP leg callback (CallSid: ${callSid}) - only tracking parent call`);
+        return NextResponse.json({
+          success: true,
+          message: 'Child call leg ignored - only tracking parent call'
+        });
+      }
+      
       console.error('Call log not found for SID:', callSid);
       return NextResponse.json(
         { success: false, message: 'Call log not found' },
@@ -66,24 +105,43 @@ export async function POST(request) {
     
     const mappedStatus = statusMap[callStatus] || 'queued';
 
+    // Prepare twilioData update - preserve existing data including child calls
+    const existingTwilioData = callLog.twilioData || {};
+    const twilioDataUpdate = {
+      ...existingTwilioData,
+      callStatus,
+      direction,
+      from,
+      to,
+      duration,
+      startTime,
+      endTime,
+      answerTime,
+      hangupCause,
+      lastUpdated: new Date().toISOString()
+    };
+
+    // If this is a child call, preserve child calls array
+    if (parentCallSid && existingTwilioData.childCalls) {
+      twilioDataUpdate.childCalls = existingTwilioData.childCalls;
+    }
+
     // Update call log with new status
+    // Note: For child calls (agent SIP leg), we update the parent call log
+    // but only update status if this is the parent call itself
     const updateData = {
       status: mappedStatus,
       duration: duration ? parseInt(duration) : null,
-      twilioData: {
-        ...callLog.twilioData,
-        callStatus,
-        direction,
-        from,
-        to,
-        duration,
-        startTime,
-        endTime,
-        answerTime,
-        hangupCause,
-        lastUpdated: new Date().toISOString()
-      }
+      twilioData: twilioDataUpdate
     };
+
+    // Only update status if this is the parent call (customer leg)
+    // Child calls (agent SIP leg) don't change the main call status
+    if (parentCallSid) {
+      // This is a child call - don't update the main status, just log the child call info
+      delete updateData.status;
+      console.log(`ℹ️ Child call leg status update (not changing parent call status): ${callStatus}`);
+    }
 
     await callLog.update(updateData);
 

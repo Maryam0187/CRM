@@ -50,14 +50,17 @@ Agent (CRM) → Clicks "Call" → Twilio API → Customer Phone
                           Agent answers in browser → Connected!
 ```
 
-#### Inbound Call (Customer Queries):
+#### Inbound Call (Future Implementation):
 ```
 Customer Phone → Twilio Number → SIP Domain → Available Agent Extension
                                                       ↓
                                             Agent answers in browser
 ```
 
-**Key Point**: Outbound calls are the primary workflow - agents call customers from CRM. Inbound calls handle customer queries when they call back.
+**Key Point**: 
+- **Outbound calls** are the primary workflow - agents call customers from CRM
+- **Inbound calls** will be implemented later - currently agents are registered but reject incoming calls
+- **Agent SIP Registration** - Agents register to SIP domain on login using SIP.js library
 
 ---
 
@@ -102,14 +105,12 @@ Customer Phone → Twilio Number → SIP Domain → Available Agent Extension
 8. **Agent and customer connected** - conversation begins
 9. **Agent updates sale record** in CRM during/after call
 
-**Secondary Use Case: Customer Calls Back**
+**Future: Inbound Calls (Not Yet Implemented)**
 
-1. **Customer calls** your Twilio phone number
-2. **Twilio webhook** calls: `POST /api/twilio/sip-voice-response`
-3. **CRM finds available agent** (round-robin or longest-idle)
-4. **Call routes to agent extension** via SIP Domain
-5. **Agent receives call** in browser
-6. **Agent handles customer query**
+Inbound call handling will be implemented later. Currently:
+- Agents register to SIP domain on login
+- Incoming calls are automatically rejected
+- Focus is on outbound calling workflow
 
 ### Typical Day for Sales Agent
 
