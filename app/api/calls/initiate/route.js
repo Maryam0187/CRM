@@ -7,7 +7,12 @@ import crypto from 'crypto';
 // Helper to encrypt SIP password (not used here but kept for consistency)
 function encryptSipPassword(password) {
   const algorithm = 'aes-256-cbc';
-  const key = Buffer.from(process.env.ENCRYPTION_KEY || 'default-key-32-chars-long!!', 'utf8');
+  
+  // Ensure key is exactly 32 bytes (256 bits) for AES-256
+  const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-32-chars-long!!';
+  // Use SHA-256 to hash the key to exactly 32 bytes
+  const key = crypto.createHash('sha256').update(encryptionKey).digest();
+  
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv(algorithm, key, iv);
   let encrypted = cipher.update(password, 'utf8', 'hex');

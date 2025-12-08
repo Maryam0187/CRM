@@ -38,6 +38,7 @@ export function SipConnectionProvider({ children }) {
   
   const userAgent = useRef(null);
   const registerer = useRef(null);
+  const remoteAudioElement = useRef(null);
   const reconnectTimeout = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
@@ -128,6 +129,18 @@ export function SipConnectionProvider({ children }) {
       const ua = new UserAgent(userAgentOptions);
       userAgent.current = ua;
 
+      // Set up audio element for remote audio (customer's voice)
+      if (typeof window !== 'undefined' && !remoteAudioElement.current) {
+        const remoteAudio = document.createElement('audio');
+        remoteAudio.id = 'sip-remote-audio';
+        remoteAudio.autoplay = true;
+        remoteAudio.controls = false;
+        remoteAudio.style.display = 'none';
+        document.body.appendChild(remoteAudio);
+        remoteAudioElement.current = remoteAudio;
+        console.log('✅ Remote audio element created');
+      }
+
       // Handle UserAgent events
       ua.onConnect = () => {
         console.log('✅ SIP UserAgent connected');
@@ -194,18 +207,63 @@ export function SipConnectionProvider({ children }) {
     }
   };
 
-  // Handle incoming call (for future inbound implementation)
-  // Note: Inbound calls will be implemented later - for now just log
+  // Handle incoming SIP call
+  // This is called when Twilio dials the agent via SIP (for outbound calls when customer answers)
+  // OR when a customer calls in (inbound - will be implemented later)
   const handleIncomingCall = async (invitation) => {
-    console.log('📞 Incoming SIP call received (inbound not yet implemented):', invitation);
+    console.log('📞 Incoming SIP call received:', invitation);
+    console.log('📞 Call from:', invitation.request.from);
+    console.log('📞 Call to:', invitation.request.to);
     
-    // Reject incoming calls for now since this is primarily an outbound call center
-    // Inbound implementation will be added later
+    // Accept the call - this is needed for outbound calls when customer answers
+    // Twilio dials the agent via SIP, and the agent must accept to connect
     try {
-      await invitation.reject();
-      console.log('⚠️ Incoming call rejected - inbound calls not yet implemented');
+      // Set up call handlers
+      invitation.delegate = {
+        onProgress: () => {
+          console.log('📞 Call in progress (ringing)');
+        },
+        onAccept: (session) => {
+          console.log('✅ Call accepted and connected');
+          
+          // Attach remote audio stream to audio element
+          if (session.sessionDescriptionHandler && remoteAudioElement.current) {
+            const sdh = session.sessionDescriptionHandler;
+            if (sdh.remoteMediaStream) {
+              remoteAudioElement.current.srcObject = sdh.remoteMediaStream;
+              console.log('✅ Remote audio stream attached');
+            }
+          }
+          
+          // Update agent status to busy
+          updateAgentStatus('busy');
+        },
+        onTerminate: () => {
+          console.log('📞 Call terminated');
+          
+          // Clear audio stream
+          if (remoteAudioElement.current) {
+            remoteAudioElement.current.srcObject = null;
+          }
+          
+          // Update agent status back to available
+          updateAgentStatus('available');
+        }
+      };
+
+      // Accept the incoming call
+      await invitation.accept();
+      console.log('✅ Incoming SIP call accepted - agent connected');
+      
     } catch (err) {
-      console.error('❌ Error rejecting call:', err);
+      console.error('❌ Error accepting incoming SIP call:', err);
+      setError('Failed to accept incoming call');
+      // Try to reject if accept failed
+      try {
+        await invitation.reject();
+      } catch (rejectErr) {
+        console.error('❌ Error rejecting call:', rejectErr);
+      }
     }
   };
 
@@ -269,6 +327,18 @@ export function SipConnectionProvider({ children }) {
         console.error('Error stopping UserAgent:', err);
       }
       userAgent.current = null;
+    }
+
+    // Clean up audio element
+    if (remoteAudioElement.current) {
+      if (remoteAudioElement.current.srcObject) {
+        remoteAudioElement.current.srcObject.getTracks().forEach(track => track.stop());
+        remoteAudioElement.current.srcObject = null;
+      }
+      if (remoteAudioElement.current.parentNode) {
+        remoteAudioElement.current.parentNode.removeChild(remoteAudioElement.current);
+      }
+      remoteAudioElement.current = null;
     }
 
     // Update agent status

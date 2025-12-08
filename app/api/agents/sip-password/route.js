@@ -48,14 +48,34 @@ export async function GET(request) {
         const parts = agent.sipPassword.split(':');
         if (parts.length === 2) {
           const algorithm = 'aes-256-cbc';
-          const key = Buffer.from(process.env.ENCRYPTION_KEY || 'default-key-32-chars-long!!', 'utf8');
+          const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-32-chars-long!!';
           const iv = Buffer.from(parts[0], 'hex');
           const encrypted = parts[1];
           
-          const decipher = crypto.createDecipheriv(algorithm, key, iv);
-          let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-          decrypted += decipher.final('utf8');
-          decryptedPassword = decrypted;
+          // Try new method first (SHA-256 hashed key - always 32 bytes)
+          try {
+            const key = crypto.createHash('sha256').update(encryptionKey).digest();
+            const decipher = crypto.createDecipheriv(algorithm, key, iv);
+            let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+            decrypted += decipher.final('utf8');
+            decryptedPassword = decrypted;
+          } catch (newMethodError) {
+            // If new method fails, try old method for backward compatibility
+            try {
+              const oldKey = Buffer.from(encryptionKey, 'utf8');
+              // Pad or truncate to 32 bytes if needed
+              const key = oldKey.length === 32 ? oldKey : 
+                         oldKey.length < 32 ? Buffer.concat([oldKey, Buffer.alloc(32 - oldKey.length)]) :
+                         oldKey.slice(0, 32);
+              const decipher = crypto.createDecipheriv(algorithm, key, iv);
+              let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+              decrypted += decipher.final('utf8');
+              decryptedPassword = decrypted;
+            } catch (oldMethodError) {
+              console.error('Both decryption methods failed:', { newMethodError, oldMethodError });
+              throw new Error('Failed to decrypt SIP password');
+            }
+          }
         } else {
           // Invalid format, return as-is
           decryptedPassword = agent.sipPassword;
