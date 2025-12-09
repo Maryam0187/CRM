@@ -320,20 +320,18 @@ const CallButton = ({
         }
       }
       
-      // Hang up via API (with timeout)
+      // Hang up via API (non-blocking, fire and forget)
       if (completedCallSid) {
-        try {
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('TIMEOUT')), 5000)
-          );
-          const apiCallPromise = apiClient.post('/api/calls/hangup', {
-            callSid: completedCallSid
-          });
-          await Promise.race([apiCallPromise, timeoutPromise]);
-        } catch (err) {
-          // Ignore errors - call will be terminated by Twilio
-          console.warn('Hangup API error (ignored):', err.message);
-        }
+        // Don't await - fire and forget to prevent blocking
+        apiClient.post('/api/calls/hangup', {
+          callSid: completedCallSid
+        }).catch(err => {
+          // Silently ignore - call is already disconnected via SDK
+          // This is just a notification to the backend
+          if (err.message !== 'TIMEOUT') {
+            console.warn('Hangup API error (ignored):', err.message);
+          }
+        });
       }
     } catch (err) {
       console.error('Error in handleEndCall:', err);

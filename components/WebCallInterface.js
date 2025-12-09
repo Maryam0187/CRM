@@ -81,15 +81,17 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           const lowerMessage = message.toLowerCase();
           return lowerMessage.includes('cannot connect to insights') ||
                  lowerMessage.includes('unable to post') ||
-                 (lowerMessage.includes('failed to fetch') && (lowerMessage.includes('insights') || lowerMessage.includes('eventpublisher'))) ||
+                 lowerMessage.includes('failed to fetch') ||
+                 (lowerMessage.includes('insights') && (lowerMessage.includes('error') || lowerMessage.includes('failed') || lowerMessage.includes('cannot'))) ||
+                 lowerMessage.includes('eventpublisher') ||
                  (lowerMessage.includes('heartbeat') && lowerMessage.includes('wstransport')) ||
                  lowerMessage.includes('wstransport') ||
                  lowerMessage.includes('dtls-transport-state') ||
                  (lowerMessage.includes('connection disconnected') && lowerMessage.includes('insights')) ||
                  lowerMessage.includes('quality-metrics') ||
-                 lowerMessage.includes('eventpublisher') ||
-                 (lowerMessage.includes('insights') && (lowerMessage.includes('error') || lowerMessage.includes('failed'))) ||
-                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('device') && (lowerMessage.includes('cannot') || lowerMessage.includes('failed')));
+                 lowerMessage.includes('metrics-sample') ||
+                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('device') && (lowerMessage.includes('cannot') || lowerMessage.includes('failed'))) ||
+                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('eventpublisher'));
         };
         
         console.warn = (...args) => {
