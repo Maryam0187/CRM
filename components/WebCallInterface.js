@@ -419,63 +419,104 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       return;
     }
     
+    isCleaningUp.current = true;
     let deviceDestroyed = false;
     let callDisconnected = false;
     
     try {
-      if (activeConnection.current) {
+      // Get call status to determine if we're in ringing state
+      const callStatus = activeConnection.current?.status || null;
+      const isRinging = callStatus === 'ringing' || callStatus === 'pending' || callStatus === 'connecting';
+      
+      console.log('📞 Call status during hangup:', callStatus);
+      
+      // If ringing or connecting, use device.disconnectAll() directly (more reliable)
+      if (isRinging || !isConnected) {
+        console.log('📞 Call is ringing/connecting, using device.disconnectAll()');
+        if (device && typeof device.disconnectAll === 'function') {
+          try {
+            device.disconnectAll();
+            deviceDestroyed = true;
+            callDisconnected = true;
+            console.log('✅ Disconnected all calls via device.disconnectAll()');
+          } catch (e) {
+            console.warn('⚠️ Error in device.disconnectAll:', e.message);
+          }
+        }
+      } else if (activeConnection.current) {
+        // For connected calls, try call.disconnect() first
         const call = activeConnection.current;
         
         try {
-          if (typeof call.disconnect === 'function') {
-            console.log('📞 Disconnecting call using call.disconnect()');
-            call.disconnect();
-            callDisconnected = true;
+          // Check if call is in a valid state to disconnect
+          if (call.status && (call.status === 'open' || call.status === 'answered')) {
+            if (typeof call.disconnect === 'function') {
+              console.log('📞 Disconnecting call using call.disconnect()');
+              call.disconnect();
+              callDisconnected = true;
+            }
+          } else {
+            // Call might be in transition state, use device.disconnectAll()
+            console.log('📞 Call in transition state, using device.disconnectAll()');
+            if (device && typeof device.disconnectAll === 'function') {
+              device.disconnectAll();
+              deviceDestroyed = true;
+              callDisconnected = true;
+            }
           }
         } catch (callErr) {
-          console.warn('⚠️ Error disconnecting call (ignored):', callErr.message);
+          console.warn('⚠️ Error disconnecting call, trying device.disconnectAll():', callErr.message);
+          // Fallback to device.disconnectAll() if call.disconnect() fails
+          if (device && typeof device.disconnectAll === 'function') {
+            try {
+              device.disconnectAll();
+              deviceDestroyed = true;
+              callDisconnected = true;
+            } catch (e) {
+              console.warn('⚠️ Error in device.disconnectAll (fallback):', e.message);
+            }
+          }
         }
-        
-        activeConnection.current = null;
       }
       
-      if (device && typeof device.disconnectAll === 'function' && !callDisconnected) {
-        try {
-          console.log('📞 Disconnecting all calls using device.disconnectAll() (fallback)');
-          device.disconnectAll();
-          deviceDestroyed = true;
-          isCleaningUp.current = true;
-        } catch (e) {
-          console.warn('⚠️ Error in device.disconnectAll (ignored):', e.message);
-        }
-      }
+      // Clear active connection reference
+      activeConnection.current = null;
+      
     } catch (err) {
       console.warn('⚠️ Error in hangUp (ignored):', err.message);
+      // Ensure we still try to disconnect via device
+      if (device && typeof device.disconnectAll === 'function' && !callDisconnected) {
+        try {
+          device.disconnectAll();
+          deviceDestroyed = true;
+        } catch (e) {
+          console.warn('⚠️ Final fallback disconnect failed:', e.message);
+        }
+      }
     } finally {
+      // Always update state regardless of disconnect success
       setIsConnected(false);
       setIsConnecting(false);
       localMediaStream.current = null;
       
-      if (device && !deviceDestroyed && !isCleaningUp.current) {
-        setTimeout(() => {
-          try {
-            isCleaningUp.current = true;
-            if (device && typeof device.unregister === 'function') {
-              const deviceState = device.state || (device._state ? device._state() : null);
-              if (deviceState !== 'destroyed') {
-                console.log('🧹 Unregistering device after hangup');
-                device.unregister();
-              }
-            }
-          } catch (e) {
-            // Ignore
-          } finally {
-            setTimeout(() => {
-              isCleaningUp.current = false;
-            }, 1000);
+      // Unregister device if not destroyed (using public API only)
+      if (device && !deviceDestroyed && typeof device.unregister === 'function') {
+        try {
+          // Only use device.state (public API), not _state (internal)
+          if (device.state && device.state !== 'destroyed') {
+            console.log('🧹 Unregistering device after hangup');
+            device.unregister();
           }
-        }, 100);
+        } catch (e) {
+          // Ignore - device might already be destroyed
+          console.warn('⚠️ Error unregistering device (ignored):', e.message);
+        }
       }
+      
+      // Reset cleanup flag after a delay
+      setTimeout(() => {
+        isCleaningUp.current = false;
+      }, 1000);
       
       onCallDisconnected && onCallDisconnected();
     }
