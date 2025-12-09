@@ -468,6 +468,10 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
   const hangUp = () => {
     // Prevent navigation on errors
+    // Declare variables outside try block so they're accessible in finally
+    let deviceDestroyed = false;
+    let callDisconnected = false;
+    
     try {
       console.log('📞 hangUp called');
       
@@ -477,8 +481,6 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       }
       
       isCleaningUp.current = true;
-      let deviceDestroyed = false;
-      let callDisconnected = false;
       
       // Get call status to determine if we're in ringing state
       // Status might be a function or property - handle both
