@@ -314,67 +314,116 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
           // Disconnect event
           const onDisconnect = () => {
-            console.log('📞 Call disconnected');
-            setIsConnected(false);
-            setIsConnecting(false);
-            activeConnection.current = null;
-            localMediaStream.current = null;
-            
-            if (device && !isCleaningUp.current) {
-              try {
-                isCleaningUp.current = true;
-                console.log('🧹 Unregistering device after call disconnect');
-                device.unregister();
-              } catch (e) {
-                // Ignore
-              } finally {
-                setTimeout(() => {
-                  isCleaningUp.current = false;
-                }, 1000);
+            try {
+              console.log('📞 Call disconnected');
+              setIsConnected(false);
+              setIsConnecting(false);
+              activeConnection.current = null;
+              localMediaStream.current = null;
+              
+              if (device && !isCleaningUp.current) {
+                try {
+                  isCleaningUp.current = true;
+                  console.log('🧹 Unregistering device after call disconnect');
+                  device.unregister();
+                } catch (e) {
+                  // Ignore
+                } finally {
+                  setTimeout(() => {
+                    isCleaningUp.current = false;
+                  }, 1000);
+                }
               }
+              
+              // Safely call callback
+              try {
+                onCallDisconnected && onCallDisconnected();
+              } catch (callbackErr) {
+                console.warn('Error in onCallDisconnected callback:', callbackErr);
+              }
+            } catch (disconnectErr) {
+              console.error('Error in disconnect handler:', disconnectErr);
+              // Still reset state
+              setIsConnected(false);
+              setIsConnecting(false);
             }
-            
-            onCallDisconnected && onCallDisconnected();
           };
 
           // Cancel event (customer declined/no answer)
           const onCancel = () => {
-            console.log('❌ Call canceled (customer declined or no answer)');
-            setIsConnected(false);
-            setIsConnecting(false);
-            activeConnection.current = null;
-            localMediaStream.current = null;
-            onCallDisconnected && onCallDisconnected();
+            try {
+              console.log('❌ Call canceled (customer declined or no answer)');
+              setIsConnected(false);
+              setIsConnecting(false);
+              activeConnection.current = null;
+              localMediaStream.current = null;
+              
+              // Safely call callback
+              try {
+                onCallDisconnected && onCallDisconnected();
+              } catch (callbackErr) {
+                console.warn('Error in onCallDisconnected callback:', callbackErr);
+              }
+            } catch (cancelErr) {
+              console.error('Error in cancel handler:', cancelErr);
+              setIsConnected(false);
+              setIsConnecting(false);
+            }
           };
 
           // Error event
           const onError = (err) => {
-            console.error('❌ Call error:', err);
-            const errorCode = err?.code || err?.twilioError?.code;
-            const errorMessage = err?.message || err?.twilioError?.message || 'Unknown error';
-            
-            if (errorCode === 31603 || errorMessage.includes('Decline')) {
-              setError('Call was declined by customer or Twilio.');
-            } else if (errorCode === 31005) {
-              setError('Connection error. Please check your internet connection and try again.');
-            } else {
-              setError(`Call error: ${errorMessage} (Code: ${errorCode || 'N/A'})`);
+            try {
+              console.error('❌ Call error:', err);
+              const errorCode = err?.code || err?.twilioError?.code;
+              const errorMessage = err?.message || err?.twilioError?.message || 'Unknown error';
+              
+              if (errorCode === 31603 || errorMessage.includes('Decline')) {
+                setError('Call was declined by customer or Twilio.');
+              } else if (errorCode === 31005) {
+                setError('Connection error. Please check your internet connection and try again.');
+              } else {
+                setError(`Call error: ${errorMessage} (Code: ${errorCode || 'N/A'})`);
+              }
+              
+              setIsConnected(false);
+              setIsConnecting(false);
+              activeConnection.current = null;
+              
+              // Safely call callback
+              try {
+                onCallDisconnected && onCallDisconnected();
+              } catch (callbackErr) {
+                console.warn('Error in onCallDisconnected callback:', callbackErr);
+              }
+            } catch (errorHandlerErr) {
+              console.error('Error in error handler:', errorHandlerErr);
+              // Still try to reset state
+              setIsConnected(false);
+              setIsConnecting(false);
             }
-            
-            setIsConnected(false);
-            setIsConnecting(false);
-            activeConnection.current = null;
-            onCallDisconnected && onCallDisconnected();
           };
 
           // Reject event
           const onReject = () => {
-            console.error('❌ Call rejected');
-            setError('Call was rejected. Please check TwiML App Voice URL configuration.');
-            setIsConnected(false);
-            setIsConnecting(false);
-            activeConnection.current = null;
-            onCallDisconnected && onCallDisconnected();
+            try {
+              console.error('❌ Call rejected');
+              setError('Call was rejected. Please check TwiML App Voice URL configuration.');
+              setIsConnected(false);
+              setIsConnecting(false);
+              activeConnection.current = null;
+              
+              // Safely call callback
+              try {
+                onCallDisconnected && onCallDisconnected();
+              } catch (callbackErr) {
+                console.warn('Error in onCallDisconnected callback:', callbackErr);
+              }
+            } catch (rejectErr) {
+              console.error('Error in reject handler:', rejectErr);
+              setIsConnected(false);
+              setIsConnecting(false);
+            }
           };
 
           // Try addEventListener first, then .on()
@@ -520,7 +569,12 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         isCleaningUp.current = false;
       }, 1000);
       
-      onCallDisconnected && onCallDisconnected();
+      // Safely call callback
+      try {
+        onCallDisconnected && onCallDisconnected();
+      } catch (callbackErr) {
+        console.warn('Error in onCallDisconnected callback:', callbackErr);
+      }
     }
   };
 

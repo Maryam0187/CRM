@@ -193,17 +193,22 @@ const CallButton = ({
       // Don't reset timer - keep it for display
       // setCallTimer(0);
       
-      // Notify parent
+      // Notify parent (with error handling to prevent navigation issues)
       if (onCallCompleted && currentCallSid) {
-        onCallCompleted({
-          callSid: currentCallSid,
-          status: callStatus,
-          duration: durationFromStatus || callTimer,
-          customerId,
-          saleId,
-          phoneNumber,
-          customerName
-        });
+        try {
+          onCallCompleted({
+            callSid: currentCallSid,
+            status: callStatus,
+            duration: durationFromStatus || callTimer,
+            customerId,
+            saleId,
+            phoneNumber,
+            customerName
+          });
+        } catch (callbackErr) {
+          console.warn('Error in onCallCompleted callback:', callbackErr);
+          // Don't let callback errors break the app or cause navigation
+        }
       }
       
       // Reset state after showing status (2 seconds)
@@ -335,6 +340,8 @@ const CallButton = ({
       }
     } catch (err) {
       console.error('Error in handleEndCall:', err);
+      // Don't let errors break the app - just log them
+      // Stay on the same page
     }
     
     // Reset state immediately
