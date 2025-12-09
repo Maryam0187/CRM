@@ -22,6 +22,7 @@ const CallButton = ({
   // Core call state
   const [isCalling, setIsCalling] = useState(false);
   const [currentCallSid, setCurrentCallSid] = useState(null);
+  const [conferenceName, setConferenceName] = useState(null);
   const [showWebInterface, setShowWebInterface] = useState(false);
   const [isWebCallConnected, setIsWebCallConnected] = useState(false);
   const [error, setError] = useState(null);
@@ -69,6 +70,17 @@ const CallButton = ({
   const isRinging = callStatus === 'ringing';
   const isInProgress = callStatus === 'in-progress';
   const isEnded = callStatus === 'completed' || callStatus === 'failed' || callStatus === 'busy' || callStatus === 'no-answer' || callStatus === 'canceled';
+  
+  // Disconnect WebCallInterface if call ended but we're still connected
+  useEffect(() => {
+    if (isEnded && isWebCallConnected && webCallInterfaceRef.current) {
+      console.log('📞 Call ended, disconnecting WebCallInterface');
+      if (webCallInterfaceRef.current.hangUp) {
+        webCallInterfaceRef.current.hangUp();
+      }
+      setIsWebCallConnected(false);
+    }
+  }, [isEnded, isWebCallConnected]);
 
   // Clean up all intervals on unmount
   useEffect(() => {
@@ -201,6 +213,7 @@ const CallButton = ({
         setShowWebInterface(false);
         setTimeout(() => {
           setCurrentCallSid(null);
+          setConferenceName(null);
           setCallTimer(0);
           setFinalDuration(null);
         }, 100);
@@ -247,6 +260,9 @@ const CallButton = ({
       if (result.success) {
         setCurrentCallSid(result.data.callSid);
         // Agent joins call via Voice SDK (conference)
+        // Use conference name from API response or construct it
+        const confName = result.data.conferenceName || `call-${user.id}`;
+        setConferenceName(confName);
         setShowWebInterface(true);
         
         if (onCallInitiated) {
@@ -344,6 +360,7 @@ const CallButton = ({
     
     setTimeout(() => {
       setCurrentCallSid(null);
+      setConferenceName(null);
     }, 100);
   };
 
@@ -789,11 +806,11 @@ const CallButton = ({
 
       {/* Web Call Interface - hidden, works in background */}
       {/* Agent joins call via Voice SDK using WebCallInterface */}
-      {showWebInterface && (
+      {showWebInterface && conferenceName && (
         <div className="hidden">
           <WebCallInterface
             ref={webCallInterfaceRef}
-            conferenceName={null}
+            conferenceName={conferenceName}
             onCallConnected={() => {
               setIsWebCallConnected(true);
               // Sync mute state periodically

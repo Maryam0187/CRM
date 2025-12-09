@@ -296,6 +296,29 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         return;
       }
       
+      // Resume AudioContext (user gesture) - required for audio to work
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+          console.log('✅ AudioContext resumed');
+        }
+      } catch (audioCtxErr) {
+        console.warn('⚠️ AudioContext resume failed:', audioCtxErr);
+        // Continue anyway - SDK may handle it
+      }
+      
+      // Explicitly set speaker devices
+      try {
+        if (deviceInstance.audio && typeof deviceInstance.audio.setSpeakerDevices === 'function') {
+          await deviceInstance.audio.setSpeakerDevices('default');
+          console.log('✅ Speaker devices set to default');
+        }
+      } catch (speakerErr) {
+        console.warn('⚠️ Setting speaker devices failed:', speakerErr);
+        // Continue anyway
+      }
+      
       // Connect to conference - Twilio SDK will handle all audio automatically
       // SDK 2.x returns a Promise
       const callPromise = deviceInstance.connect({ params });
@@ -359,7 +382,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             
             // Handle specific error codes
             if (errorCode === 31603 || errorMessage.includes('Decline')) {
-              setError('Call was declined by Twilio. Please check TwiML App configuration in Twilio Console.');
+              setError('Call was declined by customer or Twilio.');
             } else if (errorCode === 31005) {
               setError('Connection error. Please check your internet connection and try again.');
             } else {
@@ -369,6 +392,9 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(false);
             setIsConnecting(false);
             activeConnection.current = null;
+            
+            // Notify parent component that call disconnected
+            onCallDisconnected && onCallDisconnected();
             
             // Unregister device to stop heartbeat messages after call error
             if (device) {
@@ -388,10 +414,34 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnecting(false);
             activeConnection.current = null;
             
+            // Notify parent component that call disconnected
+            onCallDisconnected && onCallDisconnected();
+            
             // Unregister device to stop heartbeat messages after call rejection
             if (device) {
               try {
                 console.log('🧹 Unregistering device after call rejection');
+                device.unregister();
+              } catch (e) {
+                console.warn('⚠️ Error unregistering device (ignored):', e.message);
+              }
+            }
+          });
+
+          call.addEventListener('cancel', () => {
+            console.error('❌ Call canceled (customer declined or no answer)');
+            setError('Call was canceled. Customer may have declined or not answered.');
+            setIsConnected(false);
+            setIsConnecting(false);
+            activeConnection.current = null;
+            
+            // Notify parent component that call disconnected
+            onCallDisconnected && onCallDisconnected();
+            
+            // Unregister device
+            if (device) {
+              try {
+                console.log('🧹 Unregistering device after call cancel');
                 device.unregister();
               } catch (e) {
                 console.warn('⚠️ Error unregistering device (ignored):', e.message);
@@ -435,7 +485,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             
             // Handle specific error codes
             if (errorCode === 31603 || errorMessage.includes('Decline')) {
-              setError('Call was declined by Twilio. Please check TwiML App configuration in Twilio Console.');
+              setError('Call was declined by customer or Twilio.');
             } else if (errorCode === 31005) {
               setError('Connection error. Please check your internet connection and try again.');
             } else {
@@ -445,6 +495,9 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(false);
             setIsConnecting(false);
             activeConnection.current = null;
+            
+            // Notify parent component that call disconnected
+            onCallDisconnected && onCallDisconnected();
             
             // Unregister device to stop heartbeat messages after call error
             if (device) {
@@ -464,10 +517,34 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnecting(false);
             activeConnection.current = null;
             
+            // Notify parent component that call disconnected
+            onCallDisconnected && onCallDisconnected();
+            
             // Unregister device to stop heartbeat messages after call rejection
             if (device) {
               try {
                 console.log('🧹 Unregistering device after call rejection');
+                device.unregister();
+              } catch (e) {
+                console.warn('⚠️ Error unregistering device (ignored):', e.message);
+              }
+            }
+          });
+
+          call.on('cancel', () => {
+            console.error('❌ Call canceled (customer declined or no answer)');
+            setError('Call was canceled. Customer may have declined or not answered.');
+            setIsConnected(false);
+            setIsConnecting(false);
+            activeConnection.current = null;
+            
+            // Notify parent component that call disconnected
+            onCallDisconnected && onCallDisconnected();
+            
+            // Unregister device
+            if (device) {
+              try {
+                console.log('🧹 Unregistering device after call cancel');
                 device.unregister();
               } catch (e) {
                 console.warn('⚠️ Error unregistering device (ignored):', e.message);
