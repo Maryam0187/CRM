@@ -71,6 +71,10 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           allowIncomingWhileBusy: false,
           enableRTCStats: false,
           closeProtection: false,
+          // Disable insights to prevent failed fetch errors
+          insights: {
+            enabled: false
+          }
         });
         
         // Suppress console warnings for insights errors
@@ -463,20 +467,41 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   };
 
   const hangUp = () => {
-    console.log('📞 hangUp called');
-    
-    if (isCleaningUp.current) {
-      console.log('⚠️ Cleanup already in progress, skipping');
-      return;
-    }
-    
-    isCleaningUp.current = true;
-    let deviceDestroyed = false;
-    let callDisconnected = false;
-    
+    // Prevent navigation on errors
     try {
+      console.log('📞 hangUp called');
+      
+      if (isCleaningUp.current) {
+        console.log('⚠️ Cleanup already in progress, skipping');
+        return;
+      }
+      
+      isCleaningUp.current = true;
+      let deviceDestroyed = false;
+      let callDisconnected = false;
+      
       // Get call status to determine if we're in ringing state
-      const callStatus = activeConnection.current?.status || null;
+      // Status might be a function or property - handle both
+      let callStatus = null;
+      try {
+        if (activeConnection.current) {
+          const call = activeConnection.current;
+          if (typeof call.status === 'function') {
+            try {
+              callStatus = call.status();
+            } catch (e) {
+              // If function call fails, try as property
+              callStatus = call._status || null;
+            }
+          } else {
+            callStatus = call.status || call._status || null;
+          }
+        }
+      } catch (statusErr) {
+        console.warn('⚠️ Error getting call status:', statusErr);
+        callStatus = null;
+      }
+      
       const isRinging = callStatus === 'ringing' || callStatus === 'pending' || callStatus === 'connecting';
       
       console.log('📞 Call status during hangup:', callStatus);
@@ -498,15 +523,27 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         // For connected calls, try call.disconnect() first
         const call = activeConnection.current;
         
-        try {
-          // Check if call is in a valid state to disconnect
-          if (call.status && (call.status === 'open' || call.status === 'answered')) {
-            if (typeof call.disconnect === 'function') {
-              console.log('📞 Disconnecting call using call.disconnect()');
-              call.disconnect();
-              callDisconnected = true;
+          try {
+            // Check if call is in a valid state to disconnect
+            // Status might be a function or property - handle both
+            let currentStatus = null;
+            if (typeof call.status === 'function') {
+              try {
+                currentStatus = call.status();
+              } catch (e) {
+                currentStatus = call._status || null;
+              }
+            } else {
+              currentStatus = call.status || call._status || null;
             }
-          } else {
+            
+            if (currentStatus && (currentStatus === 'open' || currentStatus === 'answered' || currentStatus === 'connected')) {
+              if (typeof call.disconnect === 'function') {
+                console.log('📞 Disconnecting call using call.disconnect()');
+                call.disconnect();
+                callDisconnected = true;
+              }
+            } else {
             // Call might be in transition state, use device.disconnectAll()
             console.log('📞 Call in transition state, using device.disconnectAll()');
             if (device && typeof device.disconnectAll === 'function') {
@@ -574,6 +611,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         onCallDisconnected && onCallDisconnected();
       } catch (callbackErr) {
         console.warn('Error in onCallDisconnected callback:', callbackErr);
+        // Prevent error from propagating
       }
     }
   };
