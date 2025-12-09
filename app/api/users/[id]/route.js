@@ -18,7 +18,7 @@ export async function GET(request, { params }) {
     const userId = (await params).id;
 
     const user = await User.findByPk(userId, {
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'status', 'lastLoginTime', 'lastLogoutTime', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'extension', 'sipUsername', 'sipDomain', 'callStatus', 'created_at', 'updated_at'],
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'status', 'lastLoginTime', 'lastLogoutTime', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'created_at', 'updated_at'],
       include: [
         {
           model: require('../../../../models').SupervisorAgent,
@@ -63,13 +63,10 @@ export async function GET(request, { params }) {
       last_logout_time: user.lastLogoutTime,
       latitude: user.latitude,
       longitude: user.longitude,
-      location_accuracy: user.locationAccuracy,
-      location_timestamp: user.locationTimestamp,
-      location_permission: user.locationPermission,
-      extension: user.extension,
-      sip_username: user.sipUsername,
-      sip_domain: user.sipDomain,
-      call_status: user.callStatus || 'offline',
+        location_accuracy: user.locationAccuracy,
+        location_timestamp: user.locationTimestamp,
+        location_permission: user.locationPermission,
+        call_status: user.callStatus || 'offline',
       superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
       supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
       created_at: user.created_at,
@@ -112,11 +109,7 @@ export async function PUT(request, { params }) {
       phone,
       cnic,
       address,
-      superiorId,
-      extension,
-      sip_username,
-      sip_password,
-      sip_domain
+      superiorId
     } = await request.json();
 
     // Find user
@@ -215,78 +208,6 @@ export async function PUT(request, { params }) {
       updateData.address = address === '' ? null : address;
     }
 
-    // Handle SIP extension fields
-    if (extension !== undefined) {
-      // Validate extension uniqueness if changing
-      if (extension && extension !== user.extension) {
-        const existingExtension = await User.findOne({
-          where: { 
-            extension: extension,
-            id: { [require('sequelize').Op.ne]: userId }
-          }
-        });
-        if (existingExtension) {
-          return NextResponse.json(
-            { error: `Extension ${extension} is already assigned to another user` },
-            { status: 400 }
-          );
-        }
-      }
-      updateData.extension = extension === '' ? null : extension;
-    }
-
-    if (sip_username !== undefined) {
-      // Validate sip_username uniqueness if changing
-      if (sip_username && sip_username !== user.sipUsername) {
-        const existingSipUsername = await User.findOne({
-          where: { 
-            sipUsername: sip_username,
-            id: { [require('sequelize').Op.ne]: userId }
-          }
-        });
-        if (existingSipUsername) {
-          return NextResponse.json(
-            { error: `SIP username ${sip_username} is already assigned to another user` },
-            { status: 400 }
-          );
-        }
-      }
-      updateData.sipUsername = sip_username === '' ? null : sip_username;
-    }
-
-    // Encrypt SIP password if provided
-    if (sip_password !== undefined && sip_password !== '') {
-      const crypto = require('crypto');
-      const algorithm = 'aes-256-cbc';
-      
-      // Ensure key is exactly 32 bytes (256 bits) for AES-256
-      const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-32-chars-long!!';
-      // Use SHA-256 to hash the key to exactly 32 bytes
-      const key = crypto.createHash('sha256').update(encryptionKey).digest();
-      
-      const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv(algorithm, key, iv);
-      let encrypted = cipher.update(sip_password, 'utf8', 'hex');
-      encrypted += cipher.final('hex');
-      updateData.sipPassword = iv.toString('hex') + ':' + encrypted;
-    } else if (sip_password === '') {
-      // Allow clearing password by setting to empty string
-      updateData.sipPassword = null;
-    }
-
-    if (sip_domain !== undefined) {
-      updateData.sipDomain = sip_domain === '' ? null : sip_domain;
-    }
-
-    // Auto-set sipUsername to extension if extension is set and sip_username is not provided
-    if (updateData.extension && !updateData.sipUsername && !sip_username) {
-      updateData.sipUsername = updateData.extension;
-    }
-
-    // Auto-set sipDomain if not provided
-    if (updateData.extension && !updateData.sipDomain && !sip_domain) {
-      updateData.sipDomain = process.env.TWILIO_SIP_DOMAIN || process.env.TWILIO_SIP_DEFAULT_DOMAIN || null;
-    }
 
     try {
       await user.update(updateData);
@@ -344,9 +265,6 @@ export async function PUT(request, { params }) {
       cnic: user.cnic,
       phone: user.phone,
       address: user.address,
-      extension: user.extension,
-      sip_username: user.sipUsername,
-      sip_domain: user.sipDomain,
       call_status: user.callStatus || 'offline',
       created_at: user.created_at,
       updated_at: user.updated_at

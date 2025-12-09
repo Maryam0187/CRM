@@ -36,66 +36,40 @@ async function handleVoiceResponse(request) {
       try {
         console.log(`📞 Voice response - Looking for agent ID: ${agentId}`);
         
-        // Get agent with SIP extension info
+        // Get agent information
         const agent = await sequelizeDb.User.findByPk(parseInt(agentId), {
-          attributes: ['id', 'firstName', 'lastName', 'phone', 'extension', 'sipUsername', 'sipDomain']
+          attributes: ['id', 'firstName', 'lastName', 'phone']
         });
         
         console.log(`📞 Agent lookup result:`, {
           found: !!agent,
           agentId: agent?.id,
-          name: agent ? `${agent.firstName} ${agent.lastName}` : 'N/A',
-          hasExtension: !!agent?.extension,
-          extension: agent?.extension || 'N/A',
-          hasSipUsername: !!agent?.sipUsername
+          name: agent ? `${agent.firstName} ${agent.lastName}` : 'N/A'
         });
         
-        // Check if agent has SIP extension configured
-        if (agent && agent.extension && agent.sipUsername) {
-          // Route via SIP Domain (for SIP trunking)
-          const sipDomain = agent.sipDomain || process.env.TWILIO_SIP_DOMAIN || process.env.TWILIO_SIP_DEFAULT_DOMAIN;
-          if (sipDomain) {
-            const agentSipUri = `sip:${agent.sipUsername}@${sipDomain}`;
-            console.log(`📞 Routing to agent via SIP Domain: ${agent.extension} (${agentSipUri})`);
-            
-            // Dial agent via SIP Domain with proper error handling
-            // timeout: How long to ring before giving up (60 seconds to give agent time to connect)
-            // timeLimit: Maximum call duration (3600 seconds = 1 hour)
-            // answerOnMedia: false = connect immediately, don't wait for media
-            // hangupOnStar: false = don't hangup on *
-            // action: URL to call if dial fails (no-answer, busy, etc.)
-            const dialActionUrl = `${getWebhookUrl('/api/twilio/dial-status')}?agentId=${agentId}`;
-            twiml += `\n  <Dial timeout="60" timeLimit="3600" answerOnMedia="false" record="false" hangupOnStar="false" action="${dialActionUrl}">`;
-            twiml += `\n    <Sip>${agentSipUri}</Sip>`;
-            twiml += `\n  </Dial>`;
-          } else {
-            throw new Error('SIP domain not configured');
+        // Use conference for Voice SDK (agent joins via browser)
+        const conferenceName = `call-${agentId}`;
+        console.log(`📞 Routing to conference: ${conferenceName}`);
+        
+        // Place customer in conference room
+        // Agent should already be connected via Voice SDK (connected immediately when call initiated)
+        // Recording is DISABLED
+        // Optimize for immediate connection - no waitUrl, no beep, connect instantly
+        // answerOnMedia="false" = connect immediately when answered, don't wait for media
+        // startConferenceOnEnter="true" = conference already started by agent (first participant)
+        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
+        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST" maxParticipants="2" muted="false" trim="do-not-trim">${conferenceName}</Conference>`;
+        twiml += `\n  </Dial>`;
+        
+        // If agent has phone, we could call them separately to join the conference
+        // But with Voice SDK, agent joins via browser, so this is optional
+        if (agent && agent.phone) {
+          const agentPhone = validatePhoneNumber(agent.phone);
+          if (agentPhone) {
+            console.log(`📞 Agent phone available: ${agentPhone} - can be called separately if needed`);
           }
         } else {
-          // Fallback to conference (for agents without SIP extension)
-          const conferenceName = `call-${agentId}`;
-          console.log(`📞 Agent has no SIP extension - using conference: ${conferenceName}`);
-          
-          // Place customer in conference room
-          // Agent should already be connected via web interface (connected immediately when call initiated)
-          // Recording is DISABLED
-          // Optimize for immediate connection - no waitUrl, no beep, connect instantly
-          // answerOnMedia="false" = connect immediately when answered, don't wait for media
-          // startConferenceOnEnter="true" = conference already started by agent (first participant)
-          twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
-          twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST" maxParticipants="2" muted="false" trim="do-not-trim">${conferenceName}</Conference>`;
-          twiml += `\n  </Dial>`;
-          
-          // If agent has phone, we'll call them separately to join the conference
-          // This is handled in the initiate route
-          if (agent && agent.phone) {
-            const agentPhone = validatePhoneNumber(agent.phone);
-            if (agentPhone) {
-              console.log(`📞 Agent phone available: ${agentPhone} - will be called separately to join conference`);
-            }
-          } else {
-            console.log(`⚠️ Agent ${agentId} has no phone number - agent must join via web interface to conference: ${conferenceName}`);
-          }
+          console.log(`📞 Agent ${agentId} will join via Voice SDK to conference: ${conferenceName}`);
         }
       } catch (error) {
         console.error('❌ Error in voice response:', error);

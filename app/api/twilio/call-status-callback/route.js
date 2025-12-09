@@ -72,11 +72,11 @@ export async function POST(request) {
     }
 
     // If still not found, this might be a child call leg we should ignore
-    // (agent SIP leg) - we only track the parent customer call
+    // (agent leg) - we only track the parent customer call
     if (!callLog) {
-      // Check if this is a SIP call (child leg) - if so, ignore it
+      // Check if this is a child leg - if so, ignore it
       if (to && to.startsWith('sip:') || from && from.startsWith('sip:')) {
-        console.log(`ℹ️ Ignoring child SIP leg callback (CallSid: ${callSid}) - only tracking parent call`);
+        console.log(`ℹ️ Ignoring child leg callback (CallSid: ${callSid}) - only tracking parent call`);
         return NextResponse.json({
           success: true,
           message: 'Child call leg ignored - only tracking parent call'
@@ -127,7 +127,7 @@ export async function POST(request) {
     }
 
     // Update call log with new status
-    // Note: For child calls (agent SIP leg), we update the parent call log
+    // Note: For child calls (agent leg), we update the parent call log
     // but only update status if this is the parent call itself
     const updateData = {
       status: mappedStatus,
@@ -136,7 +136,7 @@ export async function POST(request) {
     };
 
     // Only update status if this is the parent call (customer leg)
-    // Child calls (agent SIP leg) don't change the main call status
+    // Child calls (agent leg) don't change the main call status
     if (parentCallSid) {
       // This is a child call - don't update the main status, just log the child call info
       delete updateData.status;
@@ -146,7 +146,7 @@ export async function POST(request) {
     await callLog.update(updateData);
 
     // Update agent status based on call status
-    // IMPORTANT: Only update agent status for parent calls (customer leg), not child calls (agent SIP leg)
+    // IMPORTANT: Only update agent status for parent calls (customer leg), not child calls (agent leg)
     if (callLog.agentId && !parentCallSid) {
       const agent = await sequelizeDb.User.findByPk(callLog.agentId);
       if (agent) {
@@ -192,7 +192,7 @@ export async function POST(request) {
         }
       }
     } else if (parentCallSid) {
-      console.log(`ℹ️ Skipping agent status update - this is a child call leg (agent SIP), only parent call updates agent status`);
+      console.log(`ℹ️ Skipping agent status update - this is a child call leg, only parent call updates agent status`);
     }
 
     // If call is completed and has duration, update any related records

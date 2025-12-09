@@ -5,7 +5,6 @@ import ToastManager from "../components/ToastManager";
 import { AuthProvider } from "../contexts/AuthContext";
 import { ToastProvider } from "../contexts/ToastContext";
 import { SocketProvider } from "../contexts/SocketContext";
-import { SipConnectionProvider } from "../components/SipConnection";
 import ReduxProvider from "../components/ReduxProvider";
 
 const geistSans = Geist({
@@ -31,16 +30,14 @@ export default function RootLayout({ children }) {
       >
         <ReduxProvider>
           <AuthProvider>
-            <SipConnectionProvider>
-              <SocketProvider>
-                <ToastProvider>
-                  <ConditionalLayout>
-                    {children}
-                  </ConditionalLayout>
-                  <ToastManager />
-                </ToastProvider>
-              </SocketProvider>
-            </SipConnectionProvider>
+            <SocketProvider>
+              <ToastProvider>
+                <ConditionalLayout>
+                  {children}
+                </ConditionalLayout>
+                <ToastManager />
+              </ToastProvider>
+            </SocketProvider>
           </AuthProvider>
         </ReduxProvider>
       </body>

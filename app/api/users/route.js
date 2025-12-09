@@ -17,7 +17,7 @@ export async function GET(request) {
     }
 
     const users = await User.findAll({
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'cnic', 'phone', 'address', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'extension', 'sipUsername', 'sipDomain', 'callStatus', 'created_at', 'updated_at'],
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'cnic', 'phone', 'address', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'created_at', 'updated_at'],
       include: [
         {
           model: require('../../../models').SupervisorAgent,
@@ -60,9 +60,6 @@ export async function GET(request) {
         location_accuracy: user.locationAccuracy,
         location_timestamp: user.locationTimestamp,
         location_permission: user.locationPermission,
-        extension: user.extension,
-        sip_username: user.sipUsername,
-        sip_domain: user.sipDomain,
         call_status: user.callStatus || 'offline',
         superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
         supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
@@ -106,11 +103,7 @@ export async function POST(request) {
       phone,
       cnic,
       address,
-      superiorId,
-      extension,
-      sip_username,
-      sip_password,
-      sip_domain
+      superiorId
     } = await request.json();
 
     // Validate required fields
@@ -151,49 +144,6 @@ export async function POST(request) {
       );
     }
 
-    // Validate extension uniqueness if provided
-    if (extension) {
-      const existingExtension = await User.findOne({
-        where: { extension: extension }
-      });
-      if (existingExtension) {
-        return NextResponse.json(
-          { error: `Extension ${extension} is already assigned to another user` },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Validate sip_username uniqueness if provided
-    if (sip_username) {
-      const existingSipUsername = await User.findOne({
-        where: { sipUsername: sip_username }
-      });
-      if (existingSipUsername) {
-        return NextResponse.json(
-          { error: `SIP username ${sip_username} is already assigned to another user` },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Encrypt SIP password if provided
-    let encryptedSipPassword = null;
-    if (sip_password) {
-      const crypto = require('crypto');
-      const algorithm = 'aes-256-cbc';
-      
-      // Ensure key is exactly 32 bytes (256 bits) for AES-256
-      const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-32-chars-long!!';
-      // Use SHA-256 to hash the key to exactly 32 bytes
-      const key = crypto.createHash('sha256').update(encryptionKey).digest();
-      
-      const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv(algorithm, key, iv);
-      let encrypted = cipher.update(sip_password, 'utf8', 'hex');
-      encrypted += cipher.final('hex');
-      encryptedSipPassword = iv.toString('hex') + ':' + encrypted;
-    }
 
     // Create new user
     const newUser = await User.create({
@@ -206,10 +156,6 @@ export async function POST(request) {
       cnic: cnic || null,
       phone: phone || null,
       address: address || null,
-      extension: extension || null,
-      sipUsername: sip_username || extension || null, // Use extension as sip_username if not provided
-      sipPassword: encryptedSipPassword,
-      sipDomain: sip_domain || process.env.TWILIO_SIP_DOMAIN || process.env.TWILIO_SIP_DEFAULT_DOMAIN || null,
       callStatus: 'offline'
     });
 
@@ -234,9 +180,6 @@ export async function POST(request) {
       cnic: newUser.cnic,
       phone: newUser.phone,
       address: newUser.address,
-      extension: newUser.extension,
-      sip_username: newUser.sipUsername,
-      sip_domain: newUser.sipDomain,
       call_status: newUser.callStatus || 'offline',
       created_at: newUser.created_at
     };

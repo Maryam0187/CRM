@@ -2,23 +2,6 @@ import { NextResponse } from 'next/server';
 import { getClient, validatePhoneNumber, getWebhookUrl } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
-import crypto from 'crypto';
-
-// Helper to encrypt SIP password (not used here but kept for consistency)
-function encryptSipPassword(password) {
-  const algorithm = 'aes-256-cbc';
-  
-  // Ensure key is exactly 32 bytes (256 bits) for AES-256
-  const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-32-chars-long!!';
-  // Use SHA-256 to hash the key to exactly 32 bytes
-  const key = crypto.createHash('sha256').update(encryptionKey).digest();
-  
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(algorithm, key, iv);
-  let encrypted = cipher.update(password, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return iv.toString('hex') + ':' + encrypted;
-}
 
 export async function POST(request) {
   let phoneNumber = null;
@@ -56,26 +39,15 @@ export async function POST(request) {
       );
     }
 
-    // Get agent with SIP extension
+    // Get agent information
     const agent = await sequelizeDb.User.findByPk(parseInt(agentId), {
-      attributes: ['id', 'firstName', 'lastName', 'extension', 'sipUsername', 'sipDomain', 'callStatus']
+      attributes: ['id', 'firstName', 'lastName', 'callStatus']
     });
 
     if (!agent) {
       return NextResponse.json(
         { success: false, message: 'Agent not found' },
         { status: 404 }
-      );
-    }
-
-    // Check if agent has SIP extension configured
-    if (!agent.extension || !agent.sipUsername) {
-      return NextResponse.json(
-        { 
-          success: false, 
-          message: 'Agent does not have SIP extension configured. Please assign an extension first.' 
-        },
-        { status: 400 }
       );
     }
 
@@ -111,30 +83,19 @@ export async function POST(request) {
       );
     }
 
-    // Get SIP domain from agent or environment
-    const sipDomain = agent.sipDomain || process.env.TWILIO_SIP_DOMAIN || process.env.TWILIO_SIP_DEFAULT_DOMAIN;
-    if (!sipDomain) {
-      return NextResponse.json(
-        { success: false, message: 'SIP domain not configured' },
-        { status: 500 }
-      );
-    }
-
-    // Build SIP URI for agent extension
-    const agentSipUri = `sip:${agent.sipUsername}@${sipDomain}`;
-    
     const statusCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
     const voiceUrl = `${getWebhookUrl('/api/twilio/voice-response')}?agentId=${agentId}`;
 
-    console.log('📞 SIP Call Initiation:', {
+    // Conference name for agent to join via Voice SDK
+    const conferenceName = `call-${agentId}`;
+
+    console.log('📞 Call Initiation:', {
       agentId: agent.id,
-      extension: agent.extension,
-      sipUri: agentSipUri,
       customerPhone: formattedNumber,
-      sipDomain: sipDomain
+      conferenceName: conferenceName
     });
 
-    // Create call: Customer → Twilio → SIP Domain → Agent Extension
+    // Create call: Customer → Twilio → Conference (Agent joins via Voice SDK)
     const callOptions = {
       url: voiceUrl,
       to: formattedNumber,  // Customer phone number
@@ -148,11 +109,12 @@ export async function POST(request) {
 
     const call = await client.calls.create(callOptions);
     
-    console.log('✅ SIP Call created successfully:', {
+    console.log('✅ Call created successfully:', {
       callSid: call.sid,
       status: call.status,
       to: call.to,
-      from: call.from
+      from: call.from,
+      conferenceName: conferenceName
     });
 
     // Update agent status to busy
@@ -180,12 +142,11 @@ export async function POST(request) {
         from: call.from,
         status: call.status,
         direction: call.direction,
-        sipUri: agentSipUri,
-        extension: agent.extension
+        conferenceName: conferenceName
       }
     });
 
-    // Return SIP connection info for agent
+    // Return call info for agent
     return NextResponse.json({
       success: true,
       data: {
@@ -194,16 +155,14 @@ export async function POST(request) {
         to: call.to,
         from: call.from,
         callLogId: callLog.id,
-        extension: agent.extension,
-        sipUri: agentSipUri,
-        sipDomain: sipDomain,
-        message: 'Call initiated - agent should connect via SIP extension'
+        conferenceName: conferenceName,
+        message: 'Call initiated - agent should join via Voice SDK'
       },
-      message: 'Call initiated successfully via SIP trunking'
+      message: 'Call initiated successfully'
     });
 
   } catch (error) {
-    console.error('❌ Error initiating SIP call:', error);
+    console.error('❌ Error initiating call:', error);
     
     const errorCode = error.code;
     const errorMessage = error.message || 'Failed to initiate call';

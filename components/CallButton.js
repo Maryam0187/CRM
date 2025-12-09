@@ -246,7 +246,7 @@ const CallButton = ({
 
       if (result.success) {
         setCurrentCallSid(result.data.callSid);
-        // SIP calls route directly to agent extension - no conference needed
+        // Agent joins call via Voice SDK (conference)
         setShowWebInterface(true);
         
         if (onCallInitiated) {
@@ -788,7 +788,7 @@ const CallButton = ({
       )}
 
       {/* Web Call Interface - hidden, works in background */}
-      {/* Note: With SIP, calls route directly to agent extension - WebCallInterface may not be needed */}
+      {/* Agent joins call via Voice SDK using WebCallInterface */}
       {showWebInterface && (
         <div className="hidden">
           <WebCallInterface
