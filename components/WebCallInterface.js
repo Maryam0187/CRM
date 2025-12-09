@@ -14,6 +14,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   const [isMuted, setIsMuted] = useState(false);
   const activeConnection = useRef(null);
   const localMediaStream = useRef(null); // Store local media stream for muting
+  const remoteAudioElement = useRef(null); // Audio element for remote audio playback
   const isCleaningUp = useRef(false); // Track if device cleanup is in progress
 
   const fetchToken = async () => {
@@ -80,8 +81,8 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           allowIncomingWhileBusy: false,
           enableRTCStats: false,
           closeProtection: false,
-          // Don't request audio permissions during registration
-          // Audio will be requested only when joining conference
+          // Enable audio handling - SDK will automatically create audio elements
+          // But we'll also manually attach for better control
         });
         
         // Suppress console warnings for insights errors
@@ -224,6 +225,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           setIsConnected(false);
           setIsConnecting(false);
           localMediaStream.current = null;
+          cleanupRemoteAudio(); // Clean up audio element
         } catch (e) {
           // Ignore all cleanup errors
           console.warn('⚠️ Error during device cleanup (ignored):', e.message);
@@ -258,22 +260,35 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       console.log('📞 Connecting with params:', params);
       
       // Request audio permissions ONLY when actually joining the call
-      // This prevents unnecessary mic access when device is just registered
+      // This ensures mic access is granted before connecting
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
           audio: {
             echoCancellation: true,
             noiseSuppression: true,
-            autoGainControl: true
+            autoGainControl: true,
+            sampleRate: 48000, // High quality audio
+            channelCount: 1 // Mono
           }, 
           video: false 
         });
         console.log('✅ Audio permissions granted');
-        // Release the test stream immediately - Twilio SDK will request its own
-        stream.getTracks().forEach(track => track.stop());
+        // Store the stream temporarily - Twilio SDK will use it
+        // Don't stop it immediately - let SDK take over
+        setTimeout(() => {
+          // Release after a short delay to let SDK attach
+          stream.getTracks().forEach(track => {
+            // Only stop if not already attached to SDK
+            if (track.readyState !== 'ended') {
+              track.stop();
+            }
+          });
+        }, 1000);
       } catch (audioErr) {
-        console.warn('⚠️ Audio permission request failed (Twilio SDK will request):', audioErr);
-        // Continue anyway - Twilio SDK will request permissions
+        console.error('❌ Audio permission request failed:', audioErr);
+        setError('Microphone access is required for calls. Please allow microphone access and try again.');
+        setIsConnecting(false);
+        return;
       }
       
       // Connect to conference (Twilio SDK 2.x returns a Promise)
@@ -315,6 +330,9 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(true);
             setIsConnecting(false);
             
+            // Setup audio elements for remote audio playback
+            setupRemoteAudio(call);
+            
             // Get and store media streams for mute functionality
             try {
               setTimeout(() => {
@@ -322,6 +340,10 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
                 if (streams.local) {
                   localMediaStream.current = streams.local;
                   console.log('📞 Local media stream captured for mute');
+                }
+                if (streams.remote) {
+                  attachRemoteAudio(streams.remote);
+                  console.log('📞 Remote media stream captured for playback');
                 }
                 console.log('📞 Media streams captured for mute');
               }, 500); // Wait a bit for streams to be ready
@@ -338,6 +360,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnecting(false);
             activeConnection.current = null;
             localMediaStream.current = null; // Clear stored stream
+            cleanupRemoteAudio(); // Clean up audio element
             
             // Unregister device to stop heartbeat messages after call ends
             // Only if not already cleaning up (to prevent double cleanup)
@@ -413,6 +436,9 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(true);
             setIsConnecting(false);
             
+            // Setup audio elements for remote audio playback
+            setupRemoteAudio(call);
+            
             // Get and store media streams for mute functionality
             try {
               setTimeout(() => {
@@ -420,6 +446,10 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
                 if (streams.local) {
                   localMediaStream.current = streams.local;
                   console.log('📞 Local media stream captured for mute');
+                }
+                if (streams.remote) {
+                  attachRemoteAudio(streams.remote);
+                  console.log('📞 Remote media stream captured for playback');
                 }
                 console.log('📞 Media streams captured for mute');
               }, 500); // Wait a bit for streams to be ready
@@ -436,6 +466,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnecting(false);
             activeConnection.current = null;
             localMediaStream.current = null; // Clear stored stream
+            cleanupRemoteAudio(); // Clean up audio element
             
             // Unregister device to stop heartbeat messages after call ends
             if (device) {
@@ -576,6 +607,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       setIsConnected(false);
       setIsConnecting(false);
       localMediaStream.current = null; // Clear stored stream
+      cleanupRemoteAudio(); // Clean up audio element
       
       // Unregister device to stop heartbeat messages after hangup
       // Only if device wasn't destroyed by disconnectAll() and not already cleaning up
@@ -609,6 +641,100 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     }
   };
 
+  // Setup remote audio element for playback
+  const setupRemoteAudio = (call) => {
+    try {
+      // Create audio element if it doesn't exist
+      if (!remoteAudioElement.current) {
+        const audio = document.createElement('audio');
+        audio.id = 'twilio-remote-audio';
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.style.display = 'none'; // Hide the audio element
+        document.body.appendChild(audio);
+        remoteAudioElement.current = audio;
+        console.log('✅ Remote audio element created');
+      }
+
+      // Try to get remote stream and attach it
+      setTimeout(() => {
+        const streams = getCallStreams();
+        if (streams.remote) {
+          attachRemoteAudio(streams.remote);
+        } else {
+          // Try alternative method - get from call directly
+          try {
+            const pc = call.getPeerConnection ? call.getPeerConnection() : 
+                        (call._peerConnection || call._pc || null);
+            if (pc) {
+              pc.ontrack = (event) => {
+                console.log('📞 Received remote track:', event.track.kind);
+                if (event.track.kind === 'audio') {
+                  const remoteStream = new MediaStream([event.track]);
+                  attachRemoteAudio(remoteStream);
+                }
+              };
+            }
+          } catch (err) {
+            console.warn('⚠️ Error setting up ontrack handler:', err);
+          }
+        }
+      }, 300);
+    } catch (err) {
+      console.error('❌ Error setting up remote audio:', err);
+    }
+  };
+
+  // Attach remote audio stream to audio element
+  const attachRemoteAudio = (remoteStream) => {
+    try {
+      if (remoteAudioElement.current && remoteStream) {
+        // Stop any existing stream
+        if (remoteAudioElement.current.srcObject) {
+          const oldStream = remoteAudioElement.current.srcObject;
+          oldStream.getTracks().forEach(track => track.stop());
+        }
+        
+        // Attach new stream
+        remoteAudioElement.current.srcObject = remoteStream;
+        remoteAudioElement.current.play().catch(err => {
+          console.warn('⚠️ Audio autoplay prevented, user interaction required:', err);
+          // Try to play on user interaction
+          const playAudio = () => {
+            remoteAudioElement.current?.play().catch(() => {});
+            document.removeEventListener('click', playAudio);
+            document.removeEventListener('touchstart', playAudio);
+          };
+          document.addEventListener('click', playAudio, { once: true });
+          document.addEventListener('touchstart', playAudio, { once: true });
+        });
+        console.log('✅ Remote audio stream attached to audio element');
+      }
+    } catch (err) {
+      console.error('❌ Error attaching remote audio:', err);
+    }
+  };
+
+  // Clean up remote audio element
+  const cleanupRemoteAudio = () => {
+    try {
+      if (remoteAudioElement.current) {
+        // Stop the stream
+        if (remoteAudioElement.current.srcObject) {
+          const stream = remoteAudioElement.current.srcObject;
+          stream.getTracks().forEach(track => track.stop());
+          remoteAudioElement.current.srcObject = null;
+        }
+        // Remove the element
+        remoteAudioElement.current.remove();
+        remoteAudioElement.current = null;
+        console.log('🧹 Remote audio element cleaned up');
+      }
+    } catch (err) {
+      console.warn('⚠️ Error cleaning up remote audio:', err);
+    }
+  };
+
   // Get media streams from the call - simplified approach
   const getCallStreams = () => {
     if (!activeConnection.current) {
@@ -625,6 +751,17 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
                   (call._peerConnection || call._pc || null);
 
       if (pc) {
+        // Set up ontrack handler to capture remote audio as it arrives
+        if (!pc._ontrackHandlerSet) {
+          pc.ontrack = (event) => {
+            console.log('📞 Received remote track via ontrack:', event.track.kind);
+            if (event.track.kind === 'audio' && event.streams && event.streams.length > 0) {
+              attachRemoteAudio(event.streams[0]);
+            }
+          };
+          pc._ontrackHandlerSet = true;
+        }
+
         // Get local audio tracks (agent's microphone)
         const localTracks = [];
         pc.getSenders().forEach(sender => {
