@@ -68,12 +68,12 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         
         const twilioDevice = new Device(token, {
           logLevel: 1, // Set to 1 to reduce verbose logging (0 = silent, 1 = errors only)
-          codecPreferences: ['opus', 'pcmu'],
+          codecPreferences: ['opus', 'pcmu'], // Audio codec preferences
           allowIncomingWhileBusy: false,
           enableRTCStats: false,
           closeProtection: false,
-          // Don't request audio permissions during registration
-          // Audio will be requested only when joining conference
+          // Audio handling: SDK will automatically request permissions and create audio elements
+          // when connect() is called - don't pre-request permissions
         });
         
         // Suppress console warnings for insights errors
@@ -249,24 +249,9 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
       console.log('📞 Connecting with params:', params);
       
-      // Request audio permissions ONLY when actually joining the call
-      // This prevents unnecessary mic access when device is just registered
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }, 
-          video: false 
-        });
-        console.log('✅ Audio permissions granted');
-        // Release the test stream immediately - Twilio SDK will request its own
-        stream.getTracks().forEach(track => track.stop());
-      } catch (audioErr) {
-        console.warn('⚠️ Audio permission request failed (Twilio SDK will request):', audioErr);
-        // Continue anyway - Twilio SDK will request permissions
-      }
+      // Let Twilio SDK handle audio permissions automatically
+      // Don't pre-request permissions as it can interfere with SDK's audio setup
+      // SDK will request permissions when needed during connect()
       
       // Connect to conference (Twilio SDK 2.x returns a Promise)
       // Await the Promise to get the actual Call object
@@ -307,6 +292,48 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(true);
             setIsConnecting(false);
             
+            // Verify audio is working
+            console.log('🔊 Checking audio setup...');
+            try {
+              // Check peer connection for audio tracks
+              const pc = call.getPeerConnection ? call.getPeerConnection() : 
+                          (call._peerConnection || call._pc || null);
+              
+              if (pc) {
+                // Check senders (outgoing audio)
+                const senders = pc.getSenders();
+                const audioSenders = senders.filter(s => s.track && s.track.kind === 'audio');
+                console.log('📤 Outgoing audio tracks:', audioSenders.length);
+                audioSenders.forEach((sender, idx) => {
+                  console.log(`  - Track ${idx + 1}: ${sender.track.id}, enabled: ${sender.track.enabled}, readyState: ${sender.track.readyState}`);
+                });
+                
+                // Check receivers (incoming audio)
+                const receivers = pc.getReceivers();
+                const audioReceivers = receivers.filter(r => r.track && r.track.kind === 'audio');
+                console.log('📥 Incoming audio tracks:', audioReceivers.length);
+                audioReceivers.forEach((receiver, idx) => {
+                  console.log(`  - Track ${idx + 1}: ${receiver.track.id}, enabled: ${receiver.track.enabled}, readyState: ${receiver.track.readyState}`);
+                });
+                
+                // Ensure all audio tracks are enabled
+                audioSenders.forEach(sender => {
+                  if (sender.track && !sender.track.enabled) {
+                    console.log('🔊 Enabling outgoing audio track:', sender.track.id);
+                    sender.track.enabled = true;
+                  }
+                });
+                audioReceivers.forEach(receiver => {
+                  if (receiver.track && !receiver.track.enabled) {
+                    console.log('🔊 Enabling incoming audio track:', receiver.track.id);
+                    receiver.track.enabled = true;
+                  }
+                });
+              }
+            } catch (err) {
+              console.warn('⚠️ Error checking audio setup:', err);
+            }
+            
             // Get and store media streams for mute functionality
             try {
               setTimeout(() => {
@@ -314,6 +341,20 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
                 if (streams.local) {
                   localMediaStream.current = streams.local;
                   console.log('📞 Local media stream captured for mute');
+                  // Verify local stream has audio tracks
+                  const audioTracks = streams.local.getAudioTracks();
+                  console.log('📞 Local audio tracks:', audioTracks.length);
+                  audioTracks.forEach((track, idx) => {
+                    console.log(`  - Track ${idx + 1}: ${track.id}, enabled: ${track.enabled}, muted: ${track.muted}, readyState: ${track.readyState}`);
+                  });
+                }
+                if (streams.remote) {
+                  console.log('📞 Remote media stream available');
+                  const remoteAudioTracks = streams.remote.getAudioTracks();
+                  console.log('📞 Remote audio tracks:', remoteAudioTracks.length);
+                  remoteAudioTracks.forEach((track, idx) => {
+                    console.log(`  - Track ${idx + 1}: ${track.id}, enabled: ${track.enabled}, muted: ${track.muted}, readyState: ${track.readyState}`);
+                  });
                 }
                 console.log('📞 Media streams captured for mute');
               }, 500); // Wait a bit for streams to be ready
@@ -405,6 +446,48 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             setIsConnected(true);
             setIsConnecting(false);
             
+            // Verify audio is working
+            console.log('🔊 Checking audio setup...');
+            try {
+              // Check peer connection for audio tracks
+              const pc = call.getPeerConnection ? call.getPeerConnection() : 
+                          (call._peerConnection || call._pc || null);
+              
+              if (pc) {
+                // Check senders (outgoing audio)
+                const senders = pc.getSenders();
+                const audioSenders = senders.filter(s => s.track && s.track.kind === 'audio');
+                console.log('📤 Outgoing audio tracks:', audioSenders.length);
+                audioSenders.forEach((sender, idx) => {
+                  console.log(`  - Track ${idx + 1}: ${sender.track.id}, enabled: ${sender.track.enabled}, readyState: ${sender.track.readyState}`);
+                });
+                
+                // Check receivers (incoming audio)
+                const receivers = pc.getReceivers();
+                const audioReceivers = receivers.filter(r => r.track && r.track.kind === 'audio');
+                console.log('📥 Incoming audio tracks:', audioReceivers.length);
+                audioReceivers.forEach((receiver, idx) => {
+                  console.log(`  - Track ${idx + 1}: ${receiver.track.id}, enabled: ${receiver.track.enabled}, readyState: ${receiver.track.readyState}`);
+                });
+                
+                // Ensure all audio tracks are enabled
+                audioSenders.forEach(sender => {
+                  if (sender.track && !sender.track.enabled) {
+                    console.log('🔊 Enabling outgoing audio track:', sender.track.id);
+                    sender.track.enabled = true;
+                  }
+                });
+                audioReceivers.forEach(receiver => {
+                  if (receiver.track && !receiver.track.enabled) {
+                    console.log('🔊 Enabling incoming audio track:', receiver.track.id);
+                    receiver.track.enabled = true;
+                  }
+                });
+              }
+            } catch (err) {
+              console.warn('⚠️ Error checking audio setup:', err);
+            }
+            
             // Get and store media streams for mute functionality
             try {
               setTimeout(() => {
@@ -412,6 +495,20 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
                 if (streams.local) {
                   localMediaStream.current = streams.local;
                   console.log('📞 Local media stream captured for mute');
+                  // Verify local stream has audio tracks
+                  const audioTracks = streams.local.getAudioTracks();
+                  console.log('📞 Local audio tracks:', audioTracks.length);
+                  audioTracks.forEach((track, idx) => {
+                    console.log(`  - Track ${idx + 1}: ${track.id}, enabled: ${track.enabled}, muted: ${track.muted}, readyState: ${track.readyState}`);
+                  });
+                }
+                if (streams.remote) {
+                  console.log('📞 Remote media stream available');
+                  const remoteAudioTracks = streams.remote.getAudioTracks();
+                  console.log('📞 Remote audio tracks:', remoteAudioTracks.length);
+                  remoteAudioTracks.forEach((track, idx) => {
+                    console.log(`  - Track ${idx + 1}: ${track.id}, enabled: ${track.enabled}, muted: ${track.muted}, readyState: ${track.readyState}`);
+                  });
                 }
                 console.log('📞 Media streams captured for mute');
               }, 500); // Wait a bit for streams to be ready
