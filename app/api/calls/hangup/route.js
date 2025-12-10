@@ -2,6 +2,24 @@ import { NextResponse } from 'next/server';
 import { getClient } from '../../../../lib/twilio';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 
+/**
+ * Hangup API - ONLY for server-side initiated hangups
+ * 
+ * ⚠️ DO NOT call this when user clicks hangup button!
+ * The Twilio Web SDK automatically handles client-side disconnects and sends
+ * status updates to the backend via call-status-callback.
+ * 
+ * This API is ONLY for:
+ * - Admin forcing agent to hang up
+ * - Auto timeout hangup
+ * - IVR logic
+ * - Server-side scheduling
+ * 
+ * Calling this API during a client-side hangup creates a race condition:
+ * - SDK sends disconnect → Twilio updates call status
+ * - API also tries to update status → conflict
+ * - Device states don't match → crashes
+ */
 export async function POST(request) {
   try {
     // Validate JWT token

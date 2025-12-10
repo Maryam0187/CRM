@@ -314,7 +314,9 @@ const CallButton = ({
     // setCallTimer(0);
     
     try {
-      // Disconnect web call first (immediate) - always try to hang up, even during ringing
+      // Disconnect web call - Twilio SDK handles the disconnect and notifies backend automatically
+      // DO NOT call backend hangup API here - it causes race condition and double hangup issues
+      // The SDK already sends disconnect events to Twilio, backend will receive status callback
       if (webCallInterfaceRef.current?.hangUp) {
         try {
           // Always try to hang up - works for ringing, in-progress, or any state
@@ -325,49 +327,13 @@ const CallButton = ({
         }
       }
       
-      // Hang up via API (non-blocking, fire and forget)
-      // IMPORTANT: Use fetch directly to bypass apiClient token refresh/redirect logic
-      if (completedCallSid) {
-        // Use setTimeout to ensure this runs asynchronously and doesn't interfere
-        setTimeout(() => {
-          try {
-            const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-            
-            if (!token) {
-              // No token available, skip API call silently
-              return;
-            }
-
-            // Use fetch with a timeout to prevent hanging
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-
-            fetch('/api/calls/hangup', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                callSid: completedCallSid
-              }),
-              signal: controller.signal
-            })
-            .then(response => {
-              clearTimeout(timeoutId);
-              // Don't check response status - just silently ignore
-              // Call is already disconnected via SDK, this is just a backend notification
-            })
-            .catch(err => {
-              clearTimeout(timeoutId);
-              // Silently ignore ALL errors - don't let this cause any issues
-              // Call is already disconnected via SDK
-            });
-          } catch (err) {
-            // Catch any synchronous errors and ignore them
-          }
-        }, 0);
-      }
+      // NOTE: Backend /api/calls/hangup API is ONLY for:
+      // - Admin forcing agent to hang up
+      // - Auto timeout hangup
+      // - IVR logic
+      // - Server-side scheduling
+      // DO NOT call it when user clicks hang up - SDK handles it automatically
+      
     } catch (err) {
       console.error('Error in handleEndCall:', err);
       // Don't let errors break the app - just log them
