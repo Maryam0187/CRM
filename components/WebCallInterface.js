@@ -584,14 +584,6 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       
     } catch (err) {
       console.warn('⚠️ Error in hangUp (ignored):', err.message);
-      // Fallback: try disconnectAll if we haven't already
-      if (device && typeof device.disconnectAll === 'function') {
-        try {
-          device.disconnectAll();
-        } catch (e) {
-          console.warn('⚠️ Final fallback disconnect failed:', e.message);
-        }
-      }
       // Still update UI state
       setIsConnected(false);
       setIsConnecting(false);
