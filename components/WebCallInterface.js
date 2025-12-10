@@ -83,19 +83,32 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         
         const shouldFilterMessage = (message) => {
           const lowerMessage = message.toLowerCase();
+          // Filter all Twilio Insights-related errors and warnings
+          // These are harmless analytics errors that don't affect call functionality
           return lowerMessage.includes('cannot connect to insights') ||
                  lowerMessage.includes('unable to post') ||
                  lowerMessage.includes('failed to fetch') ||
-                 (lowerMessage.includes('insights') && (lowerMessage.includes('error') || lowerMessage.includes('failed') || lowerMessage.includes('cannot'))) ||
+                 lowerMessage.includes('received error: typeerror') ||
+                 lowerMessage.includes('typeerror: failed to fetch') ||
+                 (lowerMessage.includes('insights') && (lowerMessage.includes('error') || lowerMessage.includes('failed') || lowerMessage.includes('cannot') || lowerMessage.includes('unable'))) ||
                  lowerMessage.includes('eventpublisher') ||
+                 lowerMessage.includes('event publisher') ||
                  (lowerMessage.includes('heartbeat') && lowerMessage.includes('wstransport')) ||
                  lowerMessage.includes('wstransport') ||
                  lowerMessage.includes('dtls-transport-state') ||
-                 (lowerMessage.includes('connection disconnected') && lowerMessage.includes('insights')) ||
+                 (lowerMessage.includes('connection disconnected') && (lowerMessage.includes('insights') || lowerMessage.includes('event'))) ||
                  lowerMessage.includes('quality-metrics') ||
                  lowerMessage.includes('metrics-sample') ||
+                 lowerMessage.includes('dtls-transport-state closed event') ||
+                 lowerMessage.includes('disconnected-by-local event') ||
+                 lowerMessage.includes('quality-metrics-samples') ||
+                 lowerMessage.includes('unable to post dtls-transport-state') ||
+                 lowerMessage.includes('unable to post quality-metrics') ||
+                 lowerMessage.includes('unable to post connection') ||
                  (lowerMessage.includes('twiliovoice') && lowerMessage.includes('device') && (lowerMessage.includes('cannot') || lowerMessage.includes('failed'))) ||
-                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('eventpublisher'));
+                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('eventpublisher')) ||
+                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('event publisher')) ||
+                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('unable to post'));
         };
         
         console.warn = (...args) => {
