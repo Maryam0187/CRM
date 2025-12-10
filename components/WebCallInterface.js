@@ -935,9 +935,9 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
   return (
     <>
-      {/* Call Status Indicator - Fixed Bottom Right Corner */}
+      {/* Call Status Indicator - Fixed Bottom Right (above WebCallInterface) */}
       {statusDisplay && (
-        <div className="fixed bottom-4 right-4 z-50">
+        <div className="fixed bottom-32 right-4 z-50">
           <div className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg border-2 backdrop-blur-sm ${
             statusDisplay.color === 'green' ? 'bg-green-50/90 border-green-300 text-green-700' :
             statusDisplay.color === 'blue' ? 'bg-blue-50/90 border-blue-300 text-blue-700' :

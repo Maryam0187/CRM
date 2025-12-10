@@ -51,6 +51,7 @@ const CallButton = ({
   const hasNotifiedCompletion = useRef(false);
   const webCallInterfaceRef = useRef(null);
   const previousCallSid = useRef(null);
+  const isEndingCall = useRef(false); // Prevent multiple calls to handleEndCall
   
   // Get call status - use socket context directly for immediate updates
   const { currentCallStatus, isCallCompleted } = useCallStatus(currentCallSid);
@@ -287,8 +288,14 @@ const CallButton = ({
   // End call - called when agent clicks "End Call" button
   const handleEndCall = async () => {
     console.log('handleEndCall called');
-    if (hasNotifiedCompletion.current) return;
     
+    // Prevent multiple simultaneous calls to handleEndCall
+    if (hasNotifiedCompletion.current || isEndingCall.current) {
+      console.log('⚠️ handleEndCall already in progress, skipping duplicate call');
+      return;
+    }
+    
+    isEndingCall.current = true;
     hasNotifiedCompletion.current = true;
     const completedCallSid = currentCallSid;
     
@@ -363,6 +370,7 @@ const CallButton = ({
     setTimeout(() => {
       setCurrentCallSid(null);
       setConferenceName(null);
+      isEndingCall.current = false; // Reset flag after delay
     }, 100);
   };
 
@@ -566,15 +574,22 @@ const CallButton = ({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              handleEndCall();
+              if (!isEndingCall.current) {
+                handleEndCall();
+              }
             }}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-red-500 hover:bg-red-600 text-white"
+            disabled={isEndingCall.current}
+            className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg ${
+              isEndingCall.current 
+                ? 'bg-gray-400 cursor-not-allowed' 
+                : 'bg-red-500 hover:bg-red-600'
+            } text-white`}
             title="End Call"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-            <span className="text-sm">End Call</span>
+            <span className="text-sm">{isEndingCall.current ? 'Ending...' : 'End Call'}</span>
           </button>
         </div>
       )}
@@ -582,14 +597,25 @@ const CallButton = ({
       {/* End Call Button - when ringing */}
       {isRinging && (
         <button
-          onClick={handleEndCall}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-red-500 hover:bg-red-600 text-white"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!isEndingCall.current) {
+              handleEndCall();
+            }
+          }}
+          disabled={isEndingCall.current}
+          className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg ${
+            isEndingCall.current 
+              ? 'bg-gray-400 cursor-not-allowed' 
+              : 'bg-red-500 hover:bg-red-600'
+          } text-white`}
           title="End Call"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
-          <span className="text-sm">End Call</span>
+          <span className="text-sm">{isEndingCall.current ? 'Ending...' : 'End Call'}</span>
         </button>
       )}
 
@@ -806,10 +832,10 @@ const CallButton = ({
         </div>
       )}
 
-      {/* Web Call Interface - hidden, works in background */}
+      {/* Web Call Interface - Bottom Right Corner (visible for customer) */}
       {/* Agent joins call via Voice SDK using WebCallInterface */}
       {showWebInterface && conferenceName && (
-        <div className="hidden">
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm">
           <WebCallInterface
             ref={webCallInterfaceRef}
             conferenceName={conferenceName}
@@ -825,7 +851,10 @@ const CallButton = ({
             }}
             onCallDisconnected={() => {
               setIsWebCallConnected(false);
-              handleEndCall();
+              // Only call handleEndCall if not already ending (prevents duplicate calls)
+              if (!isEndingCall.current && !hasNotifiedCompletion.current) {
+                handleEndCall();
+              }
             }}
           />
         </div>
