@@ -554,21 +554,64 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         return;
       }
       
-      // Rule: Only use device.disconnectAll() - let SDK handle everything
-      // DO NOT call device.destroy() here - wait for disconnect events
-      if (device && typeof device.disconnectAll === 'function') {
+      // Check if we have an active call connection
+      if (activeConnection.current) {
+        const call = activeConnection.current;
+        
         try {
-          console.log('📞 Disconnecting all calls via device.disconnectAll()');
+          // Get call status - handle both function and property
+          let callStatus = null;
+          if (typeof call.status === 'function') {
+            try {
+              callStatus = call.status();
+            } catch (e) {
+              // If function call fails, try as property
+              callStatus = call._status || null;
+            }
+          } else {
+            callStatus = call.status || call._status || null;
+          }
+          
+          console.log('📞 Call status during hangup:', callStatus);
+          
+          // If call is open (connected), disconnect it directly
+          if (callStatus === 'open' || callStatus === 'answered' || callStatus === 'connected') {
+            if (typeof call.disconnect === 'function') {
+              console.log('📞 Call is open, disconnecting via call.disconnect()');
+              call.disconnect();
+              // Clear reference after disconnect
+              activeConnection.current = null;
+            }
+          } else if (callStatus === 'ringing' || callStatus === 'pending' || callStatus === 'connecting') {
+            // If call is ringing, use device.disconnectAll() to cancel it
+            console.log('📞 Call is ringing/connecting, using device.disconnectAll()');
+            if (device && typeof device.disconnectAll === 'function') {
+              device.disconnectAll();
+            }
+            activeConnection.current = null;
+          } else {
+            // For any other status, use device.disconnectAll() as fallback
+            console.log('📞 Call in unknown state, using device.disconnectAll()');
+            if (device && typeof device.disconnectAll === 'function') {
+              device.disconnectAll();
+            }
+            activeConnection.current = null;
+          }
+        } catch (callErr) {
+          console.warn('⚠️ Error checking call status, using device.disconnectAll():', callErr.message);
+          // Fallback to device.disconnectAll() if call status check fails
+          if (device && typeof device.disconnectAll === 'function') {
+            device.disconnectAll();
+          }
+          activeConnection.current = null;
+        }
+      } else {
+        // No active connection, just use device.disconnectAll()
+        if (device && typeof device.disconnectAll === 'function') {
+          console.log('📞 No active call, using device.disconnectAll()');
           device.disconnectAll();
-          // SDK will fire disconnect events - cleanup happens in event handlers
-          // DO NOT destroy device here - causes race condition with Insights events
-        } catch (e) {
-          console.warn('⚠️ Error in device.disconnectAll:', e.message);
         }
       }
-      
-      // Clear active connection reference immediately
-      activeConnection.current = null;
       
       // Update UI state immediately
       setIsConnected(false);
@@ -584,9 +627,18 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
       
     } catch (err) {
       console.warn('⚠️ Error in hangUp (ignored):', err.message);
+      // Fallback: try device.disconnectAll() if everything else fails
+      if (device && typeof device.disconnectAll === 'function') {
+        try {
+          device.disconnectAll();
+        } catch (e) {
+          console.warn('⚠️ Final fallback disconnect failed:', e.message);
+        }
+      }
       // Still update UI state
       setIsConnected(false);
       setIsConnecting(false);
+      activeConnection.current = null;
     }
   };
 
