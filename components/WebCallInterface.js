@@ -45,6 +45,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [callStatus, setCallStatus] = useState(null); // Track current call status for UI display
   const activeConnection = useRef(null);
   const localMediaStream = useRef(null); // Store local media stream for muting
   const isCleaningUp = useRef(false);
@@ -298,6 +299,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
     setIsConnecting(true);
     setError(null);
+    setCallStatus('connecting');
 
     try {
       console.log(`📞 Attempting to join conference: ${conferenceName}`);
@@ -362,6 +364,28 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
       console.log('📞 Call object created:', call);
       activeConnection.current = call;
+      
+      // Check initial status and update UI
+      try {
+        let initialStatus = null;
+        if (typeof call.status === 'function') {
+          try {
+            initialStatus = call.status();
+          } catch (e) {
+            initialStatus = call._status || null;
+          }
+        } else {
+          initialStatus = call.status || call._status || null;
+        }
+        
+        if (initialStatus === 'ringing' || initialStatus === 'pending' || initialStatus === 'connecting') {
+          setCallStatus('ringing');
+        } else if (initialStatus === 'open' || initialStatus === 'answered' || initialStatus === 'connected') {
+          setCallStatus('connected');
+        }
+      } catch (e) {
+        // Ignore status check errors
+      }
 
       // Attach event listeners
       if (call && typeof call === 'object') {
@@ -394,6 +418,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
               console.log('📞 Call disconnected (client) - waiting for SDK to finish...');
               setIsConnected(false);
               setIsConnecting(false);
+              setCallStatus('disconnected');
               activeConnection.current = null;
               localMediaStream.current = null;
               
@@ -438,6 +463,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
               console.log('❌ Call canceled (customer declined or no answer)');
               setIsConnected(false);
               setIsConnecting(false);
+              setCallStatus('canceled');
               activeConnection.current = null;
               localMediaStream.current = null;
               
@@ -463,10 +489,13 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
               
               if (errorCode === 31603 || errorMessage.includes('Decline')) {
                 setError('Call was declined by customer or Twilio.');
+                setCallStatus('declined');
               } else if (errorCode === 31005) {
                 setError('Connection error. Please check your internet connection and try again.');
+                setCallStatus('error');
               } else {
                 setError(`Call error: ${errorMessage} (Code: ${errorCode || 'N/A'})`);
+                setCallStatus('error');
               }
               
               setIsConnected(false);
@@ -492,6 +521,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             try {
               console.error('❌ Call rejected');
               setError('Call was rejected. Please check TwiML App Voice URL configuration.');
+              setCallStatus('rejected');
               setIsConnected(false);
               setIsConnecting(false);
               activeConnection.current = null;
@@ -548,6 +578,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   const hangUp = () => {
     try {
       console.log('📞 hangUp called');
+      setCallStatus('disconnecting');
       
       if (isCleaningUp.current) {
         console.log('⚠️ Cleanup already in progress, skipping');
@@ -879,55 +910,111 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
     return null;
   }
 
+  // Get status display info for bottom-right indicator
+  const getStatusDisplay = () => {
+    if (!callStatus && !isConnecting && !isConnected) return null;
+    
+    const statusConfig = {
+      'connecting': { text: 'Connecting...', color: 'blue', icon: '🔄' },
+      'ringing': { text: 'Ringing...', color: 'yellow', icon: '📞' },
+      'connected': { text: 'Connected', color: 'green', icon: '✓' },
+      'disconnecting': { text: 'Disconnecting...', color: 'orange', icon: '📞' },
+      'canceling': { text: 'Canceling...', color: 'orange', icon: '📞' },
+      'disconnected': { text: 'Disconnected', color: 'gray', icon: '✕' },
+      'canceled': { text: 'Canceled', color: 'orange', icon: '✕' },
+      'declined': { text: 'Declined', color: 'red', icon: '✕' },
+      'rejected': { text: 'Rejected', color: 'red', icon: '✕' },
+      'error': { text: 'Error', color: 'red', icon: '⚠' }
+    };
+
+    const config = statusConfig[callStatus] || (isConnecting ? statusConfig['connecting'] : isConnected ? statusConfig['connected'] : null);
+    return config;
+  };
+
+  const statusDisplay = getStatusDisplay();
+
   return (
-    <div className="w-full">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-gray-800">Web Call</h3>
+    <>
+      {/* Call Status Indicator - Fixed Bottom Right Corner */}
+      {statusDisplay && (
+        <div className="fixed bottom-4 right-4 z-50">
+          <div className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg border-2 backdrop-blur-sm ${
+            statusDisplay.color === 'green' ? 'bg-green-50/90 border-green-300 text-green-700' :
+            statusDisplay.color === 'blue' ? 'bg-blue-50/90 border-blue-300 text-blue-700' :
+            statusDisplay.color === 'yellow' ? 'bg-yellow-50/90 border-yellow-300 text-yellow-700' :
+            statusDisplay.color === 'orange' ? 'bg-orange-50/90 border-orange-300 text-orange-700' :
+            statusDisplay.color === 'red' ? 'bg-red-50/90 border-red-300 text-red-700' :
+            'bg-gray-50/90 border-gray-300 text-gray-700'
+          }`}>
+            {(statusDisplay.color === 'blue' || statusDisplay.color === 'orange') && (isConnecting || callStatus === 'connecting' || callStatus === 'disconnecting' || callStatus === 'canceling') && (
+              <div className={`animate-spin rounded-full h-4 w-4 border-2 ${
+                statusDisplay.color === 'blue' ? 'border-blue-600 border-t-transparent' : 'border-orange-600 border-t-transparent'
+              }`}></div>
+            )}
+            {(statusDisplay.color === 'green' && isConnected) && (
+              <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+            )}
+            {!isConnecting && !isConnected && !callStatus?.includes('ing') && (
+              <span className="text-lg">{statusDisplay.icon}</span>
+            )}
+            <span className="font-semibold text-sm">{statusDisplay.text}</span>
+            {isMuted && isConnected && (
+              <span className="text-xs px-2 py-0.5 bg-gray-200/80 rounded" title="Muted">🔇 Muted</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Main Component */}
+      <div className="w-full">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-gray-800">Web Call</h3>
+          {isConnected && (
+            <div className="flex items-center gap-2 text-green-600">
+              <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-sm">Connected</span>
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <div className="mb-3 p-2 bg-red-100 text-red-700 text-sm rounded">
+            {error}
+          </div>
+        )}
+
+        {isConnecting && (
+          <div className="flex items-center gap-2 text-blue-600">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+            <span>Connecting...</span>
+          </div>
+        )}
+
         {isConnected && (
           <div className="flex items-center gap-2 text-green-600">
             <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-sm">Connected</span>
+            <span>Connected to conference</span>
           </div>
         )}
+
+        {!isConnected && !isConnecting && !error && device && (
+          <button
+            onClick={() => joinConference()}
+            className="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          >
+            Join Call
+          </button>
+        )}
+
+        {!device && !error && (
+          <div className="text-sm text-gray-500">Initializing device...</div>
+        )}
+
+        <div className="mt-2 text-xs text-gray-500">
+          Conference: {conferenceName}
+        </div>
       </div>
-
-      {error && (
-        <div className="mb-3 p-2 bg-red-100 text-red-700 text-sm rounded">
-          {error}
-        </div>
-      )}
-
-      {isConnecting && (
-        <div className="flex items-center gap-2 text-blue-600">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-          <span>Connecting...</span>
-        </div>
-      )}
-
-      {isConnected && (
-        <div className="flex items-center gap-2 text-green-600">
-          <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-          <span>Connected to conference</span>
-        </div>
-      )}
-
-      {!isConnected && !isConnecting && !error && device && (
-        <button
-          onClick={() => joinConference()}
-          className="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          Join Call
-        </button>
-      )}
-
-      {!device && !error && (
-        <div className="text-sm text-gray-500">Initializing device...</div>
-      )}
-
-      <div className="mt-2 text-xs text-gray-500">
-        Conference: {conferenceName}
-      </div>
-    </div>
+    </>
   );
 });
 

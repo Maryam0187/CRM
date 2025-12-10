@@ -286,6 +286,7 @@ const CallButton = ({
 
   // End call - called when agent clicks "End Call" button
   const handleEndCall = async () => {
+    console.log('handleEndCall called');
     if (hasNotifiedCompletion.current) return;
     
     hasNotifiedCompletion.current = true;
