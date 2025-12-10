@@ -6,16 +6,28 @@ import apiClient from '../lib/apiClient';
 import { Device } from '@twilio/voice-sdk';
 
 // Add global unhandled rejection handler to prevent SDK errors from crashing app
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && !window.__twilioRejectionHandlerAdded) {
+  window.__twilioRejectionHandlerAdded = true;
+  
   window.addEventListener('unhandledrejection', (e) => {
-    // Filter out Twilio Insights errors - they're informational
+    // Filter out Twilio Insights errors - they're informational and harmless
     const reason = e.reason?.message || e.reason?.toString() || '';
-    const isTwilioInsightsError = reason.toLowerCase().includes('insights') ||
-                                  reason.toLowerCase().includes('eventgw') ||
-                                  reason.toLowerCase().includes('failed to fetch');
+    const reasonStr = String(reason).toLowerCase();
+    
+    const isTwilioInsightsError = 
+      reasonStr.includes('insights') ||
+      reasonStr.includes('eventgw') ||
+      reasonStr.includes('eventpublisher') ||
+      reasonStr.includes('failed to fetch') ||
+      reasonStr.includes('typeerror') ||
+      reasonStr.includes('dtls-transport-state') ||
+      reasonStr.includes('quality-metrics') ||
+      reasonStr.includes('disconnected-by-local') ||
+      reasonStr.includes('metrics-sample');
     
     if (isTwilioInsightsError) {
       // Silently ignore Insights-related unhandled rejections
+      // These are normal when network blocks Insights POSTs or CORS issues occur
       e.preventDefault();
       return;
     }
@@ -92,10 +104,8 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           allowIncomingWhileBusy: false,
           enableRTCStats: false,
           closeProtection: false,
-          // Disable insights to prevent failed fetch errors
-          insights: {
-            enabled: false
-          }
+          disableInsights: true
+
         });
         
         // Suppress console warnings for insights errors
@@ -106,24 +116,31 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           const lowerMessage = message.toLowerCase();
           // Filter all Twilio Insights-related errors and warnings
           // These are harmless analytics errors that don't affect call functionality
-          // Also filter verbose Twilio SDK internal logs
+          // They occur when network blocks Insights POSTs or CORS issues occur
           return lowerMessage.includes('cannot connect to insights') ||
                  lowerMessage.includes('unable to post') ||
                  lowerMessage.includes('failed to fetch') ||
+                 lowerMessage.includes('received error:') ||
                  lowerMessage.includes('received error: typeerror') ||
                  lowerMessage.includes('typeerror: failed to fetch') ||
+                 lowerMessage.includes('typeerror') ||
+                 // Catch the specific error pattern: "[TwilioVoice][EventPublisher] Unable to post..."
+                 (lowerMessage.includes('[twiliovoice]') && lowerMessage.includes('[eventpublisher]') && lowerMessage.includes('unable to post')) ||
+                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('eventpublisher') && lowerMessage.includes('unable to post')) ||
                  (lowerMessage.includes('insights') && (lowerMessage.includes('error') || lowerMessage.includes('failed') || lowerMessage.includes('cannot') || lowerMessage.includes('unable'))) ||
                  lowerMessage.includes('eventpublisher') ||
                  lowerMessage.includes('event publisher') ||
                  (lowerMessage.includes('heartbeat') && lowerMessage.includes('wstransport')) ||
                  lowerMessage.includes('wstransport') ||
                  lowerMessage.includes('dtls-transport-state') ||
+                 lowerMessage.includes('dtls-transport-state closed event') ||
                  (lowerMessage.includes('connection disconnected') && (lowerMessage.includes('insights') || lowerMessage.includes('event'))) ||
+                 lowerMessage.includes('connection disconnected-by-local') ||
+                 lowerMessage.includes('disconnected-by-local event') ||
                  lowerMessage.includes('quality-metrics') ||
                  lowerMessage.includes('metrics-sample') ||
-                 lowerMessage.includes('dtls-transport-state closed event') ||
-                 lowerMessage.includes('disconnected-by-local event') ||
                  lowerMessage.includes('quality-metrics-samples') ||
+                 lowerMessage.includes('metrics-sample event') ||
                  lowerMessage.includes('unable to post dtls-transport-state') ||
                  lowerMessage.includes('unable to post quality-metrics') ||
                  lowerMessage.includes('unable to post connection') ||
