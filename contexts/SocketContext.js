@@ -35,20 +35,40 @@ export const SocketProvider = ({ children }) => {
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
   const reconnectDelay = 3000;
+  const socketInitializedRef = useRef(false);
 
   // Initialize socket connection
   useEffect(() => {
     // Don't attempt connection if user is not authenticated or no access token
     if (!user || !accessToken) {
-      console.log('No user or access token available for socket connection - waiting for authentication');
-      setIsConnected(false);
-      setConnectionStatus('waiting_for_auth');
+      // Only log if we had a socket before (to avoid spam during initial load)
+      if (socket && isConnected) {
+        console.log('⚠️ User or access token unavailable - socket will disconnect');
+        setIsConnected(false);
+        setConnectionStatus('waiting_for_auth');
+      } else {
+        // Silent check - don't spam console during normal auth flow
+        setIsConnected(false);
+        setConnectionStatus('waiting_for_auth');
+      }
+      socketInitializedRef.current = false;
       return;
     }
 
+    // Prevent re-initialization if socket already exists and is connected
+    if (socket && socket.connected) {
+      socketInitializedRef.current = true;
+      return;
+    }
+
+    // Prevent re-initialization if we're already in the process of initializing
+    if (socketInitializedRef.current && socket) {
+      return;
+    }
+
+    socketInitializedRef.current = true;
+
     console.log('🔌 Initializing Socket.IO connection...');
-    console.log('NEXT_PUBLIC_SOCKET_URL:', process.env.NEXT_PUBLIC_SOCKET_URL);
-    console.log('NODE_ENV:', process.env.NODE_ENV);
     
     const isProduction = process.env.NODE_ENV === 'production';
     
@@ -295,9 +315,13 @@ export const SocketProvider = ({ children }) => {
 
     setSocket(socketInstance);
 
-    // Cleanup on unmount
+    // Cleanup on unmount or when dependencies change
     return () => {
-      console.log('🧹 Cleaning up socket connection...');
+      socketInitializedRef.current = false;
+      // Only log cleanup if socket was actually connected
+      if (socketInstance && socketInstance.connected) {
+        console.log('🧹 Cleaning up socket connection...');
+      }
       if (socketInstance) {
         socketInstance.disconnect();
       }
