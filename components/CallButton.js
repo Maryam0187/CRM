@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useCallStatus } from '../lib/useCallStatus';
 import apiClient from '../lib/apiClient';
 import WebCallInterface from './WebCallInterface';
 
-const CallButton = ({ 
+const CallButton = forwardRef(function CallButton({ 
   customerId, 
   saleId, 
   phoneNumber, 
@@ -15,7 +15,7 @@ const CallButton = ({
   onCallCompleted,
   className = '',
   size = 'default'
-}) => {
+}, ref) {
   const { user } = useAuth();
   const { getCallStatus } = useSocket();
   
@@ -389,31 +389,79 @@ const CallButton = ({
       // Stay on the same page
     }
     
-    // Reset state immediately
+    // Reset state immediately to update UI right away
     setIsCalling(false);
     setIsWebCallConnected(false);
-    setShowWebInterface(false);
-    setError(null);
     setIsMuted(false);
+    setError(null);
+    
+    // Clear call SID and conference immediately to force UI update
+    // This makes the UI show "idle" state instead of "ringing" or "in-progress"
+    setCurrentCallSid(null);
+    setConferenceName(null);
+    
+    // Reset timer
+    setCallTimer(0);
+    
+    // Hide WebCallInterface after a short delay to allow smooth disconnect
+    setTimeout(() => {
+      setShowWebInterface(false);
+    }, 500);
     
     // Notify parent
     if (onCallCompleted && completedCallSid) {
-      onCallCompleted({
-        callSid: completedCallSid,
-        status: 'completed',
-        customerId,
-        saleId,
-        phoneNumber,
-        customerName
-      });
+      try {
+        onCallCompleted({
+          callSid: completedCallSid,
+          status: 'completed',
+          customerId,
+          saleId,
+          phoneNumber,
+          customerName
+        });
+      } catch (callbackErr) {
+        console.warn('Error in onCallCompleted callback:', callbackErr);
+      }
     }
     
+    // Reset completion flag after delay
     setTimeout(() => {
-      setCurrentCallSid(null);
-      setConferenceName(null);
-      isEndingCall.current = false; // Reset flag after delay
-    }, 100);
+      hasNotifiedCompletion.current = false;
+      isEndingCall.current = false;
+    }, 1000);
   };
+
+  // Expose call state and methods via ref
+  useImperativeHandle(ref, () => ({
+    hasActiveCall: () => {
+      // Check if there's an active call (ringing, connecting, or in-progress)
+      // Use the derived state values
+      const latestStatus = getLatestStatus();
+      const callStatusValue = latestStatus?.status || null;
+      const ringing = callStatusValue === 'ringing';
+      const inProgress = callStatusValue === 'in-progress';
+      
+      return !!(currentCallSid || isCalling || isWebCallConnected || ringing || inProgress);
+    },
+    hangUp: () => {
+      // Expose hangup method to parent
+      if (!isEndingCall.current) {
+        handleEndCall();
+      }
+    },
+    getCallState: () => {
+      const latestStatus = getLatestStatus();
+      const callStatusValue = latestStatus?.status || null;
+      return {
+        isCalling,
+        currentCallSid,
+        isWebCallConnected,
+        isRinging: callStatusValue === 'ringing',
+        isInProgress: callStatusValue === 'in-progress',
+        isEnded: callStatusValue === 'completed' || callStatusValue === 'failed' || callStatusValue === 'canceled'
+      };
+    }
+  }), [currentCallSid, isCalling, isWebCallConnected, getLatestStatus, handleEndCall]);
 
   // Fetch agents for transfer
   const fetchAvailableAgents = async () => {
@@ -502,8 +550,8 @@ const CallButton = ({
           </div>
         )}
         
-        {/* Call Button - shows when idle */}
-        {!isRinging && !isInProgress && !isEnded && !isCalling && (
+        {/* Call Button - shows when idle (no active call) */}
+        {!isRinging && !isInProgress && !isEnded && !isCalling && !currentCallSid && (
           <button
             onClick={handleCall}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-blue-600 hover:bg-blue-700 text-white"
@@ -514,8 +562,8 @@ const CallButton = ({
           </button>
         )}
         
-        {/* Calling State */}
-        {isCalling && !isRinging && !isInProgress && !isEnded && (
+        {/* Calling State - only if we have callSid */}
+        {isCalling && !isRinging && !isInProgress && !isEnded && currentCallSid && (
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-orange-50 text-orange-700 border border-orange-200">
             <span className="inline-block w-2 h-2 bg-orange-500 rounded-full mr-2 animate-pulse"></span>
             <PhoneIcon isCalling={true} />
@@ -523,8 +571,8 @@ const CallButton = ({
           </div>
         )}
         
-        {/* Ringing State */}
-        {isRinging && !isEnded && (
+        {/* Ringing State - only show if we have a callSid (active call) */}
+        {isRinging && !isEnded && currentCallSid && (
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-blue-50 text-blue-700 border border-blue-200">
             <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>
             <PhoneIcon isCalling={true} />
@@ -532,8 +580,8 @@ const CallButton = ({
           </div>
         )}
         
-        {/* In-Progress State - shows timer */}
-        {isInProgress && !isEnded && (
+        {/* In-Progress State - shows timer - only show if we have a callSid */}
+        {isInProgress && !isEnded && currentCallSid && (
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-green-50 text-green-700 border border-green-200">
             <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
             <PhoneIcon isCalling={true} />
@@ -541,17 +589,17 @@ const CallButton = ({
           </div>
         )}
         
-        {/* Ended State - shows duration if call was in-progress */}
-        {isEnded && (finalDuration || callTimer > 0) && callStatus === 'completed' && (
+        {/* Ended State - show when call ended (check hasNotifiedCompletion or no currentCallSid after ending) */}
+        {((isEnded || hasNotifiedCompletion.current) && !currentCallSid) && (
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold bg-gray-50 text-gray-700 border border-gray-200">
             <PhoneIcon isCalling={false} />
-            {getDisplayText()}
+            {finalDuration ? `Completed (${formatTimer(finalDuration)})` : 'Call Ended'}
           </div>
         )}
       </div>
 
-      {/* Call Controls - only when in-progress */}
-      {isInProgress && (
+      {/* Call Controls - only when in-progress and not ended */}
+      {isInProgress && !isEnded && currentCallSid && (
         <div className="inline-flex items-center gap-2 flex-wrap relative z-10">
           {/* Mute Button */}
           <button
@@ -635,8 +683,8 @@ const CallButton = ({
         </div>
       )}
 
-      {/* End Call Button - when ringing */}
-      {isRinging && (
+      {/* End Call Button - when ringing (only show if not ended and has callSid) */}
+      {isRinging && !isEnded && currentCallSid && (
         <button
           onClick={(e) => {
             e.preventDefault();
@@ -876,7 +924,7 @@ const CallButton = ({
       {/* Web Call Interface - Bottom Right Corner (visible for customer) */}
       {/* Agent joins call via Voice SDK using WebCallInterface */}
       {showWebInterface && conferenceName && (
-        <div className="fixed bottom-4 right-4 z-50 max-w-sm bg-white rounded-lg shadow-xl border-2 border-gray-200 p-4">
+        <div className="fixed bottom-4 right-4 z-50 w-80 bg-white rounded-lg shadow-2xl border-2 border-blue-200 p-4 backdrop-blur-sm">
           <WebCallInterface
             ref={webCallInterfaceRef}
             conferenceName={conferenceName}
@@ -902,7 +950,7 @@ const CallButton = ({
       )}
     </div>
   );
-};
+});
 
 const PhoneIcon = ({ isCalling = false }) => (
   <svg

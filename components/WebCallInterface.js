@@ -967,52 +967,77 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
       {/* Main Component */}
       <div className="w-full">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-gray-800">Web Call</h3>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200">
+          <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <span className="text-2xl">📞</span>
+            Active Call
+          </h3>
           {isConnected && (
-            <div className="flex items-center gap-2 text-green-600">
-              <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-sm">Connected</span>
+            <div className="flex items-center gap-1.5 px-2 py-1 bg-green-100 rounded-full">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-xs font-semibold text-green-700">LIVE</span>
             </div>
           )}
         </div>
 
+        {/* Error Display */}
         {error && (
-          <div className="mb-3 p-2 bg-red-100 text-red-700 text-sm rounded">
-            {error}
+          <div className="mb-3 p-2.5 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
+            <div className="font-semibold mb-1">⚠️ Error</div>
+            <div>{error}</div>
           </div>
         )}
 
-        {isConnecting && (
-          <div className="flex items-center gap-2 text-blue-600">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-            <span>Connecting...</span>
+        {/* Connecting State */}
+        {isConnecting && !isConnected && (
+          <div className="flex items-center gap-3 py-3 px-4 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent"></div>
+            <div>
+              <div className="font-semibold text-blue-700">Connecting...</div>
+              <div className="text-xs text-blue-600">Please wait</div>
+            </div>
           </div>
         )}
 
+        {/* Connected State */}
         {isConnected && (
-          <div className="flex items-center gap-2 text-green-600">
-            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-            <span>Connected to conference</span>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 py-3 px-4 bg-green-50 rounded-lg border border-green-200">
+              <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+              <div>
+                <div className="font-semibold text-green-700">Connected</div>
+                <div className="text-xs text-green-600">Call in progress</div>
+              </div>
+            </div>
+            
+            {/* Conference Info */}
+            <div className="px-2 py-1.5 bg-gray-50 rounded text-xs text-gray-600 border border-gray-200">
+              <span className="font-semibold">Conference:</span> {conferenceName}
+            </div>
           </div>
         )}
 
+        {/* Join Button */}
         {!isConnected && !isConnecting && !error && device && (
           <button
             onClick={() => joinConference()}
-            className="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-semibold transition-all duration-200 shadow-md hover:shadow-lg flex items-center justify-center gap-2"
           >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+            </svg>
             Join Call
           </button>
         )}
 
+        {/* Initializing State */}
         {!device && !error && (
-          <div className="text-sm text-gray-500">Initializing device...</div>
+          <div className="flex items-center gap-2 py-3 px-4 bg-gray-50 rounded-lg border border-gray-200">
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-400 border-t-transparent"></div>
+            <span className="text-sm text-gray-600">Initializing device...</span>
+          </div>
         )}
-
-        <div className="mt-2 text-xs text-gray-500">
-          Conference: {conferenceName}
-        </div>
       </div>
     </>
   );

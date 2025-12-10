@@ -12,6 +12,7 @@ import CallButton from './CallButton';
 import CallHistory from './CallHistory';
 import AddCardForm from './AddCardForm';
 import AddBankForm from './AddBankForm';
+import ConfirmModal from './ConfirmModal';
 import { 
   formatPhoneNumber, 
   formatCellNumber, 
@@ -96,6 +97,13 @@ export default function AddSale() {
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const { showSuccess, showError } = useToast();
+  
+  // Refs to track CallButton instances for call state checking
+  const callButtonRefs = useRef([]);
+  
+  // Confirmation modal state for navigation with active call
+  const [showNavigateConfirm, setShowNavigateConfirm] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState(null);
   
   // Check if we're in edit mode
   const editId = searchParams.get('id');
@@ -2729,6 +2737,73 @@ Room: `;
     }
   };
 
+  // Check if any call is active
+  const hasActiveCall = () => {
+    return callButtonRefs.current.some(ref => ref && ref.current && ref.current.hasActiveCall && ref.current.hasActiveCall());
+  };
+
+  // Handle navigation with call check
+  const handleNavigation = (navigationFn) => {
+    if (hasActiveCall()) {
+      // Store the navigation function and show confirmation
+      setPendingNavigation(() => navigationFn);
+      setShowNavigateConfirm(true);
+    } else {
+      // No active call, proceed with navigation
+      navigationFn();
+    }
+  };
+
+  // Handle confirmation to navigate and hangup
+  const handleConfirmNavigate = async () => {
+    // Hangup all active calls
+    callButtonRefs.current.forEach(ref => {
+      if (ref && ref.current && ref.current.hangUp) {
+        try {
+          ref.current.hangUp();
+        } catch (err) {
+          console.warn('Error hanging up call:', err);
+        }
+      }
+    });
+    
+    // Wait a bit for hangup to process
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Close modal
+    setShowNavigateConfirm(false);
+    
+    // Execute pending navigation
+    if (pendingNavigation) {
+      pendingNavigation();
+      setPendingNavigation(null);
+    }
+  };
+
+  // Handle window/tab close - hangup call
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (hasActiveCall()) {
+        // Hangup all active calls synchronously
+        callButtonRefs.current.forEach(ref => {
+          if (ref && ref.current && ref.current.hangUp) {
+            try {
+              ref.current.hangUp();
+            } catch (err) {
+              console.warn('Error hanging up call on unload:', err);
+            }
+          }
+        });
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -2759,7 +2834,7 @@ Room: `;
                 </button>
               )}
               <button
-                onClick={() => router.back()}
+                onClick={() => handleNavigation(() => router.back())}
                 className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3555,6 +3630,11 @@ Room: `;
                       <div className="flex items-center justify-between mb-3">
                         <h3 className="text-lg font-medium text-blue-800">Ready to Call</h3>
                         <CallButton
+                          ref={(el) => {
+                            if (el && !callButtonRefs.current.find(ref => ref?.current === el)) {
+                              callButtonRefs.current.push({ current: el });
+                            }
+                          }}
                           customerId={customer.id}
                           saleId={saleForm.id}
                           phoneNumber={customer.phone || customer.landline}
@@ -3600,6 +3680,11 @@ Room: `;
                       <div className="flex items-center justify-between mb-3">
                         <h3 className="text-lg font-medium text-blue-800">Ready to Call</h3>
                         <CallButton
+                          ref={(el) => {
+                            if (el && !callButtonRefs.current.find(ref => ref?.current === el)) {
+                              callButtonRefs.current.push({ current: el });
+                            }
+                          }}
                           customerId={checkedCustomer.customerId}
                           saleId={null} // No sale created yet
                           phoneNumber={customer.phone || customer.landline}
@@ -4960,6 +5045,11 @@ Room: `;
                 {/* Call Button */}
                 <div className="flex justify-center pt-4">
                   <CallButton
+                    ref={(el) => {
+                      if (el && !callButtonRefs.current.find(ref => ref?.current === el)) {
+                        callButtonRefs.current.push({ current: el });
+                      }
+                    }}
                     customerId={checkedCustomer.customerId}
                     saleId={null} // No sale created yet
                     phoneNumber={customer.phone || customer.landline}
@@ -5016,7 +5106,25 @@ Room: `;
         </div>
       )}
 
-
+      {/* Navigation Confirmation Modal - when call is active */}
+      <ConfirmModal
+        isOpen={showNavigateConfirm}
+        onClose={() => {
+          setShowNavigateConfirm(false);
+          setPendingNavigation(null);
+        }}
+        onConfirm={handleConfirmNavigate}
+        title="Active Call Detected"
+        message="You have an active call. Do you want to hang up and navigate away?"
+        confirmText="Hang Up & Leave"
+        cancelText="Stay on Page"
+        confirmButtonClass="bg-red-600 hover:bg-red-700"
+        icon={
+          <svg className="w-16 h-16 text-red-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        }
+      />
     </div>
   );
 }
