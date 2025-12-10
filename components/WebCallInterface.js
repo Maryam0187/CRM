@@ -5,6 +5,27 @@ import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient';
 import { Device } from '@twilio/voice-sdk';
 
+// Add global unhandled rejection handler to prevent SDK errors from crashing app
+if (typeof window !== 'undefined') {
+  window.addEventListener('unhandledrejection', (e) => {
+    // Filter out Twilio Insights errors - they're informational
+    const reason = e.reason?.message || e.reason?.toString() || '';
+    const isTwilioInsightsError = reason.toLowerCase().includes('insights') ||
+                                  reason.toLowerCase().includes('eventgw') ||
+                                  reason.toLowerCase().includes('failed to fetch');
+    
+    if (isTwilioInsightsError) {
+      // Silently ignore Insights-related unhandled rejections
+      e.preventDefault();
+      return;
+    }
+    
+    // Log other unhandled rejections but don't let them crash the app
+    console.warn('⚠️ Unhandled promise rejection (prevented crash):', e.reason);
+    e.preventDefault();
+  });
+}
+
 const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, onCallConnected, onCallDisconnected }, ref) {
   const { user } = useAuth();
   const [device, setDevice] = useState(null);
@@ -150,6 +171,15 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           }
         });
 
+        // Listen to device-level events for graceful cleanup
+        twilioDevice.on('unregistered', () => {
+          console.log('📞 Device unregistered');
+        });
+
+        twilioDevice.on('offline', () => {
+          console.log('📞 Device offline');
+        });
+
         twilioDevice.on('error', (err) => {
           console.error('❌ Twilio Device error:', err);
           setError(`Device error: ${err.message || err.code}`);
@@ -203,21 +233,28 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             // Ignore
           }
           
-          try {
-            if (device && typeof device.unregister === 'function') {
-              device.unregister();
+          // Wait for disconnect to settle before destroying
+          // This prevents crashes from destroying device while Insights events are being sent
+          setTimeout(() => {
+            try {
+              if (device && typeof device.unregister === 'function') {
+                device.unregister();
+              }
+            } catch (e) {
+              // Ignore
             }
-          } catch (e) {
-            // Ignore
-          }
-          
-          try {
-            if (device && typeof device.destroy === 'function') {
-              device.destroy();
+            
+            // Only destroy if truly needed (component unmounting)
+            // Device can be reused, so destroy only when necessary
+            try {
+              if (device && typeof device.destroy === 'function') {
+                device.destroy();
+              }
+            } catch (e) {
+              // Ignore - device might already be destroyed
+              console.warn('⚠️ Error destroying device on unmount (ignored):', e.message);
             }
-          } catch (e) {
-            // Ignore
-          }
+          }, 300); // Wait 300ms for SDK to finish sending Insights events
           
           setDevice(null);
           setIsConnected(false);
@@ -334,28 +371,35 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
             onCallConnected && onCallConnected(callObj);
           };
 
-          // Disconnect event
+          // Disconnect event - wait for SDK to finish sending Insights events before cleanup
           const onDisconnect = () => {
             try {
-              console.log('📞 Call disconnected');
+              console.log('📞 Call disconnected (client) - waiting for SDK to finish...');
               setIsConnected(false);
               setIsConnecting(false);
               activeConnection.current = null;
               localMediaStream.current = null;
               
-              if (device && !isCleaningUp.current) {
+              // Wait 300ms to allow SDK to finish sending Insights events and DTLS to close
+              // This prevents race conditions and crashes from premature device destruction
+              setTimeout(() => {
                 try {
-                  isCleaningUp.current = true;
-                  console.log('🧹 Unregistering device after call disconnect');
-                  device.unregister();
+                  if (device && !isCleaningUp.current) {
+                    isCleaningUp.current = true;
+                    console.log('🧹 Safe to cleanup after disconnect event');
+                    // Only unregister, don't destroy - let device stay alive for potential reuse
+                    if (typeof device.unregister === 'function') {
+                      device.unregister();
+                    }
+                    setTimeout(() => {
+                      isCleaningUp.current = false;
+                    }, 1000);
+                  }
                 } catch (e) {
-                  // Ignore
-                } finally {
-                  setTimeout(() => {
-                    isCleaningUp.current = false;
-                  }, 1000);
+                  console.warn('⚠️ Cleanup error after disconnect (ignored):', e.message);
+                  isCleaningUp.current = false;
                 }
-              }
+              }, 300); // 200-500ms usually ok; adjust if you still see problems
               
               // Safely call callback
               try {
@@ -485,11 +529,6 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   };
 
   const hangUp = () => {
-    // Prevent navigation on errors
-    // Declare variables outside try block so they're accessible in finally
-    let deviceDestroyed = false;
-    let callDisconnected = false;
-    
     try {
       console.log('📞 hangUp called');
       
@@ -498,141 +537,47 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         return;
       }
       
-      isCleaningUp.current = true;
-      
-      // Get call status to determine if we're in ringing state
-      // Status might be a function or property - handle both
-      let callStatus = null;
-      try {
-        if (activeConnection.current) {
-          const call = activeConnection.current;
-          if (typeof call.status === 'function') {
-            try {
-              callStatus = call.status();
-            } catch (e) {
-              // If function call fails, try as property
-              callStatus = call._status || null;
-            }
-          } else {
-            callStatus = call.status || call._status || null;
-          }
-        }
-      } catch (statusErr) {
-        console.warn('⚠️ Error getting call status:', statusErr);
-        callStatus = null;
-      }
-      
-      const isRinging = callStatus === 'ringing' || callStatus === 'pending' || callStatus === 'connecting';
-      
-      console.log('📞 Call status during hangup:', callStatus);
-      
-      // If ringing or connecting, use device.disconnectAll() directly (more reliable)
-      if (isRinging || !isConnected) {
-        console.log('📞 Call is ringing/connecting, using device.disconnectAll()');
-        if (device && typeof device.disconnectAll === 'function') {
-          try {
-            device.disconnectAll();
-            deviceDestroyed = true;
-            callDisconnected = true;
-            console.log('✅ Disconnected all calls via device.disconnectAll()');
-          } catch (e) {
-            console.warn('⚠️ Error in device.disconnectAll:', e.message);
-          }
-        }
-      } else if (activeConnection.current) {
-        // For connected calls, try call.disconnect() first
-        const call = activeConnection.current;
-        
-          try {
-            // Check if call is in a valid state to disconnect
-            // Status might be a function or property - handle both
-            let currentStatus = null;
-            if (typeof call.status === 'function') {
-              try {
-                currentStatus = call.status();
-              } catch (e) {
-                currentStatus = call._status || null;
-              }
-            } else {
-              currentStatus = call.status || call._status || null;
-            }
-            
-            if (currentStatus && (currentStatus === 'open' || currentStatus === 'answered' || currentStatus === 'connected')) {
-              if (typeof call.disconnect === 'function') {
-                console.log('📞 Disconnecting call using call.disconnect()');
-                call.disconnect();
-                callDisconnected = true;
-              }
-            } else {
-            // Call might be in transition state, use device.disconnectAll()
-            console.log('📞 Call in transition state, using device.disconnectAll()');
-            if (device && typeof device.disconnectAll === 'function') {
-              device.disconnectAll();
-              deviceDestroyed = true;
-              callDisconnected = true;
-            }
-          }
-        } catch (callErr) {
-          console.warn('⚠️ Error disconnecting call, trying device.disconnectAll():', callErr.message);
-          // Fallback to device.disconnectAll() if call.disconnect() fails
-          if (device && typeof device.disconnectAll === 'function') {
-            try {
-              device.disconnectAll();
-              deviceDestroyed = true;
-              callDisconnected = true;
-            } catch (e) {
-              console.warn('⚠️ Error in device.disconnectAll (fallback):', e.message);
-            }
-          }
+      // Rule: Only use device.disconnectAll() - let SDK handle everything
+      // DO NOT call device.destroy() here - wait for disconnect events
+      if (device && typeof device.disconnectAll === 'function') {
+        try {
+          console.log('📞 Disconnecting all calls via device.disconnectAll()');
+          device.disconnectAll();
+          // SDK will fire disconnect events - cleanup happens in event handlers
+          // DO NOT destroy device here - causes race condition with Insights events
+        } catch (e) {
+          console.warn('⚠️ Error in device.disconnectAll:', e.message);
         }
       }
       
-      // Clear active connection reference
+      // Clear active connection reference immediately
       activeConnection.current = null;
       
-    } catch (err) {
-      console.warn('⚠️ Error in hangUp (ignored):', err.message);
-      // Ensure we still try to disconnect via device
-      if (device && typeof device.disconnectAll === 'function' && !callDisconnected) {
-        try {
-          device.disconnectAll();
-          deviceDestroyed = true;
-        } catch (e) {
-          console.warn('⚠️ Final fallback disconnect failed:', e.message);
-        }
-      }
-    } finally {
-      // Always update state regardless of disconnect success
+      // Update UI state immediately
       setIsConnected(false);
       setIsConnecting(false);
       localMediaStream.current = null;
       
-      // Unregister device if not destroyed (using public API only)
-      if (device && !deviceDestroyed && typeof device.unregister === 'function') {
-        try {
-          // Only use device.state (public API), not _state (internal)
-          if (device.state && device.state !== 'destroyed') {
-            console.log('🧹 Unregistering device after hangup');
-            device.unregister();
-          }
-        } catch (e) {
-          // Ignore - device might already be destroyed
-          console.warn('⚠️ Error unregistering device (ignored):', e.message);
-        }
-      }
-      
-      // Reset cleanup flag after a delay
-      setTimeout(() => {
-        isCleaningUp.current = false;
-      }, 1000);
-      
-      // Safely call callback
+      // Call callback immediately for UI updates
       try {
         onCallDisconnected && onCallDisconnected();
       } catch (callbackErr) {
         console.warn('Error in onCallDisconnected callback:', callbackErr);
-        // Prevent error from propagating
       }
+      
+    } catch (err) {
+      console.warn('⚠️ Error in hangUp (ignored):', err.message);
+      // Fallback: try disconnectAll if we haven't already
+      if (device && typeof device.disconnectAll === 'function') {
+        try {
+          device.disconnectAll();
+        } catch (e) {
+          console.warn('⚠️ Final fallback disconnect failed:', e.message);
+        }
+      }
+      // Still update UI state
+      setIsConnected(false);
+      setIsConnecting(false);
     }
   };
 

@@ -54,6 +54,20 @@ export async function POST(request) {
       throw new Error(`Failed to fetch call: ${fetchErr.message}`);
     }
 
+    // Make API idempotent: if call is already ended, return success
+    // This prevents errors when frontend calls this after SDK already disconnected
+    if (call.status === 'completed' || call.status === 'canceled' || call.status === 'failed') {
+      console.log('📞 Call already ended, returning success (idempotent)');
+      return NextResponse.json({
+        success: true,
+        data: {
+          callSid: call.sid,
+          status: call.status
+        },
+        message: 'Call already ended'
+      });
+    }
+
     // Hang up or cancel the call based on its status
     // If call is ringing, we need to cancel it
     // If call is in-progress, we complete it
