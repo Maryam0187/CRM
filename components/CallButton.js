@@ -322,9 +322,7 @@ const CallButton = ({
     // setCallTimer(0);
     
     try {
-      // Disconnect web call - Twilio SDK handles the disconnect and notifies backend automatically
-      // DO NOT call backend hangup API here - it causes race condition and double hangup issues
-      // The SDK already sends disconnect events to Twilio, backend will receive status callback
+      // Step 1: Disconnect agent's WebCallInterface (SDK connection to conference)
       if (webCallInterfaceRef.current?.hangUp) {
         try {
           // Always try to hang up - works for ringing, in-progress, or any state
@@ -335,12 +333,55 @@ const CallButton = ({
         }
       }
       
-      // NOTE: Backend /api/calls/hangup API is ONLY for:
-      // - Admin forcing agent to hang up
-      // - Auto timeout hangup
-      // - IVR logic
-      // - Server-side scheduling
-      // DO NOT call it when user clicks hang up - SDK handles it automatically
+      // Step 2: Cancel the outbound call to customer's phone
+      // This stops the customer's phone from ringing
+      // Use fetch directly to avoid token refresh issues, fire-and-forget
+      if (completedCallSid) {
+        setTimeout(() => {
+          try {
+            const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+            
+            if (!token) {
+              console.warn('No token available for hangup API call');
+              return;
+            }
+
+            // Use fetch with a timeout to prevent hanging
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+            fetch('/api/calls/hangup', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                callSid: completedCallSid
+              }),
+              signal: controller.signal
+            })
+            .then(response => {
+              clearTimeout(timeoutId);
+              if (response.ok) {
+                console.log('✅ Outbound call canceled successfully');
+              } else {
+                console.warn('⚠️ Hangup API returned non-OK status:', response.status);
+              }
+            })
+            .catch(err => {
+              clearTimeout(timeoutId);
+              // Silently ignore errors - API is idempotent, call might already be ended
+              if (err.name !== 'AbortError') {
+                console.debug('Hangup API error (ignored):', err.message);
+              }
+            });
+          } catch (err) {
+            // Catch any synchronous errors and ignore them
+            console.debug('Hangup API setup error (ignored):', err.message);
+          }
+        }, 100); // Small delay to ensure SDK disconnect happens first
+      }
       
     } catch (err) {
       console.error('Error in handleEndCall:', err);
@@ -835,7 +876,7 @@ const CallButton = ({
       {/* Web Call Interface - Bottom Right Corner (visible for customer) */}
       {/* Agent joins call via Voice SDK using WebCallInterface */}
       {showWebInterface && conferenceName && (
-        <div className="fixed bottom-4 right-4 z-50 max-w-sm">
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm bg-white rounded-lg shadow-xl border-2 border-gray-200 p-4">
           <WebCallInterface
             ref={webCallInterfaceRef}
             conferenceName={conferenceName}
