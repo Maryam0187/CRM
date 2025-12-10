@@ -85,6 +85,7 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
           const lowerMessage = message.toLowerCase();
           // Filter all Twilio Insights-related errors and warnings
           // These are harmless analytics errors that don't affect call functionality
+          // Also filter verbose Twilio SDK internal logs
           return lowerMessage.includes('cannot connect to insights') ||
                  lowerMessage.includes('unable to post') ||
                  lowerMessage.includes('failed to fetch') ||
@@ -105,6 +106,10 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
                  lowerMessage.includes('unable to post dtls-transport-state') ||
                  lowerMessage.includes('unable to post quality-metrics') ||
                  lowerMessage.includes('unable to post connection') ||
+                 // Filter Twilio SDK internal verbose logs
+                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('device') && (lowerMessage.includes('rejecting') || lowerMessage.includes('disconnectall') || lowerMessage.includes('unregistered') || lowerMessage.includes('destroyed') || lowerMessage.includes('stream is offline'))) ||
+                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('pstream') && lowerMessage.includes('destroy')) ||
+                 (lowerMessage.includes('twiliovoice') && lowerMessage.includes('wstransport') && (lowerMessage.includes('close') || lowerMessage.includes('closing') || lowerMessage.includes('cleaning up'))) ||
                  (lowerMessage.includes('twiliovoice') && lowerMessage.includes('device') && (lowerMessage.includes('cannot') || lowerMessage.includes('failed'))) ||
                  (lowerMessage.includes('twiliovoice') && lowerMessage.includes('eventpublisher')) ||
                  (lowerMessage.includes('twiliovoice') && lowerMessage.includes('event publisher')) ||
