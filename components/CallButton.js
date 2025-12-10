@@ -326,17 +326,47 @@ const CallButton = ({
       }
       
       // Hang up via API (non-blocking, fire and forget)
+      // IMPORTANT: Use fetch directly to bypass apiClient token refresh/redirect logic
       if (completedCallSid) {
-        // Don't await - fire and forget to prevent blocking
-        apiClient.post('/api/calls/hangup', {
-          callSid: completedCallSid
-        }).catch(err => {
-          // Silently ignore - call is already disconnected via SDK
-          // This is just a notification to the backend
-          if (err.message !== 'TIMEOUT') {
-            console.warn('Hangup API error (ignored):', err.message);
+        // Use setTimeout to ensure this runs asynchronously and doesn't interfere
+        setTimeout(() => {
+          try {
+            const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+            
+            if (!token) {
+              // No token available, skip API call silently
+              return;
+            }
+
+            // Use fetch with a timeout to prevent hanging
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+            fetch('/api/calls/hangup', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                callSid: completedCallSid
+              }),
+              signal: controller.signal
+            })
+            .then(response => {
+              clearTimeout(timeoutId);
+              // Don't check response status - just silently ignore
+              // Call is already disconnected via SDK, this is just a backend notification
+            })
+            .catch(err => {
+              clearTimeout(timeoutId);
+              // Silently ignore ALL errors - don't let this cause any issues
+              // Call is already disconnected via SDK
+            });
+          } catch (err) {
+            // Catch any synchronous errors and ignore them
           }
-        });
+        }, 0);
       }
     } catch (err) {
       console.error('Error in handleEndCall:', err);
