@@ -35,7 +35,9 @@ const CallButton = forwardRef(function CallButton({
     setWebCallInterfaceRef,
     getWebCallInterfaceRef,
     setIsMuted,
-    isMuted
+    isMuted,
+    setFinalDuration,
+    setCallTimer
   } = useCall();
   
   // Local component state (not in global store)
