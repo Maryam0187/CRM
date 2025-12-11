@@ -48,8 +48,8 @@ export const SocketProvider = ({ children }) => {
         setConnectionStatus('waiting_for_auth');
       } else {
         // Silent check - don't spam console during normal auth flow
-        setIsConnected(false);
-        setConnectionStatus('waiting_for_auth');
+      setIsConnected(false);
+      setConnectionStatus('waiting_for_auth');
       }
       socketInitializedRef.current = false;
       return;
@@ -320,7 +320,7 @@ export const SocketProvider = ({ children }) => {
       socketInitializedRef.current = false;
       // Only log cleanup if socket was actually connected
       if (socketInstance && socketInstance.connected) {
-        console.log('🧹 Cleaning up socket connection...');
+      console.log('🧹 Cleaning up socket connection...');
       }
       if (socketInstance) {
         socketInstance.disconnect();

@@ -2754,12 +2754,17 @@ Room: `;
     }
   };
 
-  // Handle confirmation to navigate and hangup
+  // Handle confirmation to navigate and hangup - same as clicking "End Call" button
   const handleConfirmNavigate = async () => {
-    // Hangup all active calls
+    // Hangup all active calls - this calls handleEndCall internally, same as "End Call" button
     callButtonRefs.current.forEach(ref => {
       if (ref && ref.current && ref.current.hangUp) {
         try {
+          // This calls handleEndCall which:
+          // - Disconnects WebCallInterface
+          // - Cancels outbound call via backend API
+          // - Resets all state
+          // - Notifies parent component
           ref.current.hangUp();
         } catch (err) {
           console.warn('Error hanging up call:', err);
@@ -2767,7 +2772,7 @@ Room: `;
       }
     });
     
-    // Wait a bit for hangup to process
+    // Wait for hangup to process (same timing as handleEndCall uses)
     await new Promise(resolve => setTimeout(resolve, 500));
     
     // Close modal
@@ -2803,6 +2808,25 @@ Room: `;
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
+
+  // Cleanup: Hangup all calls when component unmounts (agent navigates away)
+  // useEffect(() => {
+  //   return () => {
+  //     // Component is unmounting - hangup all active calls
+  //     console.log('🧹 AddSale component unmounting - hanging up all active calls');
+  //     callButtonRefs.current.forEach(ref => {
+  //       if (ref && ref.current && ref.current.hangUp) {
+  //         try {
+  //           // Call handleEndCall (same as clicking "End Call" button)
+  //           // This ensures proper cleanup: disconnects SDK, cancels outbound call, resets state
+  //           ref.current.hangUp();
+  //         } catch (err) {
+  //           console.warn('Error hanging up call on unmount:', err);
+  //         }
+  //       }
+  //     });
+  //   };
+  // }, []);
 
   return (
     <div className="min-h-screen bg-gray-50">

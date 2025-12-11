@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
+import { useCall } from '../contexts/CallContext';
 import { useCallStatus } from '../lib/useCallStatus';
 import apiClient from '../lib/apiClient';
-import WebCallInterface from './WebCallInterface';
 
 const CallButton = forwardRef(function CallButton({ 
   customerId, 
@@ -19,17 +19,27 @@ const CallButton = forwardRef(function CallButton({
   const { user } = useAuth();
   const { getCallStatus } = useSocket();
   
-  // Core call state
-  const [isCalling, setIsCalling] = useState(false);
-  const [currentCallSid, setCurrentCallSid] = useState(null);
-  const [conferenceName, setConferenceName] = useState(null);
-  const [showWebInterface, setShowWebInterface] = useState(false);
-  const [isWebCallConnected, setIsWebCallConnected] = useState(false);
-  const [error, setError] = useState(null);
+  // Use global call context
+  const {
+    isCalling,
+    currentCallSid,
+    conferenceName,
+    isWebCallConnected,
+    callTimer,
+    finalDuration,
+    callStatus: contextCallStatus,
+    startCall: contextStartCall,
+    callConnected: contextCallConnected,
+    endCall: contextEndCall,
+    updateCallStatus,
+    setWebCallInterfaceRef,
+    getWebCallInterfaceRef,
+    setIsMuted,
+    isMuted
+  } = useCall();
   
-  // Timer state
-  const [callTimer, setCallTimer] = useState(0);
-  const [finalDuration, setFinalDuration] = useState(null); // Store final duration when call ends
+  // Local component state (not in global store)
+  const [error, setError] = useState(null);
   
   // Transfer modal state
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -41,17 +51,13 @@ const CallButton = forwardRef(function CallButton({
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [isTransferring, setIsTransferring] = useState(false);
   
-  // Mute state
-  const [isMuted, setIsMuted] = useState(false);
-  
   // Refs
   const ringingInterval = useRef(null);
-  const timerInterval = useRef(null);
   const muteSyncInterval = useRef(null);
   const hasNotifiedCompletion = useRef(false);
-  const webCallInterfaceRef = useRef(null);
   const previousCallSid = useRef(null);
   const isEndingCall = useRef(false); // Prevent multiple calls to handleEndCall
+  const handleEndCallRef = useRef(null); // Will be set after handleEndCall is defined
   
   // Get call status - use socket context directly for immediate updates
   const { currentCallStatus, isCallCompleted } = useCallStatus(currentCallSid);
@@ -74,23 +80,41 @@ const CallButton = forwardRef(function CallButton({
   
   // Disconnect WebCallInterface if call ended but we're still connected
   useEffect(() => {
-    if (isEnded && isWebCallConnected && webCallInterfaceRef.current) {
+    if (isEnded && isWebCallConnected) {
       console.log('📞 Call ended, disconnecting WebCallInterface');
-      if (webCallInterfaceRef.current.hangUp) {
-        webCallInterfaceRef.current.hangUp();
+      const webInterface = getWebCallInterfaceRef();
+      if (webInterface?.hangUp) {
+        webInterface.hangUp();
       }
-      setIsWebCallConnected(false);
+      contextEndCall();
     }
-  }, [isEnded, isWebCallConnected]);
+  }, [isEnded, isWebCallConnected, getWebCallInterfaceRef, contextEndCall]);
 
-  // Clean up all intervals on unmount
+  // Clean up all intervals and hangup call on unmount
   useEffect(() => {
     return () => {
+      // Clear all intervals
       if (ringingInterval.current) clearInterval(ringingInterval.current);
-      if (timerInterval.current) clearInterval(timerInterval.current);
       if (muteSyncInterval.current) clearInterval(muteSyncInterval.current);
+      
+      // Timer is managed by context, so we don't need to clear it here
+      
+      // If there's an active call, hang it up (same as clicking "End Call")
+      // Use ref to get latest values without dependencies
+      const hasActiveCall = currentCallSid || isCalling || isWebCallConnected;
+      if (hasActiveCall && !isEndingCall.current) {
+        console.log('🧹 CallButton unmounting with active call - hanging up');
+        try {
+          // Call handleEndCall to properly cleanup
+          // This disconnects SDK, cancels outbound call, resets state
+          handleEndCallRef.current();
+        } catch (err) {
+          console.warn('Error hanging up call on CallButton unmount:', err);
+        }
+      }
     };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on unmount
 
   // Play ringing sound
   const playRingingSound = () => {
@@ -129,35 +153,8 @@ const CallButton = forwardRef(function CallButton({
     }
   }, [isRinging]);
 
-  // Handle timer - start when in-progress, stop when ended
-  useEffect(() => {
-    // Stop timer immediately for any end state
-    if (isEnded) {
-      if (timerInterval.current) {
-        clearInterval(timerInterval.current);
-        timerInterval.current = null;
-      }
-      setCallTimer(0);
-      return;
-    }
-    
-    // Start timer when call becomes in-progress
-    if (isInProgress) {
-      if (!timerInterval.current) {
-        setCallTimer(0);
-        timerInterval.current = setInterval(() => {
-          setCallTimer(prev => prev + 1);
-        }, 1000);
-      }
-    } else {
-      // Not in progress - stop timer
-      if (timerInterval.current) {
-        clearInterval(timerInterval.current);
-        timerInterval.current = null;
-        setCallTimer(0);
-      }
-    }
-  }, [isInProgress, isEnded]);
+  // Timer is now managed by CallContext, so we don't need local timer management here
+  // The context automatically starts/stops the timer based on call status
 
   // Handle call completion - triggered when call ends (by customer or agent)
   useEffect(() => {
@@ -177,11 +174,7 @@ const CallButton = forwardRef(function CallButton({
         setFinalDuration(callTimer);
       }
       
-      // Stop all intervals immediately
-      if (timerInterval.current) {
-        clearInterval(timerInterval.current);
-        timerInterval.current = null;
-      }
+      // Timer is managed by context, so we don't need to stop it here
       if (ringingInterval.current) {
         clearInterval(ringingInterval.current);
         ringingInterval.current = null;
@@ -212,17 +205,9 @@ const CallButton = forwardRef(function CallButton({
         }
       }
       
-      // Reset state after showing status (2 seconds)
+      // Reset state after showing status (2 seconds) - use context
       setTimeout(() => {
-        setIsCalling(false);
-        setIsWebCallConnected(false);
-        setShowWebInterface(false);
-        setTimeout(() => {
-          setCurrentCallSid(null);
-          setConferenceName(null);
-          setCallTimer(0);
-          setFinalDuration(null);
-        }, 100);
+        contextEndCall();
       }, 2000);
     }
   }, [isEnded, currentCallSid, callStatus, callTimer, finalDuration, getLatestStatus, onCallCompleted, customerId, saleId, phoneNumber, customerName]);
@@ -236,8 +221,7 @@ const CallButton = forwardRef(function CallButton({
     } else if (!currentCallSid) {
       hasNotifiedCompletion.current = false;
       previousCallSid.current = null;
-      setFinalDuration(null);
-      setCallTimer(0);
+      // Duration and timer are managed by context
     }
   }, [currentCallSid]);
 
@@ -248,40 +232,98 @@ const CallButton = forwardRef(function CallButton({
       return;
     }
 
-    setIsCalling(true);
     setError(null);
 
     try {
-      const response = await apiClient.post('/api/calls/initiate', {
-        customerId,
-        saleId,
-        agentId: user.id,
-        phoneNumber,
-        callPurpose,
-        customMessage: `Hello ${customerName || 'there'}, this is a call from our CRM system.`
-      });
+      let response;
+      try {
+        response = await apiClient.post('/api/calls/initiate', {
+          customerId,
+          saleId,
+          agentId: user.id,
+          phoneNumber,
+          callPurpose,
+          customMessage: `Hello ${customerName || 'there'}, this is a call from our CRM system.`
+        });
+      } catch (apiErr) {
+        // Network error or API client error
+        console.log(apiErr);
+        console.error('❌ API call failed:', apiErr);
+        if (apiErr?.name === 'AbortError' || apiErr?.message === 'Failed to fetch') {
+          // Already handled inside inner catch → do nothing
+          console.log('AbortError or Failed to fetch, returning');
+          return;
+        }
+      
+        debugger;
 
-      const result = await response.json();
-
-      if (result.success) {
-        setCurrentCallSid(result.data.callSid);
-        // Agent joins call via Voice SDK (conference)
-        // Use conference name from API response or construct it
-        const confName = result.data.conferenceName || `call-${user.id}`;
-        setConferenceName(confName);
-        setShowWebInterface(true);
+        setError(apiErr?.message || 'Network error. Please check your connection and try again.');
+        contextEndCall();
         
-        if (onCallInitiated) {
-          onCallInitiated(result.data);
+       return;
+
+      }
+
+      // Check if response exists and is valid
+      if (!response) {
+        console.error('❌ No response from API');
+        setError('No response from server. Please try again.');
+        contextEndCall();
+        return;
+      }
+
+      let result;
+      try {
+        result = await response.json();
+      } catch (jsonErr) {
+        console.error('❌ Failed to parse response:', jsonErr);
+        setError('Invalid response from server. Please try again.');
+        contextEndCall();
+        return;
+      }
+
+      if (result?.success) {
+        try {
+          // Use context to start call - this will show WebCallInterface globally
+          const confName = result.data?.conferenceName || `call-${user.id}`;
+          const callSid = result.data?.callSid;
+          
+          if (!callSid) {
+            throw new Error('Call SID not received from server');
+          }
+          
+          contextStartCall({
+            callSid,
+            conferenceName: confName,
+            customerId,
+            saleId,
+            phoneNumber,
+            customerName
+          });
+          
+          if (onCallInitiated) {
+            try {
+              onCallInitiated(result.data);
+            } catch (callbackErr) {
+              console.warn('⚠️ Error in onCallInitiated callback (ignored):', callbackErr);
+            }
+          }
+        } catch (stateErr) {
+          console.error('❌ Error updating call state:', stateErr);
+          setError('Failed to initialize call. Please try again.');
+          contextEndCall();
         }
       } else {
-        setError(result.message || 'Failed to initiate call');
-        setIsCalling(false);
+        const errorMsg = result?.message || result?.error || 'Failed to initiate call';
+        console.error('❌ Call initiation failed:', errorMsg);
+        setError(errorMsg);
+        contextEndCall();
       }
     } catch (err) {
-      console.error('Error initiating call:', err);
-      setError('Network error. Please try again.');
-      setIsCalling(false);
+      // Catch any unexpected errors
+      console.error('❌ Unexpected error initiating call:', err);
+      setError(err?.message || 'An unexpected error occurred. Please try again.');
+      contextEndCall();
     }
   };
 
@@ -305,10 +347,6 @@ const CallButton = forwardRef(function CallButton({
     }
     
     // Stop all intervals immediately
-    if (timerInterval.current) {
-      clearInterval(timerInterval.current);
-      timerInterval.current = null;
-    }
     if (ringingInterval.current) {
       clearInterval(ringingInterval.current);
       ringingInterval.current = null;
@@ -318,15 +356,13 @@ const CallButton = forwardRef(function CallButton({
       muteSyncInterval.current = null;
     }
     
-    // Don't reset timer yet - preserve it for display
-    // setCallTimer(0);
-    
     try {
       // Step 1: Disconnect agent's WebCallInterface (SDK connection to conference)
-      if (webCallInterfaceRef.current?.hangUp) {
+      const webInterface = getWebCallInterfaceRef();
+      if (webInterface?.hangUp) {
         try {
           // Always try to hang up - works for ringing, in-progress, or any state
-          webCallInterfaceRef.current.hangUp();
+          webInterface.hangUp();
         } catch (err) {
           // Ignore errors - call might be in any state (ringing, connecting, etc.)
           console.warn('Web call hangup error (ignored):', err.message);
@@ -342,13 +378,15 @@ const CallButton = forwardRef(function CallButton({
             const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
             
             if (!token) {
-              console.warn('No token available for hangup API call');
+              console.warn('⚠️ No token available for hangup API call');
               return;
             }
 
             // Use fetch with a timeout to prevent hanging
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+            const timeoutId = setTimeout(() => {
+              controller.abort();
+            }, 5000); // 5 second timeout
 
             fetch('/api/calls/hangup', {
               method: 'POST',
@@ -363,50 +401,50 @@ const CallButton = forwardRef(function CallButton({
             })
             .then(response => {
               clearTimeout(timeoutId);
-              if (response.ok) {
+              if (response?.ok) {
                 console.log('✅ Outbound call canceled successfully');
               } else {
-                console.warn('⚠️ Hangup API returned non-OK status:', response.status);
+                // Non-critical - call might already be ended
+                console.warn('⚠️ Hangup API returned non-OK status:', response?.status);
               }
             })
             .catch(err => {
               clearTimeout(timeoutId);
               // Silently ignore errors - API is idempotent, call might already be ended
-              if (err.name !== 'AbortError') {
-                console.debug('Hangup API error (ignored):', err.message);
+              // Don't log AbortError (timeout) as it's expected
+              if (err?.name !== 'AbortError') {
+                console.debug('⚠️ Hangup API error (ignored, non-critical):', err?.message || 'Unknown error');
               }
             });
           } catch (err) {
-            // Catch any synchronous errors and ignore them
-            console.debug('Hangup API setup error (ignored):', err.message);
+            // Catch any synchronous errors and ignore them (non-critical)
+            console.debug('⚠️ Hangup API setup error (ignored):', err?.message || 'Unknown error');
           }
         }, 100); // Small delay to ensure SDK disconnect happens first
       }
       
     } catch (err) {
-      console.error('Error in handleEndCall:', err);
-      // Don't let errors break the app - just log them
-      // Stay on the same page
+      // Don't let errors break the app - always cleanup state
+      console.error('❌ Error in handleEndCall:', err);
+      setError('Error ending call. State has been reset.');
+      
+      // Always cleanup state even on error
+      try {
+        contextEndCall();
+      } catch (cleanupErr) {
+        console.error('❌ Error during cleanup:', cleanupErr);
+      }
+      
+      // Reset flags
+      isEndingCall.current = false;
+      hasNotifiedCompletion.current = false;
     }
     
-    // Reset state immediately to update UI right away
-    setIsCalling(false);
-    setIsWebCallConnected(false);
-    setIsMuted(false);
+    // Reset local error state
     setError(null);
     
-    // Clear call SID and conference immediately to force UI update
-    // This makes the UI show "idle" state instead of "ringing" or "in-progress"
-    setCurrentCallSid(null);
-    setConferenceName(null);
-    
-    // Reset timer
-    setCallTimer(0);
-    
-    // Hide WebCallInterface after a short delay to allow smooth disconnect
-    setTimeout(() => {
-      setShowWebInterface(false);
-    }, 500);
+    // Use context to end call - this handles all state cleanup
+    contextEndCall();
     
     // Notify parent
     if (onCallCompleted && completedCallSid) {
@@ -430,6 +468,11 @@ const CallButton = forwardRef(function CallButton({
       isEndingCall.current = false;
     }, 1000);
   };
+  
+  // Update handleEndCall ref whenever handleEndCall changes
+  useEffect(() => {
+    handleEndCallRef.current = handleEndCall;
+  }, [handleEndCall]);
 
   // Expose call state and methods via ref
   useImperativeHandle(ref, () => ({
@@ -466,16 +509,50 @@ const CallButton = forwardRef(function CallButton({
   // Fetch agents for transfer
   const fetchAvailableAgents = async () => {
     setLoadingAgents(true);
+    setError(null); // Clear previous errors
+    
     try {
-      const response = await apiClient.get('/api/calls/agents');
+      let response;
+      try {
+        response = await apiClient.get('/api/calls/agents');
+      } catch (apiErr) {
+        console.error('❌ Failed to fetch agents:', apiErr);
+        setError('Failed to load agents. Please try again.');
+        setAvailableAgents([]);
+        return;
+      }
+
+      if (!response) {
+        console.error('❌ No response when fetching agents');
+        setError('No response from server.');
+        setAvailableAgents([]);
+        return;
+      }
+
       if (response?.ok) {
-        const result = await response.json();
-        if (result.success) {
-          setAvailableAgents(result.data || []);
+        try {
+          const result = await response.json();
+          if (result?.success) {
+            setAvailableAgents(result.data || []);
+          } else {
+            console.warn('⚠️ Agents fetch returned unsuccessful:', result?.message);
+            setError(result?.message || 'Failed to load agents.');
+            setAvailableAgents([]);
+          }
+        } catch (jsonErr) {
+          console.error('❌ Failed to parse agents response:', jsonErr);
+          setError('Invalid response from server.');
+          setAvailableAgents([]);
         }
+      } else {
+        console.error('❌ Agents API returned non-OK status:', response?.status);
+        setError(`Server error (${response?.status}). Please try again.`);
+        setAvailableAgents([]);
       }
     } catch (err) {
-      console.warn('Error fetching agents:', err);
+      // Catch any unexpected errors
+      console.error('❌ Unexpected error fetching agents:', err);
+      setError(err?.message || 'An unexpected error occurred.');
       setAvailableAgents([]);
     } finally {
       setLoadingAgents(false);
@@ -606,15 +683,16 @@ const CallButton = forwardRef(function CallButton({
             onClick={async (e) => {
               e.preventDefault();
               e.stopPropagation();
-              if (webCallInterfaceRef.current?.toggleMute) {
-                const success = await webCallInterfaceRef.current.toggleMute();
-                if (success !== false && webCallInterfaceRef.current?.getMutedState) {
+              const webInterface = getWebCallInterfaceRef();
+              if (webInterface?.toggleMute) {
+                const success = await webInterface.toggleMute();
+                if (success !== false && webInterface?.getMutedState) {
                   // Update state immediately
-                  setIsMuted(webCallInterfaceRef.current.getMutedState());
+                  setIsMuted(webInterface.getMutedState());
                 }
               }
             }}
-            disabled={!isWebCallConnected || !webCallInterfaceRef.current}
+            disabled={!isWebCallConnected || !getWebCallInterfaceRef()}
             className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg ${
               isMuted ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-gray-600 hover:bg-gray-700 text-white'
             } ${!isWebCallConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -885,25 +963,49 @@ const CallButton = forwardRef(function CallButton({
                       requestBody.transferTo = transferPhoneNumber.trim();
                     }
 
-                    const response = await apiClient.post('/api/calls/transfer', requestBody);
+                    let response;
+                    try {
+                      response = await apiClient.post('/api/calls/transfer', requestBody);
+                    } catch (apiErr) {
+                      console.error('❌ Transfer API call failed:', apiErr);
+                      setError(apiErr?.message || 'Network error. Please try again.');
+                      return;
+                    }
+
+                    if (!response) {
+                      console.error('❌ No response from transfer API');
+                      setError('No response from server. Please try again.');
+                      return;
+                    }
                     
                     if (response?.ok) {
-                      const result = await response.json();
-                      if (result.success) {
-                        setShowTransferModal(false);
-                        setTransferPhoneNumber('');
-                        setSelectedAgentId(null);
-                        setTransferType('blind');
-                        setTransferDestinationType('phone');
-                      } else {
-                        setError(result.message || result.error || 'Failed to transfer call');
+                      try {
+                        const result = await response.json();
+                        if (result?.success) {
+                          // Transfer successful
+                          setShowTransferModal(false);
+                          setTransferPhoneNumber('');
+                          setSelectedAgentId(null);
+                          setTransferType('blind');
+                          setTransferDestinationType('phone');
+                          setError(null);
+                        } else {
+                          const errorMsg = result?.message || result?.error || 'Failed to transfer call';
+                          console.error('❌ Transfer failed:', errorMsg);
+                          setError(errorMsg);
+                        }
+                      } catch (jsonErr) {
+                        console.error('❌ Failed to parse transfer response:', jsonErr);
+                        setError('Invalid response from server. Please try again.');
                       }
                     } else {
-                      setError('Transfer failed');
+                      console.error('❌ Transfer API returned non-OK status:', response?.status);
+                      setError(`Transfer failed (${response?.status}). Please try again.`);
                     }
                   } catch (err) {
-                    console.error('Error transferring call:', err);
-                    setError(err.message || 'Failed to transfer call');
+                    // Catch any unexpected errors
+                    console.error('❌ Unexpected error transferring call:', err);
+                    setError(err?.message || 'An unexpected error occurred. Please try again.');
                   } finally {
                     setIsTransferring(false);
                   }
@@ -921,33 +1023,7 @@ const CallButton = forwardRef(function CallButton({
         </div>
       )}
 
-      {/* Web Call Interface - Bottom Right Corner (visible for customer) */}
-      {/* Agent joins call via Voice SDK using WebCallInterface */}
-      {showWebInterface && conferenceName && (
-        <div className="fixed bottom-4 right-4 z-50 w-80 bg-white rounded-lg shadow-2xl border-2 border-blue-200 p-4 backdrop-blur-sm">
-          <WebCallInterface
-            ref={webCallInterfaceRef}
-            conferenceName={conferenceName}
-            onCallConnected={() => {
-              setIsWebCallConnected(true);
-              // Sync mute state periodically
-              if (muteSyncInterval.current) clearInterval(muteSyncInterval.current);
-              muteSyncInterval.current = setInterval(() => {
-                if (webCallInterfaceRef.current?.getMutedState) {
-                  setIsMuted(webCallInterfaceRef.current.getMutedState());
-                }
-              }, 500);
-            }}
-            onCallDisconnected={() => {
-              setIsWebCallConnected(false);
-              // Only call handleEndCall if not already ending (prevents duplicate calls)
-              if (!isEndingCall.current && !hasNotifiedCompletion.current) {
-                handleEndCall();
-              }
-            }}
-          />
-        </div>
-      )}
+      {/* WebCallInterface is now rendered globally via GlobalWebCallInterface component */}
     </div>
   );
 });

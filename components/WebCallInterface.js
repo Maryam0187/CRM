@@ -52,16 +52,42 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
 
   const fetchToken = async () => {
     try {
-      const response = await apiClient.get('/api/twilio/token');
-      const data = await response.json();
-      if (data.success) {
+      let response;
+      try {
+        response = await apiClient.get('/api/twilio/token');
+      } catch (apiErr) {
+        console.error('❌ Failed to fetch Twilio token (API error):', apiErr);
+        setError(apiErr?.message || 'Network error. Please check your connection and try again.');
+        return null;
+      }
+
+      if (!response) {
+        console.error('❌ No response when fetching Twilio token');
+        setError('No response from server. Please try again.');
+        return null;
+      }
+
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        console.error('❌ Failed to parse token response:', jsonErr);
+        setError('Invalid response from server. Please try again.');
+        return null;
+      }
+
+      if (data?.success && data?.token) {
         return data.token;
       } else {
-        throw new Error(data.error || 'Failed to fetch Twilio token');
+        const errorMsg = data?.error || 'Failed to fetch Twilio token';
+        console.error('❌ Token fetch unsuccessful:', errorMsg);
+        setError(errorMsg);
+        return null;
       }
     } catch (err) {
-      console.error('Error fetching Twilio token:', err);
-      setError(err.message);
+      // Catch any unexpected errors
+      console.error('❌ Unexpected error fetching Twilio token:', err);
+      setError(err?.message || 'An unexpected error occurred. Please try again.');
       return null;
     }
   };
@@ -199,8 +225,21 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         });
 
         twilioDevice.on('error', (err) => {
+          // Don't let device errors crash the app
           console.error('❌ Twilio Device error:', err);
-          setError(`Device error: ${err.message || err.code}`);
+          const errorMsg = err?.message || err?.code || 'Device error occurred';
+          setError(`Device error: ${errorMsg}`);
+          
+          // Try to cleanup on device error
+          try {
+            setIsConnecting(false);
+            setIsConnected(false);
+            if (onCallDisconnected) {
+              onCallDisconnected();
+            }
+          } catch (cleanupErr) {
+            console.warn('⚠️ Error during device error cleanup (ignored):', cleanupErr);
+          }
           setIsConnecting(false);
         });
 
