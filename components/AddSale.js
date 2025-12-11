@@ -3667,6 +3667,7 @@ Room: `;
                           onCallInitiated={handleCallInitiated}
                           onCallCompleted={handleCallCompleted}
                           size="small"
+                          disabled={false} // Will be disabled automatically if there's an active call
                         />
                       </div>
 
@@ -5016,15 +5017,22 @@ Room: `;
 
       {/* Customer Information Popup Modal */}
       {showCustomerInfoModal && checkedCustomer && checkedCustomer.id && checkedCustomer.customerId && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+        <div 
+          className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+          onClick={() => setShowCustomerInfoModal(false)}
+        >
+          <div 
+            className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="mt-3">
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">📋 Customer History & Call Information</h3>
                 <button
                   onClick={() => setShowCustomerInfoModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label="Close modal"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

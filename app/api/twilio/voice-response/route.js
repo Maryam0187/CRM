@@ -71,18 +71,20 @@ async function handleVoiceResponse(request) {
         } else {
           console.log(`📞 Agent ${agentId} will join via Voice SDK to conference: ${conferenceName}`);
         }
+        // No Hangup here - let the call continue in the conference
       } catch (error) {
         console.error('❌ Error in voice response:', error);
         twiml += `\n  <Say voice="alice">We're sorry, we're unable to connect you at this time.</Say>`;
+        twiml += `\n  <Hangup/>`;
       }
     } else {
       // Fallback: automated message (no recording)
       twiml += `\n  <Say voice="alice">Hello, this is a call from your CRM system.</Say>`;
       twiml += `\n  <Say voice="alice">Thank you for your time. Have a great day!</Say>`;
+      twiml += `\n  <Hangup/>`;
     }
     
-    twiml += `\n  <Hangup/>
-</Response>`;
+    twiml += `\n</Response>`;
 
     console.log('🎙️ Voice response TwiML:', twiml);
 

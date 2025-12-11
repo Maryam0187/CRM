@@ -93,9 +93,13 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
   };
 
   // Setup device only when conferenceName is provided and user is available
+  // IMPORTANT: This effect should NOT clean up the device during navigation
+  // Only clean up when conferenceName or user actually changes to null/undefined
   useEffect(() => {
     if (!conferenceName || !user) {
-      if (device) {
+      // Only cleanup if we have a device AND the conference/user is truly gone
+      // Don't cleanup during component remounts - let the device persist
+      if (device && (!conferenceName || !user)) {
         console.log('🧹 Cleaning up device: conferenceName or user removed');
         try {
           if (activeConnection.current) {
@@ -110,6 +114,27 @@ const WebCallInterface = forwardRef(function WebCallInterface({ conferenceName, 
         } catch (e) {
           console.error('Error cleaning up device:', e);
         }
+      }
+      return;
+    }
+    
+    // If device already exists and conferenceName matches, don't recreate
+    // This prevents disconnection during navigation
+    if (device && conferenceName) {
+      console.log('📞 Device already exists, reusing for conference:', conferenceName);
+      // Ensure device is registered (check state if available)
+      try {
+        const deviceState = device.state || device._state;
+        if (deviceState && deviceState !== 'registered') {
+          device.register().catch(err => {
+            console.warn('⚠️ Device re-registration warning:', err);
+          });
+        }
+      } catch (e) {
+        // If state check fails, try to register anyway
+        device.register().catch(err => {
+          console.warn('⚠️ Device re-registration warning:', err);
+        });
       }
       return;
     }

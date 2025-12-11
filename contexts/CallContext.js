@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useRef, useCallback } from 'react';
+import apiClient from '../lib/apiClient';
 
 const CallContext = createContext(undefined);
 
@@ -138,6 +139,81 @@ export function CallProvider({ children }) {
     return webCallInterfaceRef.current;
   }, []);
 
+  // Initiate call - moved from CallButton
+  const initiateCall = useCallback(async (callParams) => {
+    const {
+      customerId,
+      saleId,
+      phoneNumber,
+      customerName,
+      agentId,
+      callPurpose = 'follow_up',
+      onCallInitiated,
+      onError
+    } = callParams;
+
+    if (!phoneNumber || !agentId) {
+      const errorMsg = 'Phone number or agent ID missing';
+      setError(errorMsg);
+      if (onError) onError(errorMsg);
+      return;
+    }
+
+    setError(null);
+    setIsCalling(true);
+
+    try {
+      const response = await apiClient.post('/api/calls/initiate', {
+        customerId,
+        saleId,
+        agentId,
+        phoneNumber,
+        callPurpose,
+        customMessage: `Hello ${customerName || 'there'}, this is a call from our CRM system.`
+      });
+
+      if (!response) {
+        throw new Error('No response from server');
+      }
+
+      const result = await response.json();
+
+      if (result?.success) {
+        const confName = result.data?.conferenceName || `call-${agentId}`;
+        const callSid = result.data?.callSid;
+
+        if (!callSid) {
+          throw new Error('Call SID not received from server');
+        }
+
+        // Start call using existing startCall function
+        startCall({
+          callSid,
+          conferenceName: confName,
+          customerId,
+          saleId,
+          phoneNumber,
+          customerName
+        });
+
+        if (onCallInitiated) {
+          onCallInitiated(result.data);
+        }
+      } else {
+        const errorMsg = result?.message || result?.error || 'Failed to initiate call';
+        setError(errorMsg);
+        setIsCalling(false);
+        if (onError) onError(errorMsg);
+      }
+    } catch (err) {
+      console.error('❌ Error initiating call:', err);
+      const errorMsg = err?.message || 'An unexpected error occurred. Please try again.';
+      setError(errorMsg);
+      setIsCalling(false);
+      if (onError) onError(errorMsg);
+    }
+  }, [startCall]);
+
   const value = {
     // State
     isCalling,
@@ -166,6 +242,7 @@ export function CallProvider({ children }) {
     
     // Actions
     startCall,
+    initiateCall,
     callConnected,
     endCall,
     updateCallStatus,
