@@ -167,18 +167,36 @@ module.exports = (sequelize) => {
     hooks: {
       beforeCreate: async (user) => {
         if (user.password) {
-          const saltRounds = 12;
-          user.password = await bcrypt.hash(user.password, saltRounds);
+          // Only hash if not already a bcrypt hash
+          if (!isBcryptHash(user.password)) {
+            const saltRounds = 12;
+            user.password = await bcrypt.hash(user.password, saltRounds);
+          }
         }
       },
       beforeUpdate: async (user) => {
         if (user.changed('password') && user.password) {
-          const saltRounds = 12;
-          user.password = await bcrypt.hash(user.password, saltRounds);
+          // Only hash if not already a bcrypt hash
+          // This prevents double-hashing if an already-hashed password is accidentally passed
+          if (!isBcryptHash(user.password)) {
+            const saltRounds = 12;
+            user.password = await bcrypt.hash(user.password, saltRounds);
+          }
         }
       }
     }
   });
+
+  // Helper function to check if a string is already a bcrypt hash
+  // Bcrypt hashes start with $2a$, $2b$, or $2y$ followed by cost parameter
+  function isBcryptHash(str) {
+    if (!str || typeof str !== 'string') {
+      return false;
+    }
+    // Bcrypt hash format: $2[abxy]$[cost]$[22 character salt][31 character hash]
+    // Total length is typically 60 characters
+    return /^\$2[abxy]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(str);
+  }
 
   // Add instance method for password comparison
   User.prototype.comparePassword = async function(candidatePassword) {

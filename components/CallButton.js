@@ -247,21 +247,52 @@ const CallButton = forwardRef(function CallButton({
         });
       } catch (apiErr) {
         // Network error or API client error
-        console.log(apiErr);
-        console.error('❌ API call failed:', apiErr);
-        if (apiErr?.name === 'AbortError' || apiErr?.message === 'Failed to fetch') {
-          // Already handled inside inner catch → do nothing
-          console.log('AbortError or Failed to fetch, returning');
+        // Handle network errors (AbortError, Failed to fetch, TypeError, etc.)
+        const errorName = apiErr?.name || '';
+        const errorMessage = apiErr?.message || String(apiErr) || '';
+        const errorString = errorMessage.toLowerCase();
+        
+        const isNetworkError = 
+          errorName === 'AbortError' ||
+          errorName === 'TypeError' ||
+          errorName === 'NetworkError' ||
+          errorMessage === 'Failed to fetch' ||
+          errorString.includes('failed to fetch') ||
+          errorString.includes('fetch') ||
+          errorString.includes('network') ||
+          errorString.includes('networkerror');
+        
+        if (isNetworkError) {
+          // Network errors are expected and handled - log as info, not error
+          console.warn('⚠️ Network error detected (handled):', errorMessage);
+          setError('Network error. Please check your connection and try again.');
+          contextEndCall();
           return;
         }
-      
-        debugger;
+        
+        // For non-network errors, log as error
+        console.error('❌ API call failed:', apiErr);
+        
+        // Handle Response objects that might have been returned instead of thrown
+        if (apiErr instanceof Response) {
+          // If it's a Response object, try to parse it
+          try {
+            const errorData = await apiErr.json().catch(() => ({}));
+            const errorMsg = errorData?.message || errorData?.error || `Server error (${apiErr.status})`;
+            setError(errorMsg);
+            contextEndCall();
+            return;
+          } catch (parseErr) {
+            setError(`Server error (${apiErr.status}). Please try again.`);
+            contextEndCall();
+            return;
+          }
+        }
 
+        // For other errors, show the error message
         setError(apiErr?.message || 'Network error. Please check your connection and try again.');
         contextEndCall();
-        
-       return;
-
+        return;
       }
 
       // Check if response exists and is valid
@@ -630,7 +661,16 @@ const CallButton = forwardRef(function CallButton({
         {/* Call Button - shows when idle (no active call) */}
         {!isRinging && !isInProgress && !isEnded && !isCalling && !currentCallSid && (
           <button
-            onClick={handleCall}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleCall().catch((err) => {
+                // Ensure any unhandled errors are caught and don't cause navigation
+                console.error('Unhandled error in handleCall:', err);
+                setError('An error occurred. Please try again.');
+                contextEndCall();
+              });
+            }}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 shadow-md hover:shadow-lg bg-blue-600 hover:bg-blue-700 text-white"
             title={`Call ${customerName || phoneNumber}`}
           >
