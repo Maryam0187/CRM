@@ -7,6 +7,7 @@ import NoteModal from './NoteModal';
 // import ReceiverModal from './ReceiverModal'; // Removed - using textarea template instead
 import StateSelector, { getStateTimezone, convertToUTC, convertFromUTC } from './StateSelector';
 import { useAuth } from '../contexts/AuthContext';
+import { useCall } from '../contexts/CallContext';
 import apiClient from '../lib/apiClient.js';
 import CallButton from './CallButton';
 import CallHistory from './CallHistory';
@@ -97,6 +98,7 @@ export default function AddSale() {
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const { showSuccess, showError } = useToast();
+  const { callStatus } = useCall();
   
   // Refs to track CallButton instances for call state checking
   const callButtonRefs = useRef([]);
@@ -715,16 +717,21 @@ export default function AddSale() {
     return cleanPhone.length >= 10;
   };
 
+  // Set callJustEnded based on call status from CallContext
+  useEffect(() => {
+    if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') {
+      setCallJustEnded(true);
+    } else if (callStatus === 'in-progress' || callStatus === 'ringing' || callStatus === 'connecting') {
+      // Reset when new call starts
+      setCallJustEnded(false);
+    }
+  }, [callStatus]);
+
   // Handle call completion
 
   const handleCallCompleted = (callResult) => {
     console.log('Call completed:', callResult);
     setCallData(callResult);
-    
-    // Show action buttons overlay to prompt user to select status
-    if (callResult) {
-      setCallJustEnded(true);
-    }
     
     // Hide the customer/sale info panel after call is initiated
     setShowCallInfo(false);
@@ -733,6 +740,7 @@ export default function AddSale() {
     // Reset checked customer and last sale info
     setCheckedCustomer(null);
     setLastSaleInfo(null);
+    // Note: callJustEnded is now set automatically based on callStatus from CallContext
   };
 
   // Handle call initiation (not completion)

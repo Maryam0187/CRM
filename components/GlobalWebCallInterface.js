@@ -974,8 +974,8 @@ export default function GlobalWebCallInterface() {
                     {!['in-progress', 'ringing', 'completed'].includes(callStatus) && callStatus}
                   </div>
                 )}
-                {/* Timer in Header */}
-                {(callStatus === 'in-progress' || callStatus === 'ringing' || finalDuration) && durationToShow > 0 && (
+                {/* Timer in Header - only show when in-progress */}
+                {callStatus === 'in-progress' && durationToShow > 0 && (
                   <div className="text-xs font-bold text-white">
                     {formatTimer(durationToShow)}
                   </div>
@@ -1070,16 +1070,20 @@ export default function GlobalWebCallInterface() {
               </div>
             )}
 
-            {/* Hangup Button */}
-            {(callStatus === 'in-progress' || callStatus === 'ringing' || callStatus === 'connecting' || isCalling || isConnecting) && (
+            {/* Hangup Button - highlight when call ended */}
+            {(callStatus === 'in-progress' || callStatus === 'ringing' || callStatus === 'connecting' || isCalling || isConnecting || callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') && (
               <button
                 onClick={handleHangup}
-                className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
+                className={`w-full px-4 py-2 font-medium rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
+                  callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled'
+                    ? 'bg-green-600 hover:bg-green-700 text-white shadow-lg ring-2 ring-green-400 ring-offset-2 animate-pulse'
+                    : 'bg-red-600 hover:bg-red-700 text-white'
+                }`}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
                 </svg>
-                End Call
+                {callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled' ? 'Call Ended' : 'End Call'}
               </button>
             )}
         </div>
@@ -1099,7 +1103,8 @@ export default function GlobalWebCallInterface() {
                 {callMetadata?.customerName || 'Call'}
               </span>
             </div>
-            {durationToShow > 0 && (
+            {/* Timer in minimized view - only show when in-progress */}
+            {callStatus === 'in-progress' && durationToShow > 0 && (
               <span className="text-sm font-bold text-green-600">
                 {formatTimer(durationToShow)}
               </span>
