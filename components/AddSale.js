@@ -27,7 +27,7 @@ import {
   validateCurrency 
 } from '../lib/validation.js';
 import { useToast } from '../contexts/ToastContext';
-import { SALES_STATUSES, getStepForStatus, getStatusDisplayName, getStatusColorClass, getStatusBadgeClasses } from '../lib/salesStatuses.js';
+import { SALES_STATUSES, SALE_TAGS, getStepForStatus, getStatusDisplayName, getStatusColorClass, getStatusBadgeClasses, hasTag, addTag, toggleTag, getTagDisplayName, getTagBadgeClasses } from '../lib/salesStatuses.js';
 import { downloadSaleDoc, escapeHtml as docEscapeHtml, buildTableRows as docBuildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
 
 // Helper function to calculate time ago
@@ -142,6 +142,7 @@ export default function AddSale() {
   const [lastSaleInfo, setLastSaleInfo] = useState(null); // Store last sale information
   const [isCheckNumberMode, setIsCheckNumberMode] = useState(false); // Track if in check number mode
   const [callJustEnded, setCallJustEnded] = useState(false); // Track if call just ended to highlight action buttons
+  const [sale, setSale] = useState(null); // Store full sale data including cards/banks for tag checking
   
   // Payment section state
   const [showPaymentSection, setShowPaymentSection] = useState(false); // Show payment section after call ends
@@ -479,6 +480,9 @@ export default function AddSale() {
       if (result.success) {
         const sale = result.data;
         
+        // Store full sale data including cards/banks for tag checking
+        setSale(sale);
+        
         // Populate customer data
         if (sale.customer) {
           const customerId = sale.customerId || sale.customer.id;
@@ -540,7 +544,8 @@ export default function AddSale() {
           appointmentDateTime: displayAppointmentDateTime,
           services: sale.services || [],
           receivers: sale.receivers || {},
-          receiversInfo: sale.receiversInfo || {}
+          receiversInfo: sale.receiversInfo || {},
+          tags: sale.tags || [] // Load tags when sale is fetched
         });
         
         // Set selected receivers
@@ -767,7 +772,7 @@ export default function AddSale() {
     // Don't clear form data - preserve it for next time
   };
 
-  const handlePaymentSuccess = (type, data) => {
+  const handlePaymentSuccess = async (type, data) => {
     console.log('Payment saved:', data);
     
     // Clear the form data for the successful payment type
@@ -795,40 +800,15 @@ export default function AddSale() {
       });
     }
     
-    // Set status to payment info when payment details are actually added
+    // Show success message
+    setSuccessMessage(`${type === 'card' ? 'Card' : 'Bank'} payment information added successfully!`);
+    
+    // Log the payment collection action to sales logs
+    // Payment-info tag is now automatically shown based on cards/banks existence, no need to update tag
     if (saleForm.id || editId) {
-      const saleId = saleForm.id || editId;
-      
-      // Update sale status to payment info
-      apiClient.put(`/api/sales/${saleId}`, {
-        status: SALES_STATUSES.PAYMENT_INFO
-      })
-      .then(response => {
-        console.log('Sale status updated to payment info:', response.data);
-        // Update local state
-        setSaleForm(prev => ({
-          ...prev,
-          status: SALES_STATUSES.PAYMENT_INFO
-        }));
-        
-        // Log the payment collection action to sales logs
-        logSalesAction('payment_collected', SALES_STATUSES.PAYMENT_INFO, {
-          paymentType: type,
-          paymentData: data
-        });
-        
-        // Show success message
-        setSuccessMessage(`${type === 'card' ? 'Card' : 'Bank'} payment information added successfully!`);
-        
-        // Refresh sale data to show updated information
-        if (isEditMode && editId) {
-          fetchSaleData();
-        }
-      })
-      .catch(error => {
-        console.error('Error updating sale status:', error);
-        // Still show success for payment addition, but log status update error
-        setSuccessMessage(`${type === 'card' ? 'Card' : 'Bank'} payment information added successfully!`);
+      logSalesAction('payment_collected', saleForm.status, {
+        paymentType: type,
+        paymentData: data
       });
     }
     
@@ -1740,8 +1720,9 @@ Room: `;
     resetCallHighlight(); // Reset highlight when action is taken
     if (action === 'appointment') {
       openAppointmentModal();
-    }  else if (action === 'sale_done') {
-      logSalesAction('sale_done', SALES_STATUSES.SALE_DONE);
+    } else if (action === 'sale_done') {
+      // When sale-done is selected, set status to ACTIVE without adding tags by default
+      logSalesAction('sale_done', SALES_STATUSES.ACTIVE);
     } else {
       logSalesAction(action, status);
     }
@@ -1758,9 +1739,9 @@ Room: `;
       // Add new appointment without changing status
       openAppointmentModal();
     } else if (action === 'add_payments') {
-      // Always show payment section regardless of call timing
+      // Show payment section - tag will be updated when payment is successfully added
       setShowPaymentSection(true);
-      // Don't log anything yet - status will be logged when payment is actually added
+      // Don't update tag immediately - will be handled when payment is saved
     } else if (action === 'cancelled') {
       logSalesAction('cancelled', SALES_STATUSES.CANCELLED);
     } else {
@@ -1769,8 +1750,17 @@ Room: `;
   };
 
   const handleThirdStepAction = (action, status) => {
+    // Step 3 is removed - verification and process are now tags on ACTIVE sales
+    // This function is kept for backward compatibility but should not be used
     if (action === 'cancelled') {
-      logSalesAction('cancelled', SALES_STATUSES.CANCELLED);
+      logSalesAction('cancelled', SALES_STATUSES.LEAD_CALL);
+    } else if (action === 'verification' || action === 'process') {
+      // These are now handled as tags on ACTIVE sales
+      // Redirect to tag management
+      const currentTags = saleForm.tags || [];
+      const tagToToggle = action === 'verification' ? SALE_TAGS.VERIFICATION : SALE_TAGS.PROCESS;
+      const newTags = toggleTag(currentTags, tagToToggle);
+      updateSaleTags(newTags, action);
     } else {
       logSalesAction(action, status);
     }
@@ -1783,9 +1773,11 @@ Room: `;
   const handleLeadCallAction = (action, status) => {
     resetCallHighlight(); // Reset highlight when action is taken
     if (action === 'sale_done') {
-      logSalesAction('sale_done', SALES_STATUSES.SALE_DONE);
+      // When sale-done is selected, set status to ACTIVE without adding tags by default
+      logSalesAction('sale_done', SALES_STATUSES.ACTIVE);
     } else if (action === 'cancelled') {
-      logSalesAction('cancelled', SALES_STATUSES.CANCELLED);
+      // When cancelled, set status back to LEAD_CALL
+      logSalesAction('cancelled', SALES_STATUSES.LEAD_CALL);
     } else if (action === 'add_note') {
       // Open note modal
       openNoteModal();
@@ -1793,9 +1785,9 @@ Room: `;
       // Update sale data without changing status
       logSalesAction('update_sale_data', SALES_STATUSES.LEAD_CALL);
     } else if (action === 'add_payments') {
-      // Always show payment section regardless of call timing
+      // Show payment section - tag will be updated when payment is successfully added
       setShowPaymentSection(true);
-      // Don't log anything yet - status will be logged when payment is actually added
+      // Don't update tag immediately - will be handled when payment is saved
     } else {
       logSalesAction(action, status);
     }
@@ -1803,14 +1795,23 @@ Room: `;
 
 
   const handlePaymentInfoAction = (action, status) => {
+    // Verification and process are now tags, not statuses
+    // These actions should only work on ACTIVE sales
     if (action === 'verification') {
-      logSalesAction('verification', SALES_STATUSES.VERIFICATION);
+      // Toggle verification tag on active sale
+      const currentTags = saleForm.tags || [];
+      const newTags = toggleTag(currentTags, SALE_TAGS.VERIFICATION);
+      updateSaleTags(newTags, 'verification');
     } else if (action === 'process') {
-      logSalesAction('process', SALES_STATUSES.PROCESS);
+      // Toggle process tag on active sale
+      const currentTags = saleForm.tags || [];
+      const newTags = toggleTag(currentTags, SALE_TAGS.PROCESS);
+      updateSaleTags(newTags, 'process');
     } else if (action === 'ready_for_payment') {
       logSalesAction('ready_for_payment', SALES_STATUSES.READY_FOR_PAYMENT);
     } else if (action === 'cancelled') {
-      logSalesAction('cancelled', SALES_STATUSES.CANCELLED);
+      // When cancelled, set status back to LEAD_CALL
+      logSalesAction('cancelled', SALES_STATUSES.LEAD_CALL);
     } else {
       logSalesAction(action, status);
     }
@@ -1820,7 +1821,65 @@ Room: `;
     logSalesAction(action, status);
   };
 
+  // Function to update sale tags (for active sales)
+  const updateSaleTags = async (newTags, actionName) => {
+    if (!saleForm.id && !editId) {
+      setError('No sale found to update tags');
+      return;
+    }
 
+    setSaving(true);
+    setError(null);
+
+    try {
+      const saleId = saleForm.id || editId;
+      
+      // Update sale with new tags
+      const response = await apiClient.put(`/api/sales/${saleId}`, {
+        tags: newTags,
+        status: saleForm.status // Keep current status
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Update local form state
+        setSaleForm(prev => ({
+          ...prev,
+          tags: newTags
+        }));
+
+        // Log the tag action
+        const customerId = customer.id || result.data?.customerId;
+        if (customerId) {
+          const logData = {
+            saleId: saleId,
+            customerId: customerId,
+            agentId: user?.id,
+            action: actionName,
+            status: saleForm.status,
+            currentSaleData: {
+              ...saleForm,
+              tags: newTags
+            }
+          };
+          
+          await apiClient.post('/api/sales-logs', logData);
+        }
+
+        const tagName = actionName === 'verification' ? 'Verification' : 'Process';
+        const isAdded = hasTag(newTags, actionName === 'verification' ? SALE_TAGS.VERIFICATION : SALE_TAGS.PROCESS);
+        showSuccess(`Tag "${tagName}" ${isAdded ? 'added' : 'removed'}`);
+      } else {
+        setError(result.message || 'Failed to update tags');
+      }
+    } catch (error) {
+      console.error('Error updating tags:', error);
+      setError('Failed to update tags');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // Add or update sale with status
   // Handle customer dialog close and continue with sale
@@ -2243,10 +2302,12 @@ Room: `;
     if (status !== null) {
       setSaleStatus(status);
       
-      // Update sale form status
+      // Update sale form status and tags
       setSaleForm(prev => ({
         ...prev,
-        status: status
+        status: status,
+        // Update tags if provided in additionalData
+        tags: additionalData.tags !== undefined ? additionalData.tags : prev.tags || []
       }));
     }
     
@@ -2642,6 +2703,8 @@ Room: `;
         customerId: customerId,
         agentId: user?.id, // Get agentId from the logged in user
         status: status,
+        // Include tags if provided in additionalData (for sale-done action)
+        tags: additionalData.tags || saleForm.tags || [],
         spokeTo: sanitizeValue(saleForm.spoke_to),
         pinCode: sanitizeValue(saleForm.pin_code),
         pinCodeStatus: sanitizeEnumValue(saleForm.pin_code_status),
@@ -2929,7 +2992,7 @@ Room: `;
                       getCurrentStep() === 'third' ? '3' : 'Admin'}: 
                 {getCurrentStep() === 'first' ? ' Initial Contact' : 
                  getCurrentStep() === 'lead-call' ? (saleForm.status === 'cancelled' ? ' Lead Call (Cancelled Sale)' : ' Lead Call') :
-                 getCurrentStep() === 'payment-info' ? ' Payment Info' :
+                 // payment-info step removed - now a tag
                  getCurrentStep() === 'ready-for-payment' ? ' Ready for Payment' :
                  getCurrentStep() === 'second' ? ' Active Engagement' : 
                  getCurrentStep() === 'third' ? ' Processing' : ' Final Actions'}
@@ -3233,8 +3296,111 @@ Room: `;
                 </>
               )}
               
-              {/* General Step 2 actions */}
-              {saleForm.status !== 'sale-done' && (
+              {/* ACTIVE status actions with tags */}
+              {saleForm.status === SALES_STATUSES.ACTIVE && (
+                <>
+                  {/* Tags Management Section */}
+                  <div className="col-span-full mb-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">Tags:</h4>
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        onClick={() => {
+                          const currentTags = saleForm.tags || [];
+                          const newTags = toggleTag(currentTags, SALE_TAGS.VERIFICATION);
+                          updateSaleTags(newTags, 'verification');
+                        }}
+                        disabled={saving || loading}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                          hasTag(saleForm.tags, SALE_TAGS.VERIFICATION)
+                            ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {hasTag(saleForm.tags, SALE_TAGS.VERIFICATION) ? '✓ ' : ''}
+                        🔍 Verification
+                      </button>
+                      <button
+                        onClick={() => {
+                          const currentTags = saleForm.tags || [];
+                          const newTags = toggleTag(currentTags, SALE_TAGS.PROCESS);
+                          updateSaleTags(newTags, 'process');
+                        }}
+                        disabled={saving || loading}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                          hasTag(saleForm.tags, SALE_TAGS.PROCESS)
+                            ? 'bg-yellow-600 text-white hover:bg-yellow-700'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {hasTag(saleForm.tags, SALE_TAGS.PROCESS) ? '✓ ' : ''}
+                        ⚙️ Process
+                      </button>
+                    </div>
+                    {/* Display current tags - automatically include payment-info if cards/banks exist */}
+                    {(() => {
+                      // Get tags from form
+                      const displayTags = [...(saleForm.tags || [])];
+                      
+                      // Check if sale has cards or banks (from fetched sale data)
+                      const hasCards = sale?.cards && sale.cards.length > 0;
+                      const hasBanks = sale?.banks && sale.banks.length > 0;
+                      const hasPayments = hasCards || hasBanks;
+                      
+                      // Automatically add payment-info tag if payments exist (but don't save to form state)
+                      if (hasPayments && !displayTags.includes(SALE_TAGS.PAYMENT_INFO)) {
+                        displayTags.push(SALE_TAGS.PAYMENT_INFO);
+                      }
+                      
+                      if (displayTags.length === 0) {
+                        return <span className="text-gray-400 text-sm">No tags</span>;
+                      }
+                      
+                      return (
+                        <div className="mt-2 flex gap-2 flex-wrap">
+                          {displayTags.map(tag => (
+                            <span key={tag} className={`px-2 py-1 rounded text-xs ${getTagBadgeClasses(tag)}`}>
+                              {getTagDisplayName(tag)}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  
+                  {/* ACTIVE status buttons: Add Payment, Add Note, Update Sale Data, Cancelled */}
+                  <button
+                    onClick={() => handleSecondStepAction('add_payments', saleForm.status)}
+                    disabled={saving || loading}
+                    className="bg-green-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    💳 Add Payment
+                  </button>
+                  <button
+                    onClick={() => handleSecondStepAction('add_note', saleForm.status)}
+                    disabled={saving || loading}
+                    className="bg-yellow-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-yellow-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    📝 Add Note
+                  </button>
+                  <button
+                    onClick={() => handleSecondStepAction('update_sale_data', saleForm.status)}
+                    disabled={saving || loading}
+                    className="bg-blue-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    📝 Update Sale Data
+                  </button>
+                  <button
+                    onClick={() => handleSecondStepAction('cancelled', SALES_STATUSES.CANCELLED)}
+                    disabled={saving || loading}
+                    className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    ❌ Cancelled
+                  </button>
+                </>
+              )}
+              
+              {/* General Step 2 actions for other statuses */}
+              {saleForm.status !== 'sale-done' && saleForm.status !== SALES_STATUSES.ACTIVE && (
                 <>
                   <button
                     onClick={() => handleSecondStepAction('update_sale_data', saleForm.status)}

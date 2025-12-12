@@ -157,7 +157,9 @@ export async function POST(request) {
       ssnNumberStatus: sanitizeEnumField(saleData.ssnNumberStatus),
       basicPackageStatus: sanitizeEnumField(saleData.basicPackageStatus),
       bundle: sanitizeEnumField(saleData.bundle),
-      status: sanitizeEnumField(saleData.status)
+      status: sanitizeEnumField(saleData.status),
+      // Handle tags - ensure it's an array
+      tags: Array.isArray(saleData.tags) ? saleData.tags : (saleData.tags ? [saleData.tags] : [])
     };
     
     // Map appointment_datetime to appointmentDateTime for the model

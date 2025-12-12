@@ -69,7 +69,9 @@ export async function PUT(request, { params }) {
       ssnNumberStatus: sanitizeEnumField(updateData.ssnNumberStatus),
       basicPackageStatus: sanitizeEnumField(updateData.basicPackageStatus),
       bundle: sanitizeEnumField(updateData.bundle),
-      status: sanitizeEnumField(updateData.status)
+      status: sanitizeEnumField(updateData.status),
+      // Handle tags - ensure it's an array
+      tags: Array.isArray(updateData.tags) ? updateData.tags : (updateData.tags ? [updateData.tags] : [])
     };
     
     // Map appointment_datetime to appointmentDateTime for the model

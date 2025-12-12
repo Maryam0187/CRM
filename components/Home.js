@@ -11,7 +11,7 @@ import AppointmentSummary from './AppointmentSummary';
 import { useAuth } from '../contexts/AuthContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
 import apiClient from '../lib/apiClient';
-import { SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName } from '../lib/salesStatuses';
+import { SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName, getTagDisplayName, getTagBadgeClasses, SALE_TAGS } from '../lib/salesStatuses';
 import { downloadSaleDoc, buildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
 
 export default function Home() {
@@ -462,45 +462,38 @@ export default function Home() {
       )
     },
     {
-      header: 'Created Date',
-      key: 'created_at',
-      render: (value) => (
-        <span className="text-gray-500">
-          {new Date(value).toLocaleDateString()}
-        </span>
-      )
-    },
-    {
-      header: 'Payment Status',
-      key: 'paymentStatus',
-      render: (value, row) => {
+      header: 'Tags',
+      key: 'tags',
+      render: (tags, row) => {
+        // Get tags from sale
+        const saleTags = Array.isArray(tags) ? tags : (tags ? [tags] : []);
+        
+        // Check if sale has cards or banks
         const hasCards = row.cards && row.cards.length > 0;
         const hasBanks = row.banks && row.banks.length > 0;
         const hasPayments = hasCards || hasBanks;
         
-        // Show existing payment status
-        if (hasPayments) {
-          const paymentTypes = [];
-          if (hasCards) paymentTypes.push(`${row.cards.length} Card${row.cards.length > 1 ? 's' : ''}`);
-          if (hasBanks) paymentTypes.push(`${row.banks.length} Bank${row.banks.length > 1 ? 's' : ''}`);
-          
-          return (
-            <div className="flex flex-col">
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mb-1">
-                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                </svg>
-                {paymentTypes.join(', ')}
-              </span>
-              <span className="text-xs text-gray-500">
-                {hasCards && hasBanks ? 'Cards & Banks' : hasCards ? 'Cards only' : 'Banks only'}
-              </span>
-            </div>
-          );
+        // Automatically include payment-info tag if payments exist
+        const displayTags = [...saleTags];
+        if (hasPayments && !displayTags.includes(SALE_TAGS.PAYMENT_INFO)) {
+          displayTags.push(SALE_TAGS.PAYMENT_INFO);
+        }
+        
+        if (displayTags.length === 0) {
+          return <span className="text-gray-400 text-sm">No tags</span>;
         }
         
         return (
-          <span className="text-gray-400 text-sm">No payments</span>
+          <div className="flex flex-wrap gap-1">
+            {displayTags.map((tag, index) => (
+              <span
+                key={index}
+                className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getTagBadgeClasses(tag)}`}
+              >
+                {getTagDisplayName(tag)}
+              </span>
+            ))}
+          </div>
         );
       }
     },

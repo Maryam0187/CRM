@@ -186,6 +186,14 @@ module.exports = (sequelize) => {
       allowNull: true,
       field: 'appointment_datetime',
       comment: 'Combined appointment date and time in UTC'
+    },
+    
+    // Tags for active sales (e.g., verification, process)
+    tags: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: [],
+      comment: 'Tags for active sales (e.g., verification, process)'
     }
   }, {
     tableName: 'sales',
