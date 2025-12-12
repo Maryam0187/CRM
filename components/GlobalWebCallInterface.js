@@ -90,6 +90,8 @@ export default function GlobalWebCallInterface() {
   const isCleaningUp = useRef(false);
   const muteSyncIntervalRef = useRef(null);
   const webCallInterfaceRef = useRef(null);
+  const ringingAudioContextRef = useRef(null); // For Web Audio API
+  const ringingOscillatorsRef = useRef([]); // For storing oscillators
 
   // Fetch Twilio token
   const fetchToken = async () => {
@@ -901,6 +903,117 @@ export default function GlobalWebCallInterface() {
       }
     };
   }, [isConnected, setIsMuted]);
+
+  // Play/stop default Twilio ringing sound
+  useEffect(() => {
+    let ringingInterval = null;
+    
+    if (callStatus === 'ringing') {
+      // Create Web Audio API context for standard phone ringtone
+      if (!ringingAudioContextRef.current) {
+        ringingAudioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      
+      const audioContext = ringingAudioContextRef.current;
+      
+      // Resume audio context if suspended (required by browsers)
+      if (audioContext.state === 'suspended') {
+        audioContext.resume().catch(err => console.warn('Failed to resume audio context:', err));
+      }
+      
+      // Standard phone ringtone: alternating between 440Hz and 480Hz
+      // Pattern: 400ms sound, 200ms silence, 400ms sound, 2000ms silence (repeat)
+      const playRingtone = () => {
+        // Stop any existing oscillators
+        ringingOscillatorsRef.current.forEach(osc => {
+          try {
+            osc.stop();
+            osc.disconnect();
+          } catch (e) {
+            // Ignore errors
+          }
+        });
+        ringingOscillatorsRef.current = [];
+        
+        // Create two oscillators for the ringtone (standard phone ring)
+        const oscillator1 = audioContext.createOscillator();
+        const oscillator2 = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator1.type = 'sine';
+        oscillator1.frequency.value = 440; // A4 note
+        oscillator2.type = 'sine';
+        oscillator2.frequency.value = 480; // Slightly higher
+        
+        gainNode.gain.value = 0.3; // Volume level
+        
+        oscillator1.connect(gainNode);
+        oscillator2.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // Start oscillators
+        oscillator1.start();
+        oscillator2.start();
+        
+        // Stop after 400ms
+        setTimeout(() => {
+          try {
+            oscillator1.stop();
+            oscillator2.stop();
+          } catch (e) {
+            // Ignore errors
+          }
+        }, 400);
+        
+        ringingOscillatorsRef.current.push(oscillator1, oscillator2);
+      };
+      
+      // Play ringtone immediately
+      playRingtone();
+      
+      // Then repeat: 400ms sound, 200ms silence, 400ms sound, 2000ms silence
+      ringingInterval = setInterval(() => {
+        if (callStatus === 'ringing') {
+          playRingtone();
+        }
+      }, 3000); // Total cycle: 400ms + 200ms + 400ms + 2000ms = 3000ms
+    } else {
+      // Stop ringing when status changes
+      if (ringingInterval) {
+        clearInterval(ringingInterval);
+        ringingInterval = null;
+      }
+      if (ringingOscillatorsRef.current.length > 0) {
+        ringingOscillatorsRef.current.forEach(osc => {
+          try {
+            osc.stop();
+            osc.disconnect();
+          } catch (e) {
+            // Ignore errors
+          }
+        });
+        ringingOscillatorsRef.current = [];
+      }
+    }
+    
+    return () => {
+      // Cleanup on unmount or status change
+      if (ringingInterval) {
+        clearInterval(ringingInterval);
+      }
+      if (ringingOscillatorsRef.current.length > 0) {
+        ringingOscillatorsRef.current.forEach(osc => {
+          try {
+            osc.stop();
+            osc.disconnect();
+          } catch (e) {
+            // Ignore errors
+          }
+        });
+        ringingOscillatorsRef.current = [];
+      }
+    };
+  }, [callStatus]);
 
   // Handle hangup
   const handleHangup = async () => {

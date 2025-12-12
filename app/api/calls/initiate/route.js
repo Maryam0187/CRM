@@ -102,6 +102,11 @@ export async function POST(request) {
       from: twilioPhoneNumber,
       statusCallback: statusCallbackUrl,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      // Enable Answering Machine Detection (AMD) to detect voicemail
+      machineDetection: 'Enable',
+      machineDetectionTimeout: 30, // Wait up to 30 seconds for AMD result
+      machineDetectionSpeechThreshold: 5000, // 5 seconds of speech to confirm human
+      machineDetectionSpeechEndThreshold: 2400, // 2.4 seconds of silence to confirm machine
       // Route agent via SIP Domain
       // We'll dial the customer first, then connect to agent via SIP in the voice response
       answerOnMedia: false

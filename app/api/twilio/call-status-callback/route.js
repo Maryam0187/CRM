@@ -19,6 +19,7 @@ export async function POST(request) {
     const endTime = formData.get('EndTime');
     const answerTime = formData.get('AnswerTime');
     const hangupCause = formData.get('HangupCause');
+    const answeredBy = formData.get('AnsweredBy'); // AMD result: 'human', 'machine', or 'unknown'
 
     console.log('📞 Call status callback received:', {
       callSid,
@@ -32,6 +33,7 @@ export async function POST(request) {
       endTime,
       answerTime,
       hangupCause,
+      answeredBy, // AMD result
       timestamp: new Date().toISOString()
     });
     
@@ -144,6 +146,44 @@ export async function POST(request) {
     }
 
     await callLog.update(updateData);
+
+    // Handle voicemail detection (AMD result) - after callLog is found and updated
+    if (answeredBy === 'machine' && callLog && !parentCallSid) {
+      console.log('📞 Voicemail detected via AMD - will auto-hangup after 30 seconds');
+      
+      // Update call log to mark as voicemail
+      const existingTwilioData = callLog.twilioData || {};
+      const twilioDataUpdate = {
+        ...existingTwilioData,
+        answeredBy: 'machine',
+        isVoicemail: true,
+        voicemailDetectedAt: new Date().toISOString()
+      };
+      
+      await callLog.update({
+        status: 'voicemail',
+        twilioData: twilioDataUpdate
+      });
+      
+      // Schedule auto-hangup after 30 seconds for voicemail
+      // Use Twilio API to update the call and hang it up after 30 seconds
+      if (callStatus === 'in-progress' || callStatus === 'answered') {
+        const { getClient } = require('../../../../lib/twilio');
+        const client = getClient();
+        
+        // Schedule hangup after 30 seconds
+        setTimeout(async () => {
+          try {
+            await client.calls(callSid).update({
+              status: 'completed'
+            });
+            console.log(`✅ Voicemail call ${callSid} auto-hung up after 30 seconds`);
+          } catch (err) {
+            console.error(`❌ Error auto-hanging up voicemail call ${callSid}:`, err);
+          }
+        }, 30000); // 30 seconds
+      }
+    }
 
     // Update agent status based on call status
     // IMPORTANT: Only update agent status for parent calls (customer leg), not child calls (agent leg)
