@@ -115,7 +115,12 @@ export function CallProvider({ children }) {
   const updateCallStatus = useCallback((status) => {
     setCallStatus(status);
     
-    // Auto-start timer when call goes in-progress
+    // Start timer when call goes to ringing (not wait for in-progress)
+    if (status === 'ringing' && !timerIntervalRef.current) {
+      startTimer();
+    }
+    
+    // Also start timer when call goes in-progress (if not already started)
     if (status === 'in-progress' && !timerIntervalRef.current) {
       startTimer();
     }
