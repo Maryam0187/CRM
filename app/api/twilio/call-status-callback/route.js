@@ -105,7 +105,7 @@ export async function POST(request) {
       'canceled': 'canceled'
     };
     
-    const mappedStatus = statusMap[callStatus] || 'queued';
+    let mappedStatus = statusMap[callStatus] || 'queued';
 
     // Prepare twilioData update - preserve existing data including child calls
     const existingTwilioData = callLog.twilioData || {};
@@ -165,23 +165,42 @@ export async function POST(request) {
         twilioData: twilioDataUpdate
       });
       
+      // Update mappedStatus for socket events
+      mappedStatus = 'voicemail';
+      
       // Schedule auto-hangup after 30 seconds for voicemail
       // Use Twilio API to update the call and hang it up after 30 seconds
-      if (callStatus === 'in-progress' || callStatus === 'answered') {
-        const { getClient } = require('../../../../lib/twilio');
-        const client = getClient();
-        
-        // Schedule hangup after 30 seconds
-        setTimeout(async () => {
-          try {
-            await client.calls(callSid).update({
-              status: 'completed'
-            });
-            console.log(`✅ Voicemail call ${callSid} auto-hung up after 30 seconds`);
-          } catch (err) {
-            console.error(`❌ Error auto-hanging up voicemail call ${callSid}:`, err);
-          }
-        }, 30000); // 30 seconds
+      const { getClient } = require('../../../../lib/twilio');
+      const client = getClient();
+      
+      // Schedule hangup after 30 seconds (regardless of current call status)
+      setTimeout(async () => {
+        try {
+          await client.calls(callSid).update({
+            status: 'completed'
+          });
+          console.log(`✅ Voicemail call ${callSid} auto-hung up after 30 seconds`);
+        } catch (err) {
+          console.error(`❌ Error auto-hanging up voicemail call ${callSid}:`, err);
+        }
+      }, 30000); // 30 seconds
+    }
+
+    // Handle no-answer: disconnect call immediately
+    if (callStatus === 'no-answer' && callLog && !parentCallSid) {
+      console.log('📞 No-answer detected - disconnecting call immediately');
+      
+      const { getClient } = require('../../../../lib/twilio');
+      const client = getClient();
+      
+      // Disconnect the call immediately
+      try {
+        await client.calls(callSid).update({
+          status: 'completed'
+        });
+        console.log(`✅ No-answer call ${callSid} disconnected immediately`);
+      } catch (err) {
+        console.error(`❌ Error disconnecting no-answer call ${callSid}:`, err);
       }
     }
 

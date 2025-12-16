@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { isAdmin, isAgent, isSupervisor, isProcessor, isVerification } from '../lib/roleUtils';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { apiClient } from '../lib/apiClient';
+import { SALES_STATUSES, getStatusDisplayName } from '../lib/salesStatuses';
 
 export default function PaymentView() {
   const { user } = useAuth();
@@ -16,6 +17,7 @@ export default function PaymentView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showFullDetails, setShowFullDetails] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -44,6 +46,87 @@ export default function PaymentView() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAdminAction = async (action, status) => {
+    if (!saleId) return;
+    
+    setSavingStatus(true);
+    setError(null);
+    
+    try {
+      // Update sale status
+      const response = await apiClient.put(`/api/sales/${saleId}`, {
+        status: status
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Log the action to sales logs
+        const saleData = payments[0]; // Get current sale data
+        if (saleData) {
+          const logData = {
+            saleId: parseInt(saleId),
+            customerId: saleData.customer?.id || saleData.saleInfo?.customerId,
+            agentId: saleData.agent?.id || saleData.saleInfo?.agentId,
+            action: action,
+            status: status,
+            currentSaleData: {
+              ...saleData.saleInfo,
+              status: status
+            }
+          };
+          
+          try {
+            await apiClient.post('/api/sales-logs', logData);
+          } catch (logError) {
+            console.warn('Failed to log action:', logError);
+          }
+        }
+        
+        // Refresh payments to show updated status
+        await fetchPayments();
+      } else {
+        setError(result.message || 'Failed to update sale status');
+      }
+    } catch (error) {
+      console.error('Error updating sale status:', error);
+      setError('Failed to update sale status');
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
+  const shouldShowAdminActions = (status) => {
+    // Show admin action buttons only for admin users
+    if (!isAdmin(user)) {
+      return false;
+    }
+    
+    if (!status) {
+      return false;
+    }
+    
+    // Show buttons for ready-for-payment and admin statuses (charged, declined, chargeback)
+    const statusValue = String(status).trim();
+    const statusLower = statusValue.toLowerCase();
+    
+    // Check against both enum values and direct strings
+    const isReadyForPayment = statusLower === SALES_STATUSES.READY_FOR_PAYMENT.toLowerCase() || 
+                              statusLower === 'ready-for-payment' ||
+                              statusValue === SALES_STATUSES.READY_FOR_PAYMENT;
+    const isCharged = statusLower === SALES_STATUSES.CHARGED.toLowerCase() || 
+                      statusLower === 'charged' ||
+                      statusValue === SALES_STATUSES.CHARGED;
+    const isDeclined = statusLower === SALES_STATUSES.DECLINED.toLowerCase() || 
+                       statusLower === 'declined' ||
+                       statusValue === SALES_STATUSES.DECLINED;
+    const isChargeback = statusLower === SALES_STATUSES.CHARGEBACK.toLowerCase() || 
+                         statusLower === 'chargeback' ||
+                         statusValue === SALES_STATUSES.CHARGEBACK;
+    
+    return isReadyForPayment || isCharged || isDeclined || isChargeback;
   };
 
   const maskCardNumber = (cardNumber) => {
@@ -127,7 +210,13 @@ export default function PaymentView() {
       'voicemail': 'bg-gray-100 text-gray-800',
       'hang-up': 'bg-red-100 text-red-800',
       'no_response': 'bg-orange-100 text-orange-800',
-      'appointment': 'bg-purple-100 text-purple-800'
+      'appointment': 'bg-purple-100 text-purple-800',
+      'ready-for-payment': 'bg-green-100 text-green-800',
+      'charged': 'bg-pink-100 text-pink-800',
+      'declined': 'bg-red-100 text-red-800',
+      'chargeback': 'bg-red-200 text-red-900',
+      'lead-call': 'bg-blue-100 text-blue-800',
+      'sale-done': 'bg-green-200 text-green-900'
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
@@ -277,7 +366,7 @@ export default function PaymentView() {
                   </div>
                   <div className="text-right">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(payment.saleInfo.status)}`}>
-                      {payment.saleInfo.status}
+                      {getStatusDisplayName(payment.saleInfo.status) || payment.saleInfo.status}
                     </span>
                     <p className="text-sm text-gray-600 mt-1">
                       Created: {formatDate(payment.saleInfo.createdAt)}
@@ -285,6 +374,109 @@ export default function PaymentView() {
                   </div>
                 </div>
               </div>
+
+              {/* Action Buttons - Visible based on status rules */}
+              {(() => {
+                const currentStatus = (payment.saleInfo?.status || '').toLowerCase();
+                const isCharged = currentStatus === SALES_STATUSES.CHARGED.toLowerCase() || currentStatus === 'charged';
+                const isDeclined = currentStatus === SALES_STATUSES.DECLINED.toLowerCase() || currentStatus === 'declined';
+                const isChargeback = currentStatus === SALES_STATUSES.CHARGEBACK.toLowerCase() || currentStatus === 'chargeback';
+                const isReadyForPayment = currentStatus === SALES_STATUSES.READY_FOR_PAYMENT.toLowerCase() || currentStatus === 'ready-for-payment';
+                
+                // Determine which buttons to show based on status
+                let showButtons = false;
+                let showCharged = false;
+                let showDeclined = false;
+                let showChargeback = false;
+                let showCancelled = false;
+                let showReadyForPayment = false;
+                let sectionTitle = 'Admin Actions';
+                
+                if (isCharged) {
+                  // If charged: show only Chargeback button (admin only)
+                  if (isAdmin(user)) {
+                    showButtons = true;
+                    showChargeback = true; // Chargeback only shows when status is charged
+                  }
+                } else if (isDeclined) {
+                  // If declined: Charged (admin only), Declined (admin only), Ready for Payment (all users), Cancelled (all users)
+                  showButtons = true;
+                  showCharged = isAdmin(user);
+                  showDeclined = isAdmin(user);
+                  showReadyForPayment = true; // All users
+                  showCancelled = true; // All users
+                  sectionTitle = 'Status Actions';
+                } else if (isReadyForPayment) {
+                  // If ready-for-payment: show admin action buttons (only for admin)
+                  if (isAdmin(user)) {
+                    showButtons = true;
+                    showCharged = true;
+                    showDeclined = true;
+                    // Chargeback only shows when status is charged, not ready-for-payment
+                    showCancelled = true;
+                  }
+                } else if (isChargeback) {
+                  // If chargeback: show buttons (only for admin)
+                  if (isAdmin(user)) {
+                    showButtons = true;
+                    showCharged = true;
+                    showDeclined = true;
+                    // Don't show chargeback button when already in chargeback status
+                  }
+                } else if (isAdmin(user)) {
+                  // For other statuses, show admin buttons only for admin
+                  showButtons = true;
+                  showCharged = true;
+                  showDeclined = true;
+                  // Chargeback only shows when status is charged
+                }
+                
+                if (!showButtons) return null;
+                
+                return (
+                  <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                    <h4 className="text-sm font-medium text-gray-900 mb-3">{sectionTitle}</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {showCharged && (
+                        <button
+                          onClick={() => handleAdminAction('charged', SALES_STATUSES.CHARGED)}
+                          disabled={savingStatus}
+                          className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          💰 Charged
+                        </button>
+                      )}
+                      {showDeclined && (
+                        <button
+                          onClick={() => handleAdminAction('declined', SALES_STATUSES.DECLINED)}
+                          disabled={savingStatus}
+                          className="bg-red-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          ❌ Declined
+                        </button>
+                      )}
+                      {showChargeback && (
+                        <button
+                          onClick={() => handleAdminAction('chargeback', SALES_STATUSES.CHARGEBACK)}
+                          disabled={savingStatus}
+                          className="bg-red-800 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-900 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          🔄 Chargeback
+                        </button>
+                      )}
+                      {showCancelled && (
+                        <button
+                          onClick={() => handleAdminAction('cancelled', SALES_STATUSES.CANCELLED)}
+                          disabled={savingStatus}
+                          className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          ❌ Cancelled
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Payment Details */}
               <div className="px-6 py-4">

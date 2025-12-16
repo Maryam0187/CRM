@@ -125,10 +125,13 @@ export function CallProvider({ children }) {
       startTimer();
     }
     
-    // Stop timer when call ends
-    if (status === 'completed' || status === 'failed' || status === 'canceled') {
+    // Stop timer when call ends (including busy, no-answer, voicemail)
+    if (status === 'completed' || status === 'failed' || status === 'canceled' || 
+        status === 'busy' || status === 'no-answer' || status === 'voicemail') {
       stopTimer();
-      if (callTimer > 0) {
+      // Only save duration if call was actually in-progress before ending
+      // For busy/no-answer/voicemail, don't save duration as call never connected
+      if (callTimer > 0 && (status === 'completed' || status === 'failed' || status === 'canceled')) {
         setFinalDuration(callTimer);
       }
     }

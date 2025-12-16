@@ -2984,26 +2984,41 @@ Room: `;
           <div className="mb-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-900">
-                Step {getCurrentStep() === 'first' ? '1' : 
+                {(() => {
+                  const isDeclinedForNonAdmin = getCurrentStep() === 'admin' && user?.role !== 'admin' && 
+                    ((saleForm.status || '').toLowerCase() === SALES_STATUSES.DECLINED.toLowerCase() || 
+                     (saleForm.status || '').toLowerCase() === 'declined');
+                  
+                  if (isDeclinedForNonAdmin) {
+                    return 'Status Actions';
+                  }
+                  
+                  return `Step ${getCurrentStep() === 'first' ? '1' : 
                       getCurrentStep() === 'lead-call' ? 'Lead-Call' :
                       getCurrentStep() === 'payment-info' ? 'Payment-Info' :
                       getCurrentStep() === 'ready-for-payment' ? 'Ready-For-Payment' :
                       getCurrentStep() === 'second' ? '2' : 
-                      getCurrentStep() === 'third' ? '3' : 'Admin'}: 
-                {getCurrentStep() === 'first' ? ' Initial Contact' : 
+                      getCurrentStep() === 'third' ? '3' : 'Admin'}: ${getCurrentStep() === 'first' ? ' Initial Contact' : 
                  getCurrentStep() === 'lead-call' ? (saleForm.status === 'cancelled' ? ' Lead Call (Cancelled Sale)' : ' Lead Call') :
                  // payment-info step removed - now a tag
                  getCurrentStep() === 'ready-for-payment' ? ' Ready for Payment' :
                  getCurrentStep() === 'second' ? ' Active Engagement' : 
-                 getCurrentStep() === 'third' ? ' Processing' : ' Final Actions'}
+                 getCurrentStep() === 'third' ? ' Processing' : ' Final Actions'}`;
+                })()}
               </h3>
               <div className="text-sm text-gray-500">
                 {/* <div>Status: {saleForm.status || 'New'}</div>
                 <div>Edit Mode: {isEditMode ? 'Yes' : 'No'}</div>
                 <div>Step: {getCurrentStep()}</div> */}
-                {getCurrentStep() === 'admin' && user?.role !== 'admin' && (
-                  <div className="text-orange-600 font-medium">Read-only: Admin actions required</div>
-                )}
+                {getCurrentStep() === 'admin' && user?.role !== 'admin' && (() => {
+                  const currentStatus = (saleForm.status || '').toLowerCase();
+                  const isDeclined = currentStatus === SALES_STATUSES.DECLINED.toLowerCase() || currentStatus === 'declined';
+                  // Don't show "Read-only" message when status is declined since non-admin users have actions available
+                  if (isDeclined) {
+                    return null;
+                  }
+                  return <div className="text-orange-600 font-medium">Read-only: Admin actions required</div>;
+                })()}
               </div>
             </div>
           </div>
@@ -3483,71 +3498,195 @@ Room: `;
             </div>
           )}
 
-          {/* Admin Actions - Only visible to admin users */}
-          {getCurrentStep() === 'admin' && user?.role === 'admin' && !showPaymentSection && (
-            <div className={`p-4 rounded-lg transition-all duration-500 ${
-              callJustEnded 
-                ? 'bg-blue-50 border-2 border-blue-400 shadow-lg ring-2 ring-blue-200 relative z-50' 
-                : 'bg-transparent'
-            }`}>
-              {callJustEnded && (
-                <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded text-center">
-                  <p className="text-blue-800 text-sm font-medium">
-                    📞 Call completed! Please select the outcome below:
-                  </p>
+          {/* Admin Actions - Visible based on status rules */}
+          {getCurrentStep() === 'admin' && !showPaymentSection && (() => {
+            const currentStatus = (saleForm.status || '').toLowerCase();
+            const isCharged = currentStatus === SALES_STATUSES.CHARGED.toLowerCase() || currentStatus === 'charged';
+            const isDeclined = currentStatus === SALES_STATUSES.DECLINED.toLowerCase() || currentStatus === 'declined';
+            const isChargeback = currentStatus === SALES_STATUSES.CHARGEBACK.toLowerCase() || currentStatus === 'chargeback';
+            
+            // Determine which buttons to show based on status
+            let showButtons = false;
+            let showCharged = false;
+            let showDeclined = false;
+            let showChargeback = false;
+            let showCancelled = false;
+            let showReadyForPayment = false;
+            let sectionTitle = 'Admin Actions';
+            let isAdminOnly = true;
+            
+            if (isCharged) {
+              // If charged: show only Chargeback button (admin only)
+              if (user?.role === 'admin') {
+                showButtons = true;
+                showChargeback = true; // Chargeback only shows when status is charged
+              }
+            } else if (isDeclined) {
+              // If declined: Charged (admin only), Declined (admin only), Ready for Payment (all users)
+              // Cancelled is shown separately for non-admin users in the section below
+              if (user?.role === 'admin') {
+                showButtons = true;
+                showCharged = true;
+                showDeclined = true;
+                showReadyForPayment = true; // All users
+                // Don't show Cancelled here - it's shown in the non-admin section below
+                sectionTitle = 'Status Actions';
+              } else {
+                // For non-admin users, show Ready for Payment here
+                showButtons = true;
+                showReadyForPayment = true;
+                sectionTitle = 'Status Actions';
+              }
+            } else if (isChargeback) {
+              // If chargeback: show Charged and Declined buttons (admin only)
+              if (user?.role === 'admin') {
+                showButtons = true;
+                showCharged = true;
+                showDeclined = true;
+                // Don't show chargeback button when already in chargeback status
+              }
+            } else {
+              // For other admin statuses (ready-for-payment, etc.), show buttons (admin only)
+              if (user?.role === 'admin') {
+                showButtons = true;
+                showCharged = true;
+                showDeclined = true;
+                // Chargeback only shows when status is charged, not for other statuses
+                showCancelled = true;
+              }
+            }
+            
+            // Check if user has permission
+            if (!showButtons || (isAdminOnly && user?.role !== 'admin')) {
+              return null;
+            }
+            
+            return (
+              <div className={`p-4 rounded-lg transition-all duration-500 ${
+                callJustEnded 
+                  ? 'bg-blue-50 border-2 border-blue-400 shadow-lg ring-2 ring-blue-200 relative z-50' 
+                  : 'bg-transparent'
+              }`}>
+                {callJustEnded && (
+                  <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded text-center">
+                    <p className="text-blue-800 text-sm font-medium">
+                      📞 Call completed! Please select the outcome below:
+                    </p>
+                  </div>
+                )}
+                <h4 className="text-sm font-medium text-gray-900 mb-3">{sectionTitle}</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                  {showCharged && (
+                    <button
+                      onClick={() => handleAdminAction('charged', SALES_STATUSES.CHARGED)}
+                      disabled={saving || loading}
+                      className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      💰 Charged
+                    </button>
+                  )}
+                  {showDeclined && (
+                    <button
+                      onClick={() => handleAdminAction('declined', SALES_STATUSES.DECLINED)}
+                      disabled={saving || loading}
+                      className="bg-red-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      ❌ Declined
+                    </button>
+                  )}
+                  {showChargeback && (
+                    <button
+                      onClick={() => handleAdminAction('chargeback', SALES_STATUSES.CHARGEBACK)}
+                      disabled={saving || loading}
+                      className="bg-red-800 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-900 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      🔄 Chargeback
+                    </button>
+                  )}
+                  {showCancelled && (
+                    <button
+                      onClick={() => handleAdminAction('cancelled', SALES_STATUSES.CANCELLED)}
+                      disabled={saving || loading}
+                      className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      ❌ Cancelled
+                    </button>
+                  )}
+                  {showReadyForPayment && (
+                    <button
+                      onClick={() => handleAdminAction('ready_for_payment', SALES_STATUSES.READY_FOR_PAYMENT)}
+                      disabled={saving || loading}
+                      className="bg-green-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      ✅ Ready for Payment
+                    </button>
+                  )}
                 </div>
-              )}
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-              <button
-                onClick={() => handleAdminAction('charged', 'charged')}
-                disabled={saving || loading}
-                className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                💰 Charged
-              </button>
-              <button
-                onClick={() => handleAdminAction('declined', 'declined')}
-                disabled={saving || loading}
-                className="bg-red-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                ❌ Declined
-              </button>
-              <button
-                onClick={() => handleAdminAction('cancelled', SALES_STATUSES.CANCELLED)}
-                disabled={saving || loading}
-                className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                ❌ Cancelled
-              </button>
-              <button
-                onClick={() => handleAdminAction('chargeback', 'chargeback')}
-                disabled={saving || loading}
-                className="bg-red-800 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-900 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                🔄 Chargeback
-              </button>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
-          {/* Sale Status Display - For agents and supervisors when in admin step */}
-          {getCurrentStep() === 'admin' && user?.role !== 'admin' && (
-            <div className="bg-gray-100 border border-gray-300 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-medium text-gray-900">Sale Status</h4>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Current status: <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColorClass(saleForm.status)} text-white`}>
-                      {getStatusDisplayName(saleForm.status)}
-                    </span>
-                  </p>
+          {/* Sale Status Display with Actions - For agents when status is declined */}
+          {getCurrentStep() === 'admin' && user?.role !== 'admin' && (() => {
+            const currentStatus = (saleForm.status || '').toLowerCase();
+            const isDeclined = currentStatus === SALES_STATUSES.DECLINED.toLowerCase() || currentStatus === 'declined';
+            
+            if (isDeclined) {
+              // Show Cancelled button only for non-admin users when status is declined
+              // (Charged and Declined buttons are admin-only and shown in admin section above)
+              return (
+                <div className={`p-4 rounded-lg transition-all duration-500 ${
+                  callJustEnded 
+                    ? 'bg-blue-50 border-2 border-blue-400 shadow-lg ring-2 ring-blue-200 relative z-50' 
+                    : 'bg-transparent'
+                }`}>
+                  {callJustEnded && (
+                    <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded text-center">
+                      <p className="text-blue-800 text-sm font-medium">
+                        📞 Call completed! Please select the outcome below:
+                      </p>
+                    </div>
+                  )}
+                  <h4 className="text-sm font-medium text-gray-900 mb-3">Status Actions</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                    <button
+                      onClick={() => handleAdminAction('ready_for_payment', SALES_STATUSES.READY_FOR_PAYMENT)}
+                      disabled={saving || loading}
+                      className="bg-green-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      ✅ Ready for Payment
+                    </button>
+                    <button
+                      onClick={() => handleAdminAction('cancelled', SALES_STATUSES.CANCELLED)}
+                      disabled={saving || loading}
+                      className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      ❌ Cancelled
+                    </button>
+                  </div>
                 </div>
-                <div className="text-xs text-gray-500">
-                  Only administrators can change final payment statuses
+              );
+            } else {
+              // Show read-only status display for other statuses
+              return (
+                <div className="bg-gray-100 border border-gray-300 rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-900">Sale Status</h4>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Current status: <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColorClass(saleForm.status)} text-white`}>
+                          {getStatusDisplayName(saleForm.status)}
+                        </span>
+                      </p>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Only administrators can change final payment statuses
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          )}
+              );
+            }
+          })()}
         </div>
       </div>
 
