@@ -28,20 +28,15 @@ const CallButton = forwardRef(function CallButton({
   // Check if Twilio is enabled for this user
   const isTwilioEnabled = user?.twilio_enabled !== undefined ? user.twilio_enabled : true;
   
-  // If Twilio is disabled, don't render the button
-  if (!isTwilioEnabled) {
-    return null;
-  }
-  
   // Check if there's an active call (any call, not just this one)
   const hasActiveCall = currentCallSid || isCalling || isWebCallConnected;
   
   // Determine if this button should be disabled
-  const isButtonDisabled = disabled || hasActiveCall || !phoneNumber || !user?.id;
+  const isButtonDisabled = disabled || hasActiveCall || !phoneNumber || !user?.id || !isTwilioEnabled;
 
   // Handle call initiation
   const handleCall = async () => {
-    if (isButtonDisabled) return;
+    if (isButtonDisabled || !isTwilioEnabled) return;
 
     await initiateCall({
       customerId,
@@ -61,7 +56,7 @@ const CallButton = forwardRef(function CallButton({
     });
   };
 
-  // Expose methods via ref
+  // Expose methods via ref - MUST be called unconditionally before any early returns
   useImperativeHandle(ref, () => ({
     hasActiveCall: () => hasActiveCall,
     hangUp: () => {
@@ -75,6 +70,11 @@ const CallButton = forwardRef(function CallButton({
       hasActiveCall
     })
   }), [hasActiveCall, isCalling, currentCallSid, isWebCallConnected]);
+  
+  // If Twilio is disabled, don't render the button (after hooks are called)
+  if (!isTwilioEnabled) {
+    return null;
+  }
 
   // Button size classes
   const sizeClasses = {
