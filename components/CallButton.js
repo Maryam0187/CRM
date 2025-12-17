@@ -25,6 +25,14 @@ const CallButton = forwardRef(function CallButton({
     error: callError
   } = useCall();
   
+  // Check if Twilio is enabled for this user
+  const isTwilioEnabled = user?.twilio_enabled !== undefined ? user.twilio_enabled : true;
+  
+  // If Twilio is disabled, don't render the button
+  if (!isTwilioEnabled) {
+    return null;
+  }
+  
   // Check if there's an active call (any call, not just this one)
   const hasActiveCall = currentCallSid || isCalling || isWebCallConnected;
   

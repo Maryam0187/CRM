@@ -17,7 +17,7 @@ export async function GET(request) {
     }
 
     const users = await User.findAll({
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'cnic', 'phone', 'address', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'created_at', 'updated_at'],
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'cnic', 'phone', 'address', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'twilioEnabled', 'created_at', 'updated_at'],
       include: [
         {
           model: require('../../../models').SupervisorAgent,
@@ -61,6 +61,7 @@ export async function GET(request) {
         location_timestamp: user.locationTimestamp,
         location_permission: user.locationPermission,
         call_status: user.callStatus || 'offline',
+        twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
         superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
         supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
         created_at: user.created_at,

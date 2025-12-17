@@ -116,6 +116,31 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleToggleTwilio = async (userId, currentStatus) => {
+    if (!user) {
+      setError('User not authenticated');
+      return;
+    }
+
+    try {
+      const response = await apiClient.put(`/api/users/${userId}`, {
+        twilio_enabled: !currentStatus
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        showSuccess(`Twilio ${!currentStatus ? 'enabled' : 'disabled'} successfully`);
+        fetchUsers(); // Refresh the users list
+      } else {
+        showError(data.error || 'Failed to update Twilio status');
+      }
+    } catch (err) {
+      showError('Failed to update Twilio status');
+      console.error('Error updating Twilio status:', err);
+    }
+  };
+
   const handleForceLogoutClick = (userId, userName) => {
     setConfirmModal({
       isOpen: true,
@@ -335,6 +360,22 @@ export default function AdminUsersPage() {
                               }`}
                             >
                               {userItem.is_active ? 'Deactivate' : 'Activate'}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleTwilio(userItem.id, userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true);
+                              }}
+                              className={`${
+                                (userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) 
+                                  ? 'text-orange-600 hover:text-orange-900' 
+                                  : 'text-blue-600 hover:text-blue-900'
+                              }`}
+                              title={(userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) 
+                                ? 'Disable Twilio calling' 
+                                : 'Enable Twilio calling'}
+                            >
+                              {(userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) ? '📞 Disable Twilio' : '📞 Enable Twilio'}
                             </button>
                           </div>
                         </td>

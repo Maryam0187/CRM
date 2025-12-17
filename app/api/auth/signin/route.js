@@ -301,6 +301,7 @@ export async function POST(request) {
       location_accuracy: user.locationAccuracy,
       location_timestamp: user.locationTimestamp,
       location_permission: user.locationPermission,
+      twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
       supervisor: supervisorInfo,
       supervisedAgents: supervisedAgents,
     };

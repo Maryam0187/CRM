@@ -158,6 +158,13 @@ module.exports = (sequelize) => {
       defaultValue: 0,
       field: 'total_call_time',
       comment: 'Total call time in seconds'
+    },
+    twilioEnabled: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+      field: 'twilio_enabled',
+      comment: 'Enable/disable Twilio calling functionality for user'
     }
   }, {
     tableName: 'users',

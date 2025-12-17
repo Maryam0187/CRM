@@ -3962,7 +3962,7 @@ Room: `;
                   
 
                   {/* Edit Mode Call Button - Show below landline in edit mode */}
-                  {isEditMode && saleForm.id && customer.id && !checkedCustomer && (
+                  {isEditMode && saleForm.id && customer.id && !checkedCustomer && user?.twilio_enabled !== false && (
                     <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                       <div className="flex items-center justify-between mb-3">
                         <h3 className="text-lg font-medium text-blue-800">Ready to Call</h3>
@@ -4013,7 +4013,7 @@ Room: `;
 
 
                   {/* Call Button and Last Sale Info - Show after checking number */}
-                  {checkedCustomer && (
+                  {checkedCustomer && user?.twilio_enabled !== false && (
                     <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                       <div className="flex items-center justify-between mb-3">
                         <h3 className="text-lg font-medium text-blue-800">Ready to Call</h3>
@@ -5388,23 +5388,25 @@ Room: `;
                 </div>
                 
                 {/* Call Button */}
-                <div className="flex justify-center pt-4">
-                  <CallButton
-                    ref={(el) => {
-                      if (el && !callButtonRefs.current.find(ref => ref?.current === el)) {
-                        callButtonRefs.current.push({ current: el });
-                      }
-                    }}
-                    customerId={checkedCustomer.customerId}
-                    saleId={null} // No sale created yet
-                    phoneNumber={customer.phone || customer.landline}
-                    customerName={customer.firstName}
-                    callPurpose="follow_up"
-                    onCallInitiated={handleCallInitiated}
-                    onCallCompleted={handleCallCompleted}
-                    size="large"
-                  />
-                </div>
+                {user?.twilio_enabled !== false && (
+                  <div className="flex justify-center pt-4">
+                    <CallButton
+                      ref={(el) => {
+                        if (el && !callButtonRefs.current.find(ref => ref?.current === el)) {
+                          callButtonRefs.current.push({ current: el });
+                        }
+                      }}
+                      customerId={checkedCustomer.customerId}
+                      saleId={null} // No sale created yet
+                      phoneNumber={customer.phone || customer.landline}
+                      customerName={customer.firstName}
+                      callPurpose="follow_up"
+                      onCallInitiated={handleCallInitiated}
+                      onCallCompleted={handleCallCompleted}
+                      size="large"
+                    />
+                  </div>
+                )}
 
                 {/* Last Sale Information */}
                 {lastSaleInfo && (

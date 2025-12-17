@@ -18,7 +18,7 @@ export async function GET(request, { params }) {
     const userId = (await params).id;
 
     const user = await User.findByPk(userId, {
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'status', 'lastLoginTime', 'lastLogoutTime', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'created_at', 'updated_at'],
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'status', 'lastLoginTime', 'lastLogoutTime', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'twilioEnabled', 'created_at', 'updated_at'],
       include: [
         {
           model: require('../../../../models').SupervisorAgent,
@@ -67,6 +67,7 @@ export async function GET(request, { params }) {
         location_timestamp: user.locationTimestamp,
         location_permission: user.locationPermission,
         call_status: user.callStatus || 'offline',
+        twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
       superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
       supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
       created_at: user.created_at,
@@ -109,7 +110,8 @@ export async function PUT(request, { params }) {
       phone,
       cnic,
       address,
-      superiorId
+      superiorId,
+      twilio_enabled
     } = await request.json();
 
     // Find user
@@ -180,6 +182,8 @@ export async function PUT(request, { params }) {
     // If role is provided for admin user, ignore it (frontend shouldn't send it, but just in case)
     
     if (typeof is_active === 'boolean') updateData.isActive = is_active;
+    
+    if (typeof twilio_enabled === 'boolean') updateData.twilioEnabled = twilio_enabled;
     
     // Handle optional phone field - clean and convert empty string to null
     if (phone !== undefined) {
@@ -266,6 +270,7 @@ export async function PUT(request, { params }) {
       phone: user.phone,
       address: user.address,
       call_status: user.callStatus || 'offline',
+      twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
       created_at: user.created_at,
       updated_at: user.updated_at
     };
