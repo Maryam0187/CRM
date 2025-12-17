@@ -1,6 +1,6 @@
 # Production Dockerfile
-# Use the official Node.js 18 image
-FROM node:18-alpine
+# Use the official Node.js 18 image with specific version for stability
+FROM node:18.20.4-alpine
 
 # Set the working directory
 WORKDIR /app

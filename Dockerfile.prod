@@ -1,5 +1,6 @@
 # Production Dockerfile
-FROM node:18-alpine AS base
+# Use specific Node.js 18 version for stability and to avoid Docker Hub rate limits
+FROM node:18.20.4-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps
