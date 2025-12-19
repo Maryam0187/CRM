@@ -73,8 +73,6 @@ export async function GET(request) {
         }
       } else {
         // Show only supervisor's own sales when no agentId is provided
-        console.log('🔍 Supervisor API - Showing supervisor\'s own sales only. Supervisor ID:', user.id);
-        
         // Get supervisor's own sales
         if (status && dateFilter) {
           result = await SaleService.findByAgentStatusAndDatePaginated(user.id, status, dateFilter, page, limit, dateField);
@@ -119,9 +117,31 @@ export async function GET(request) {
       }
     }
     
+    // Ensure associations are properly serialized
+    const serializedData = result.data.map(sale => {
+      // Use get({ plain: true }) to get plain object with all associations
+      const saleData = sale.get ? sale.get({ plain: true }) : (sale.toJSON ? sale.toJSON() : sale);
+      
+      // Ensure payment arrays exist - check both instance and serialized data
+      const cards = saleData.cards || (sale.cards ? (Array.isArray(sale.cards) ? sale.cards.map(c => c.get ? c.get({ plain: true }) : (c.toJSON ? c.toJSON() : c)) : []) : []);
+      const banks = saleData.banks || (sale.banks ? (Array.isArray(sale.banks) ? sale.banks.map(b => b.get ? b.get({ plain: true }) : (b.toJSON ? b.toJSON() : b)) : []) : []);
+      const chequesElectronic = saleData.chequesElectronic || (sale.chequesElectronic ? (Array.isArray(sale.chequesElectronic) ? sale.chequesElectronic.map(c => c.get ? c.get({ plain: true }) : (c.toJSON ? c.toJSON() : c)) : []) : []);
+      const chequesMail = saleData.chequesMail || (sale.chequesMail ? (Array.isArray(sale.chequesMail) ? sale.chequesMail.map(c => c.get ? c.get({ plain: true }) : (c.toJSON ? c.toJSON() : c)) : []) : []);
+      const paymentEmails = saleData.paymentEmails || (sale.paymentEmails ? (Array.isArray(sale.paymentEmails) ? sale.paymentEmails.map(e => e.get ? e.get({ plain: true }) : (e.toJSON ? e.toJSON() : e)) : []) : []);
+      
+      return {
+        ...saleData,
+        cards,
+        banks,
+        chequesElectronic,
+        chequesMail,
+        paymentEmails
+      };
+    });
+    
     return Response.json({
       success: true,
-      data: result.data,
+      data: serializedData,
       pagination: result.pagination
     });
   } catch (error) {

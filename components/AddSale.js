@@ -803,11 +803,24 @@ export default function AddSale() {
       });
     }
     
-    // Show success message
-    setSuccessMessage(`${type === 'card' ? 'Card' : 'Bank'} payment information added successfully!`);
+    // Show success message based on payment type
+    let paymentTypeName = 'Payment';
+    if (type === 'card') {
+      paymentTypeName = 'Card';
+    } else if (type === 'bank') {
+      paymentTypeName = 'Bank';
+    } else if (type === 'cheque_electronic') {
+      paymentTypeName = 'Electronic Cheque';
+    } else if (type === 'cheque_mail') {
+      paymentTypeName = 'Cheque to Mail';
+    } else if (type === 'payment_email') {
+      paymentTypeName = 'Payment Email';
+    }
+    
+    setSuccessMessage(`${paymentTypeName} payment information added successfully!`);
     
     // Log the payment collection action to sales logs
-    // Payment-info tag is now automatically shown based on cards/banks existence, no need to update tag
+    // Payment-info tag is now automatically shown based on payment methods existence, no need to update tag
     if (saleForm.id || editId) {
       logSalesAction('payment_collected', saleForm.status, {
         paymentType: type,

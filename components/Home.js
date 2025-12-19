@@ -468,10 +468,13 @@ export default function Home() {
         // Get tags from sale
         const saleTags = Array.isArray(tags) ? tags : (tags ? [tags] : []);
         
-        // Check if sale has cards or banks
-        const hasCards = row.cards && row.cards.length > 0;
-        const hasBanks = row.banks && row.banks.length > 0;
-        const hasPayments = hasCards || hasBanks;
+        // Check if sale has cards or banks or other payment methods
+        const hasCards = row.cards && Array.isArray(row.cards) && row.cards.length > 0;
+        const hasBanks = row.banks && Array.isArray(row.banks) && row.banks.length > 0;
+        const hasChequesElectronic = row.chequesElectronic && Array.isArray(row.chequesElectronic) && row.chequesElectronic.length > 0;
+        const hasChequesMail = row.chequesMail && Array.isArray(row.chequesMail) && row.chequesMail.length > 0;
+        const hasPaymentEmails = row.paymentEmails && Array.isArray(row.paymentEmails) && row.paymentEmails.length > 0;
+        const hasPayments = hasCards || hasBanks || hasChequesElectronic || hasChequesMail || hasPaymentEmails;
         
         // Automatically include payment-info tag if payments exist
         const displayTags = [...saleTags];
@@ -501,9 +504,13 @@ export default function Home() {
       header: 'Actions',
       key: 'actions',
       render: (value, row) => {
-        const hasCards = row.cards && row.cards.length > 0;
-        const hasBanks = row.banks && row.banks.length > 0;
-        const hasPayments = hasCards || hasBanks;
+        // Check for all payment types - arrays are always present now
+        const hasCards = row.cards && Array.isArray(row.cards) && row.cards.length > 0;
+        const hasBanks = row.banks && Array.isArray(row.banks) && row.banks.length > 0;
+        const hasChequesElectronic = row.chequesElectronic && Array.isArray(row.chequesElectronic) && row.chequesElectronic.length > 0;
+        const hasChequesMail = row.chequesMail && Array.isArray(row.chequesMail) && row.chequesMail.length > 0;
+        const hasPaymentEmails = row.paymentEmails && Array.isArray(row.paymentEmails) && row.paymentEmails.length > 0;
+        const hasPayments = hasCards || hasBanks || hasChequesElectronic || hasChequesMail || hasPaymentEmails;
         
         return (
           <div className="flex gap-2">
