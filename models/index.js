@@ -70,6 +70,9 @@ const UserActivityLog = require('./UserActivityLog')(sequelize);
 const UserTimeSession = require('./UserTimeSession')(sequelize);
 const UserDailyTimeLog = require('./UserDailyTimeLog')(sequelize);
 const UserSession = require('./UserSession')(sequelize);
+const ChequeElectronic = require('./ChequeElectronic')(sequelize);
+const ChequeMail = require('./ChequeMail')(sequelize);
+const PaymentEmail = require('./PaymentEmail')(sequelize);
 
 // Define associations
 Object.keys(sequelize.models).forEach(modelName => {
@@ -135,6 +138,9 @@ module.exports = {
   UserTimeSession,
   UserDailyTimeLog,
   UserSession,
+  ChequeElectronic,
+  ChequeMail,
+  PaymentEmail,
   testConnection,
   syncDatabase
 };

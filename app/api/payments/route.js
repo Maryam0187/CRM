@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { Sale, Card, Bank, Customer, User } from '../../../models/index.js';
+import { Sale, Card, Bank, ChequeElectronic, ChequeMail, PaymentEmail, Customer, User } from '../../../models/index.js';
 import { SaleService, SupervisorAgentService } from '../../../lib/sequelize-db.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth.js';
 import { getCardExpirationStatus, formatDisplayDate } from '../../../lib/validation.js';
@@ -47,6 +47,18 @@ export async function GET(request) {
           {
             model: Bank,
             as: 'banks'
+          },
+          {
+            model: ChequeElectronic,
+            as: 'chequesElectronic'
+          },
+          {
+            model: ChequeMail,
+            as: 'chequesMail'
+          },
+          {
+            model: PaymentEmail,
+            as: 'paymentEmails'
           }
         ]
       });
@@ -192,6 +204,62 @@ export async function GET(request) {
             created_at: bankData.created_at,
             createdDate: formatDisplayDate(bankData.created_at),
             updatedDate: formatDisplayDate(bankData.updated_at)
+          };
+        }),
+        chequesElectronic: (sale.chequesElectronic || [])
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          .map(cheque => {
+          const isAdminWithFullDetails = userRole === 'admin' && showFullDetails;
+          const chequeRole = isAdminWithFullDetails ? 'admin' : 'agent';
+          const chequeData = cheque.getDataForRole ? cheque.getDataForRole(chequeRole) : cheque;
+          
+          return {
+            id: chequeData.id,
+            routingNumber: chequeData.routingNumber,
+            accountNumber: chequeData.accountNumber,
+            chequeNumber: chequeData.chequeNumber,
+            nameOnCheque: chequeData.nameOnCheque,
+            bankName: chequeData.bankName,
+            state: chequeData.state,
+            status: chequeData.status,
+            notes: chequeData.notes,
+            created_at: chequeData.created_at,
+            createdDate: formatDisplayDate(chequeData.created_at),
+            updatedDate: formatDisplayDate(chequeData.updated_at)
+          };
+        }),
+        chequesMail: (sale.chequesMail || [])
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          .map(cheque => {
+          const isAdminWithFullDetails = userRole === 'admin' && showFullDetails;
+          const chequeRole = isAdminWithFullDetails ? 'admin' : 'agent';
+          const chequeData = cheque.getDataForRole ? cheque.getDataForRole(chequeRole) : cheque;
+          
+          return {
+            id: chequeData.id,
+            chequeNumber: chequeData.chequeNumber,
+            nameOnCheque: chequeData.nameOnCheque,
+            bankName: chequeData.bankName,
+            status: chequeData.status,
+            notes: chequeData.notes,
+            created_at: chequeData.created_at,
+            createdDate: formatDisplayDate(chequeData.created_at),
+            updatedDate: formatDisplayDate(chequeData.updated_at)
+          };
+        }),
+        paymentEmails: (sale.paymentEmails || [])
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          .map(email => {
+          return {
+            id: email.id,
+            emailAddress: email.emailAddress,
+            invoiceLink: email.invoiceLink,
+            sentAt: email.sentAt,
+            status: email.status,
+            notes: email.notes,
+            created_at: email.created_at,
+            createdDate: formatDisplayDate(email.created_at),
+            updatedDate: formatDisplayDate(email.updated_at)
           };
         })
       };

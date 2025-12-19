@@ -299,6 +299,24 @@ module.exports = (sequelize) => {
       as: 'banks'
     });
 
+    // Sale has many electronic cheques
+    Sale.hasMany(models.ChequeElectronic, {
+      foreignKey: 'saleId',
+      as: 'chequesElectronic'
+    });
+
+    // Sale has many mail cheques
+    Sale.hasMany(models.ChequeMail, {
+      foreignKey: 'saleId',
+      as: 'chequesMail'
+    });
+
+    // Sale has many payment emails
+    Sale.hasMany(models.PaymentEmail, {
+      foreignKey: 'saleId',
+      as: 'paymentEmails'
+    });
+
     // Sale has many sales logs
     Sale.hasMany(models.SalesLog, {
       foreignKey: 'saleId',

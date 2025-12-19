@@ -529,7 +529,10 @@ export default function PaymentView() {
                 </div>
 
                 {/* Payment Methods */}
-                {(payment.cards.length > 0 || payment.banks.length > 0) && (
+                {(payment.cards.length > 0 || payment.banks.length > 0 || 
+                  (payment.chequesElectronic && payment.chequesElectronic.length > 0) || 
+                  (payment.chequesMail && payment.chequesMail.length > 0) || 
+                  (payment.paymentEmails && payment.paymentEmails.length > 0)) && (
                   <div className="mt-6 pt-6 border-t border-gray-200">
                     <h4 className="text-sm font-medium text-gray-900 mb-4">Payment Methods</h4>
                     
@@ -691,12 +694,176 @@ export default function PaymentView() {
                           </div>
                         </div>
                       )}
+
+                      {/* Electronic Cheques */}
+                      {payment.chequesElectronic && payment.chequesElectronic.length > 0 && (
+                        <div>
+                          <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">Electronic Cheques</h5>
+                          <div className="space-y-3">
+                            {payment.chequesElectronic.map((cheque, index) => (
+                              <div key={index} className="bg-blue-50 rounded-lg p-4 border-l-4 border-blue-500">
+                                <div className="flex justify-between items-start mb-2">
+                                  <div className="flex items-center space-x-2">
+                                    <span className="text-sm font-medium text-gray-900">{cheque.bankName || 'N/A'}</span>
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                      cheque.status === 'active' ? 'bg-green-100 text-green-800' : 
+                                      cheque.status === 'processed' ? 'bg-blue-100 text-blue-800' : 
+                                      'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {cheque.status}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Routing Number:</span>
+                                    <span className="font-mono">{cheque.routingNumber || 'N/A'}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Account Number:</span>
+                                    <span className="font-mono">{cheque.accountNumber || 'N/A'}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Cheque Number:</span>
+                                    <span className="font-mono">{cheque.chequeNumber || 'N/A'}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Name on Cheque:</span>
+                                    <span>{cheque.nameOnCheque || 'N/A'}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">State:</span>
+                                    <span>{cheque.state || 'N/A'}</span>
+                                  </div>
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">Added:</span>
+                                      <span className="text-gray-500 text-xs">
+                                        {cheque.createdDate || formatDisplayDate(cheque.created_at) || 'N/A'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Mail Cheques */}
+                      {payment.chequesMail && payment.chequesMail.length > 0 && (
+                        <div>
+                          <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">Cheques to Mail</h5>
+                          <div className="space-y-3">
+                            {payment.chequesMail.map((cheque, index) => (
+                              <div key={index} className="bg-purple-50 rounded-lg p-4 border-l-4 border-purple-500">
+                                <div className="flex justify-between items-start mb-2">
+                                  <div className="flex items-center space-x-2">
+                                    <span className="text-sm font-medium text-gray-900">{cheque.bankName || 'N/A'}</span>
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                      cheque.status === 'active' ? 'bg-green-100 text-green-800' :
+                                      cheque.status === 'sent' ? 'bg-blue-100 text-blue-800' : 
+                                      cheque.status === 'received' ? 'bg-green-100 text-green-800' : 
+                                      cheque.status === 'processed' ? 'bg-purple-100 text-purple-800' : 
+                                      'bg-yellow-100 text-yellow-800'
+                                    }`}>
+                                      {cheque.status}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Cheque Number:</span>
+                                    <span className="font-mono">{cheque.chequeNumber || 'N/A'}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Name on Cheque:</span>
+                                    <span>{cheque.nameOnCheque || 'N/A'}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Bank Name:</span>
+                                    <span>{cheque.bankName || 'N/A'}</span>
+                                  </div>
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">Added:</span>
+                                      <span className="text-gray-500 text-xs">
+                                        {cheque.createdDate || formatDisplayDate(cheque.created_at) || 'N/A'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Payment Emails */}
+                      {payment.paymentEmails && payment.paymentEmails.length > 0 && (
+                        <div>
+                          <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">Payment Emails</h5>
+                          <div className="space-y-3">
+                            {payment.paymentEmails.map((email, index) => (
+                              <div key={index} className="bg-indigo-50 rounded-lg p-4 border-l-4 border-indigo-500">
+                                <div className="flex justify-between items-start mb-2">
+                                  <div className="flex items-center space-x-2">
+                                    <span className="text-sm font-medium text-gray-900">📧 Email Invoice</span>
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                      email.status === 'active' ? 'bg-green-100 text-green-800' :
+                                      email.status === 'sent' ? 'bg-blue-100 text-blue-800' : 
+                                      email.status === 'opened' ? 'bg-green-100 text-green-800' : 
+                                      email.status === 'paid' ? 'bg-green-200 text-green-900' : 
+                                      'bg-yellow-100 text-yellow-800'
+                                    }`}>
+                                      {email.status}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Email Address:</span>
+                                    <span className="font-mono">{email.emailAddress || 'N/A'}</span>
+                                  </div>
+                                  {email.invoiceLink && (
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">Invoice Link:</span>
+                                      <a href={email.invoiceLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                                        View Link
+                                      </a>
+                                    </div>
+                                  )}
+                                  {email.sentAt && (
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">Sent At:</span>
+                                      <span className="text-gray-500 text-xs">
+                                        {formatDisplayDate(email.sentAt)}
+                                      </span>
+                                    </div>
+                                  )}
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <div className="flex justify-between text-sm">
+                                      <span className="text-gray-600">Added:</span>
+                                      <span className="text-gray-500 text-xs">
+                                        {email.createdDate || formatDisplayDate(email.created_at) || 'N/A'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
 
                 {/* No Payment Methods */}
-                {payment.cards.length === 0 && payment.banks.length === 0 && (
+                {payment.cards.length === 0 && payment.banks.length === 0 && 
+                 (!payment.chequesElectronic || payment.chequesElectronic.length === 0) &&
+                 (!payment.chequesMail || payment.chequesMail.length === 0) &&
+                 (!payment.paymentEmails || payment.paymentEmails.length === 0) && (
                   <div className="mt-6 pt-6 border-t border-gray-200">
                     <div className="text-center py-4">
                       <svg className="mx-auto h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">

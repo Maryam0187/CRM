@@ -50,7 +50,7 @@ module.exports = (sequelize) => {
       allowNull: false
     },
     expiryDate: {
-      type: DataTypes.TEXT, // Changed to TEXT to accommodate encrypted data
+      type: DataTypes.STRING(7), // Not encrypted - all users need to see expiry date
       allowNull: false,
       field: 'expiry_date'
     },
@@ -76,9 +76,7 @@ module.exports = (sequelize) => {
         if (card.cvv) {
           card.cvv = encryptSensitiveData(card.cvv);
         }
-        if (card.expiryDate) {
-          card.expiryDate = encryptSensitiveData(card.expiryDate);
-        }
+        // expiryDate is NOT encrypted - all users need to see it
       },
       beforeUpdate: async (card) => {
         // Encrypt sensitive fields if they have changed
@@ -88,9 +86,7 @@ module.exports = (sequelize) => {
         if (card.changed('cvv') && card.cvv) {
           card.cvv = encryptSensitiveData(card.cvv);
         }
-        if (card.changed('expiryDate') && card.expiryDate) {
-          card.expiryDate = encryptSensitiveData(card.expiryDate);
-        }
+        // expiryDate is NOT encrypted - all users need to see it
       },
       // Note: We removed the afterFind hook to avoid double processing
       // Role-based access control is now handled manually in the API routes
@@ -110,9 +106,10 @@ module.exports = (sequelize) => {
       const decrypted = decryptSensitiveData(data.cvv);
       data.cvv = getDataBasedOnRole(decrypted, userRole, 'cvv');
     }
+    // expiryDate is NOT encrypted - return as is for all users
+    // If it was previously encrypted, try to decrypt it once
     if (data.expiryDate && isEncrypted(data.expiryDate)) {
-      const decrypted = decryptSensitiveData(data.expiryDate);
-      data.expiryDate = getDataBasedOnRole(decrypted, userRole, 'default');
+      data.expiryDate = decryptSensitiveData(data.expiryDate);
     }
     
     return data;

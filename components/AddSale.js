@@ -13,6 +13,9 @@ import CallButton from './CallButton';
 import CallHistory from './CallHistory';
 import AddCardForm from './AddCardForm';
 import AddBankForm from './AddBankForm';
+import AddChequeElectronicForm from './AddChequeElectronicForm';
+import AddChequeMailForm from './AddChequeMailForm';
+import AddPaymentEmailForm from './AddPaymentEmailForm';
 import ConfirmModal from './ConfirmModal';
 import { 
   formatPhoneNumber, 
@@ -3728,10 +3731,10 @@ Room: `;
               </div>
 
               {/* Payment Type Tabs */}
-              <div className="flex border border-gray-300 rounded-lg mb-6">
+              <div className="flex flex-wrap border border-gray-300 rounded-lg mb-6">
                 <button
                   onClick={() => setSelectedPaymentType('card')}
-                  className={`px-6 py-3 text-sm font-medium rounded-l-lg transition-colors ${
+                  className={`px-4 py-3 text-sm font-medium rounded-l-lg transition-colors ${
                     selectedPaymentType === 'card'
                       ? 'bg-blue-600 text-white'
                       : 'bg-white text-blue-600 hover:bg-blue-50'
@@ -3741,13 +3744,43 @@ Room: `;
                 </button>
                 <button
                   onClick={() => setSelectedPaymentType('bank')}
-                  className={`px-6 py-3 text-sm font-medium rounded-r-lg transition-colors ${
+                  className={`px-4 py-3 text-sm font-medium transition-colors ${
                     selectedPaymentType === 'bank'
                       ? 'bg-blue-600 text-white'
                       : 'bg-white text-blue-600 hover:bg-blue-50'
                   }`}
                 >
                   Bank Account
+                </button>
+                <button
+                  onClick={() => setSelectedPaymentType('cheque_electronic')}
+                  className={`px-4 py-3 text-sm font-medium transition-colors ${
+                    selectedPaymentType === 'cheque_electronic'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-blue-600 hover:bg-blue-50'
+                  }`}
+                >
+                  Cheque Electronic
+                </button>
+                <button
+                  onClick={() => setSelectedPaymentType('cheque_mail')}
+                  className={`px-4 py-3 text-sm font-medium transition-colors ${
+                    selectedPaymentType === 'cheque_mail'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-blue-600 hover:bg-blue-50'
+                  }`}
+                >
+                  Cheque to Mail
+                </button>
+                <button
+                  onClick={() => setSelectedPaymentType('payment_email')}
+                  className={`px-4 py-3 text-sm font-medium rounded-r-lg transition-colors ${
+                    selectedPaymentType === 'payment_email'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-blue-600 hover:bg-blue-50'
+                  }`}
+                >
+                  Email Invoice
                 </button>
               </div>
 
@@ -3761,13 +3794,37 @@ Room: `;
                     initialData={cardFormData}
                     onDataChange={handleCardFormDataChange}
                   />
-                ) : (
+                ) : selectedPaymentType === 'bank' ? (
                   <AddBankForm 
                     mode="create" 
                     saleId={saleForm.id || editId} 
                     onSuccess={(data) => handlePaymentSuccess('bank', data)}
                     initialData={bankFormData}
                     onDataChange={handleBankFormDataChange}
+                  />
+                ) : selectedPaymentType === 'cheque_electronic' ? (
+                  <AddChequeElectronicForm 
+                    mode="create" 
+                    saleId={saleForm.id || editId} 
+                    onSuccess={(data) => handlePaymentSuccess('cheque_electronic', data)}
+                    initialData={{}}
+                    onDataChange={() => {}}
+                  />
+                ) : selectedPaymentType === 'cheque_mail' ? (
+                  <AddChequeMailForm 
+                    mode="create" 
+                    saleId={saleForm.id || editId} 
+                    onSuccess={(data) => handlePaymentSuccess('cheque_mail', data)}
+                    initialData={{}}
+                    onDataChange={() => {}}
+                  />
+                ) : (
+                  <AddPaymentEmailForm 
+                    mode="create" 
+                    saleId={saleForm.id || editId} 
+                    onSuccess={(data) => handlePaymentSuccess('payment_email', data)}
+                    initialData={{}}
+                    onDataChange={() => {}}
                   />
                 )}
               </div>
