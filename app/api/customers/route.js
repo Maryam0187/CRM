@@ -1,6 +1,8 @@
 import { CustomerService } from '../../../lib/sequelize-db.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth.js';
-import { Sale, User } from '../../../models/index.js';
+import { Sale, User, Customer, Sequelize } from '../../../models/index.js';
+
+const { Op } = Sequelize;
 
 export async function GET(request) {
   try {
@@ -18,7 +20,7 @@ export async function GET(request) {
     const page = parseInt(searchParams.get('page')) || 1;
     const limit = parseInt(searchParams.get('limit')) || 10;
     
-    // For agents and supervisors, get customers from their sales
+    // For agents and supervisors, get customers from their sales AND customers they created
     if (user.role === 'agent' || user.role === 'supervisor') {
       // Build where clause for sales based on role
       const salesWhere = {};
@@ -38,10 +40,22 @@ export async function GET(request) {
         raw: true
       });
       
-      // Extract unique customer IDs
-      const customerIds = [...new Set(sales.map(sale => sale.customerId).filter(id => id !== null && id !== undefined))];
+      // Extract unique customer IDs from sales
+      const customerIdsFromSales = [...new Set(sales.map(sale => sale.customerId).filter(id => id !== null && id !== undefined))];
       
-      if (customerIds.length === 0) {
+      // Also get customer IDs where the agent created them (even without sales)
+      const customersCreatedByAgent = await Customer.findAll({
+        where: { createdBy: user.id },
+        attributes: ['id'],
+        raw: true
+      });
+      
+      const customerIdsFromCreated = customersCreatedByAgent.map(c => c.id).filter(id => id !== null && id !== undefined);
+      
+      // Combine and deduplicate customer IDs
+      const allCustomerIds = [...new Set([...customerIdsFromSales, ...customerIdsFromCreated])];
+      
+      if (allCustomerIds.length === 0) {
         return Response.json({
           success: true,
           data: [],
@@ -56,20 +70,34 @@ export async function GET(request) {
         });
       }
       
-      // Paginate customer IDs
-      const offset = (page - 1) * limit;
-      const paginatedCustomerIds = customerIds.slice(offset, offset + limit);
+      // Fetch all customers with ordering by created_at DESC, then paginate
+      const allCustomers = await Customer.findAll({
+        where: {
+          id: {
+            [Op.in]: allCustomerIds
+          }
+        },
+        include: [
+          {
+            model: User,
+            as: 'creator',
+            attributes: ['id', 'firstName', 'lastName', 'email']
+          }
+        ],
+        order: [['created_at', 'DESC']]
+      });
       
-      // Fetch customers with their related sales (filtered by same criteria)
+      // Paginate the sorted customers
+      const offset = (page - 1) * limit;
+      const paginatedCustomers = allCustomers.slice(offset, offset + limit);
+      
+      // Fetch sales for each paginated customer (filtered by same criteria)
       const customers = await Promise.all(
-        paginatedCustomerIds.map(async (customerId) => {
-          const customer = await CustomerService.findById(customerId);
-          if (!customer) return null;
-          
+        paginatedCustomers.map(async (customer) => {
           // Get sales for this customer matching the same criteria
           const customerSalesWhere = {
             ...salesWhere,
-            customerId: customerId
+            customerId: customer.id
           };
           
           const customerSales = await Sale.findAll({
@@ -98,10 +126,10 @@ export async function GET(request) {
         data: validCustomers,
         pagination: {
           currentPage: page,
-          totalPages: Math.ceil(customerIds.length / limit),
-          totalItems: customerIds.length,
+          totalPages: Math.ceil(allCustomers.length / limit),
+          totalItems: allCustomers.length,
           itemsPerPage: limit,
-          hasNextPage: page < Math.ceil(customerIds.length / limit),
+          hasNextPage: page < Math.ceil(allCustomers.length / limit),
           hasPrevPage: page > 1
         }
       });

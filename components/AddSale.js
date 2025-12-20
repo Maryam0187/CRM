@@ -1002,7 +1002,8 @@ export default function AddSale() {
         country: 'USA',
         mailingAddress: customer.mailingAddress,
         customerFeedback: customer.customerFeedback,
-        status: 'prospect'
+        status: 'prospect',
+        createdBy: user?.id || null
       };
 
       console.log('Creating customer:', customerData);
