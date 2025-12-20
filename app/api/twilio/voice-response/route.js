@@ -143,6 +143,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
     let lastSaleAgentId = null;
     let lastSaleAgent = null;
     let lastSaleId = null;
+    let lastSale = null;
     
     try {
       // Normalize phone number for search (remove +1 prefix for US numbers)
@@ -178,7 +179,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
         console.log(`✅ Matched inbound call to customer ID: ${customerId} (${customer.firstName} ${customer.lastName})`);
         
         // Find the last sale for this customer to get the agent and sale ID
-        const lastSale = await sequelizeDb.Sale.findOne({
+        lastSale = await sequelizeDb.Sale.findOne({
           where: {
             customerId: customerId
           },
