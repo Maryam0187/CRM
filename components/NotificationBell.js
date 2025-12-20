@@ -156,7 +156,7 @@ export default function NotificationBell() {
         dispatch(markNotificationAsRead(notification.id));
       }
 
-      // Start call using CallContext
+      // Start call using CallContext - this opens GlobalWebCallInterface
       startCall({
         callSid: notification.callSid,
         conferenceName: notification.conferenceName,
@@ -168,18 +168,51 @@ export default function NotificationBell() {
 
       // Close dropdown
       setIsOpen(false);
-      showSuccess('Joining call...');
+      showSuccess('Opening call interface...');
     } catch (error) {
       console.error('Error joining call:', error);
-      showError('Failed to join call');
+      showError('Failed to open call interface');
     }
   };
 
   // Handle notification click
   const handleNotificationClick = async (notification) => {
-    // Don't navigate if clicking on action buttons
+    // For inbound call notifications, open GlobalWebCallInterface and sale
     if (notification.conferenceName) {
-      return; // Let handleJoinCall handle it
+      // Mark as read
+      if (!notification.isRead) {
+        try {
+          await authenticatedFetch('/api/notifications', {
+            method: 'PUT',
+            body: JSON.stringify({
+              notificationId: notification.id,
+              action: 'mark_read'
+            })
+          });
+          dispatch(markNotificationAsRead(notification.id));
+        } catch (error) {
+          console.error('Error marking notification as read:', error);
+        }
+      }
+
+      // Open GlobalWebCallInterface by starting the call
+      startCall({
+        callSid: notification.callSid,
+        conferenceName: notification.conferenceName,
+        customerId: notification.customerId,
+        saleId: notification.lastSaleId,
+        phoneNumber: notification.callerNumber,
+        customerName: notification.customerName
+      });
+
+      // Open the sale in the same window if saleId exists
+      if (notification.lastSaleId || notification.saleId) {
+        router.push(`/add-sale?id=${notification.lastSaleId || notification.saleId}`);
+      }
+
+      // Close dropdown but keep notification visible
+      setIsOpen(false);
+      return;
     }
 
     // Mark as read if not already read

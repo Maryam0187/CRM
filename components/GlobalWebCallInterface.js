@@ -1135,6 +1135,41 @@ export default function GlobalWebCallInterface() {
               </div>
             )}
 
+            {/* Join Call Button for Inbound Calls - Show when not connected */}
+            {conferenceName && conferenceName.startsWith('inbound-') && !isWebCallConnected && !isConnected && !isConnecting && !isCalling && (
+              <div className="mb-3">
+                <button
+                  onClick={() => joinConference()}
+                  className="w-full px-4 py-3 font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white shadow-lg"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                  </svg>
+                  <span>Join Call</span>
+                </button>
+                
+                {/* Quick Links */}
+                {callMetadata?.saleId && (
+                  <button
+                    onClick={() => window.open(`/add-sale?id=${callMetadata.saleId}`, '_blank')}
+                    className="w-full mt-2 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 border border-blue-200 flex items-center justify-center gap-1"
+                  >
+                    <span>📋</span>
+                    <span>View Sale</span>
+                  </button>
+                )}
+                {callMetadata?.customerId && (
+                  <button
+                    onClick={() => window.open(`/customers/${callMetadata.customerId}`, '_blank')}
+                    className="w-full mt-2 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md transition-colors duration-200 border border-gray-200 flex items-center justify-center gap-1"
+                  >
+                    <span>👤</span>
+                    <span>View Customer</span>
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Connected State Info */}
             {(isWebCallConnected || isConnected) && (
               <div className="flex items-center gap-3 py-2 px-3 bg-green-50 rounded-lg border border-green-200 mb-3">

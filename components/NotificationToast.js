@@ -69,7 +69,13 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
   const timerRef = useRef(null);
 
   // Auto-dismiss after 3 seconds (paused when hovered)
+  // BUT: Don't auto-dismiss inbound call notifications (they have conferenceName)
   useEffect(() => {
+    // Skip auto-dismiss for inbound call notifications
+    if (notification.conferenceName) {
+      return;
+    }
+
     if (!isHovered) {
       timerRef.current = setTimeout(() => {
         handleClose();
@@ -81,7 +87,7 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
         clearTimeout(timerRef.current);
       }
     };
-  }, [isHovered]);
+  }, [isHovered, notification.conferenceName]);
 
   const handleClose = () => {
     setIsClosing(true);
@@ -124,8 +130,29 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
   };
 
   const handleClick = () => {
-    // Don't navigate if this is an inbound call notification (use buttons instead)
+    // For inbound call notifications, open GlobalWebCallInterface and sale
     if (notification.conferenceName) {
+      // Mark as read
+      if (!notification.isRead && onMarkAsRead) {
+        onMarkAsRead(notification.id);
+      }
+
+      // Open GlobalWebCallInterface by starting the call
+      startCall({
+        callSid: notification.callSid,
+        conferenceName: notification.conferenceName,
+        customerId: notification.customerId,
+        saleId: notification.lastSaleId,
+        phoneNumber: notification.callerNumber,
+        customerName: notification.customerName
+      });
+
+      // Open the sale in the same window if saleId exists
+      if (notification.lastSaleId || notification.saleId) {
+        router.push(`/add-sale?id=${notification.lastSaleId || notification.saleId}`);
+      }
+
+      // Don't close the notification - keep it visible
       return;
     }
 
@@ -151,9 +178,10 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
     <div
       className={`fixed top-4 right-4 z-50 max-w-sm w-full bg-white rounded-lg shadow-lg border border-gray-200 transform transition-all duration-300 ${
         isClosing ? 'translate-x-full opacity-0' : 'translate-x-0 opacity-100'
-      } ${isHovered ? 'shadow-xl border-blue-300' : ''}`}
+      } ${isHovered ? 'shadow-xl border-blue-300' : ''} ${notification.conferenceName ? 'cursor-pointer border-green-300' : ''}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onClick={handleClick}
     >
       <div className="p-4">
         {/* Header with close button */}
@@ -190,7 +218,7 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
         </p>
 
         {/* Actions */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
           {notification.conferenceName ? (
             <div className="flex items-center gap-2">
               <button
@@ -209,7 +237,7 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
                   }}
                   className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 border border-blue-200"
                 >
-                  View Last Sale
+                  View Sale
                 </button>
               )}
               {notification.customerId && (
@@ -244,18 +272,20 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
         </div>
       </div>
 
-      {/* Progress bar for auto-dismiss */}
-      <div className="h-1 bg-gray-200 rounded-b-lg overflow-hidden">
-        <div 
-          className={`h-full bg-blue-500 transition-all duration-3000 ease-linear ${
-            isHovered ? 'animate-pulse' : ''
-          }`}
-          style={{
-            width: '100%',
-            animation: isHovered ? 'none' : 'shrink 3s linear forwards'
-          }}
-        />
-      </div>
+      {/* Progress bar for auto-dismiss - only show for non-inbound call notifications */}
+      {!notification.conferenceName && (
+        <div className="h-1 bg-gray-200 rounded-b-lg overflow-hidden">
+          <div 
+            className={`h-full bg-blue-500 transition-all duration-3000 ease-linear ${
+              isHovered ? 'animate-pulse' : ''
+            }`}
+            style={{
+              width: '100%',
+              animation: isHovered ? 'none' : 'shrink 3s linear forwards'
+            }}
+          />
+        </div>
+      )}
 
       <style jsx>{`
         @keyframes shrink {

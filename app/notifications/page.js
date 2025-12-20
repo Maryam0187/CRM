@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+import { useCall } from '../../contexts/CallContext';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { 
   setNotifications, 
@@ -37,6 +38,7 @@ const formatNotificationTime = (date) => {
 export default function NotificationsPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { startCall } = useCall();
   const dispatch = useAppDispatch();
   
   // Redux state
@@ -79,10 +81,17 @@ export default function NotificationsPage() {
             isRead: notification.isRead || notification.is_read || false,
             time: timestamp ? formatNotificationTime(new Date(timestamp)) : 'Just now',
             saleId: notification.saleId || notification.sale_id,
+            lastSaleId: notification.lastSaleId || notification.last_sale_id,
             agentName: notification.agentName || notification.agent_name,
             relatedType: notification.relatedType || notification.related_type,
             route: route,
-            createdAt: timestamp
+            createdAt: timestamp,
+            // Inbound call specific fields
+            conferenceName: notification.conferenceName || notification.conference_name,
+            callSid: notification.callSid || notification.call_sid,
+            callerNumber: notification.callerNumber || notification.caller_number,
+            customerId: notification.customerId || notification.customer_id,
+            customerName: notification.customerName || notification.customer_name
           };
         });
         
@@ -153,6 +162,31 @@ export default function NotificationsPage() {
 
   // Handle notification click
   const handleNotificationClick = async (notification) => {
+    // For inbound call notifications, open GlobalWebCallInterface and sale
+    if (notification.conferenceName) {
+      // Mark as read if not already read
+      if (!notification.isRead) {
+        await handleMarkAsRead(notification.id);
+      }
+
+      // Open GlobalWebCallInterface by starting the call
+      startCall({
+        callSid: notification.callSid,
+        conferenceName: notification.conferenceName,
+        customerId: notification.customerId,
+        saleId: notification.lastSaleId,
+        phoneNumber: notification.callerNumber,
+        customerName: notification.customerName
+      });
+
+      // Open the sale in a new tab if saleId exists
+      if (notification.lastSaleId || notification.saleId) {
+        window.open(`/add-sale?id=${notification.lastSaleId || notification.saleId}`, '_blank');
+      }
+
+      return;
+    }
+
     // Mark as read if not already read
     if (!notification.isRead) {
       await handleMarkAsRead(notification.id);
@@ -163,8 +197,8 @@ export default function NotificationsPage() {
       router.push(notification.route);
     } else if (notification.relatedType === 'receiver') {
       router.push('/admin/receivers');
-    } else if (notification.saleId) {
-      router.push(`/add-sale?id=${notification.saleId}`);
+    } else if (notification.saleId || notification.lastSaleId) {
+      router.push(`/add-sale?id=${notification.saleId || notification.lastSaleId}`);
     } else {
       router.push('/');
     }
