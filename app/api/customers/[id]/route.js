@@ -1,7 +1,6 @@
 import { CustomerService } from '../../../../lib/sequelize-db.js';
-
-
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
+import { normalizePhoneForStorage } from '../../../../lib/twilio.js';
 export async function GET(request, { params }) {
   try {
     const { id } = await params;
@@ -37,11 +36,19 @@ export async function PUT(request, { params }) {
       return (value === '' || value === null || value === undefined) ? null : value;
     };
     
-    // Sanitize the update data
+    // Sanitize and normalize the update data
     const sanitizedData = {
       ...updateData,
       email: sanitizeEmail(updateData.email)
     };
+    
+    // Normalize phone numbers before updating
+    if (sanitizedData.phone !== undefined) {
+      sanitizedData.phone = sanitizedData.phone ? normalizePhoneForStorage(sanitizedData.phone) || sanitizedData.phone : sanitizedData.phone;
+    }
+    if (sanitizedData.landline !== undefined) {
+      sanitizedData.landline = sanitizedData.landline ? normalizePhoneForStorage(sanitizedData.landline) || sanitizedData.landline : sanitizedData.landline;
+    }
     
     const customer = await CustomerService.update(id, sanitizedData);
     

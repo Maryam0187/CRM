@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { useCall } from '../contexts/CallContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -505,6 +505,9 @@ export default function GlobalWebCallInterface() {
               if (!isWebCallConnected) {
                 callConnected();
               }
+              
+              // Update call status to 'in-progress' when call connects
+              updateCallStatus('in-progress');
             } else {
               console.log('✅ Already connected, skipping onAccept callback');
             }
@@ -796,6 +799,42 @@ export default function GlobalWebCallInterface() {
     }
   };
 
+  // Helper function to disconnect call
+  const disconnectCall = useCallback((reason = 'manual') => {
+    try {
+      console.log(`📞 Disconnecting call (reason: ${reason})`);
+      
+      // Disconnect the active connection
+      if (activeConnection.current) {
+        try {
+          const call = activeConnection.current;
+          if (typeof call.disconnect === 'function') {
+            call.disconnect();
+          }
+        } catch (err) {
+          console.warn('⚠️ Error disconnecting call:', err);
+        }
+      }
+      
+      // Also disconnect via device
+      if (device && typeof device.disconnectAll === 'function') {
+        try {
+          device.disconnectAll();
+        } catch (err) {
+          console.warn('⚠️ Error disconnecting all calls:', err);
+        }
+      }
+      
+      // Clean up state
+      setIsConnected(false);
+      setIsConnecting(false);
+      activeConnection.current = null;
+      localMediaStream.current = null;
+    } catch (err) {
+      console.warn('⚠️ Error in disconnectCall (ignored):', err.message);
+    }
+  }, [device]);
+
   // Hangup function
   const hangUp = () => {
     try {
@@ -829,10 +868,7 @@ export default function GlobalWebCallInterface() {
         device.disconnectAll();
       }
       
-      setIsConnected(false);
-      setIsConnecting(false);
-      activeConnection.current = null;
-      localMediaStream.current = null;
+      disconnectCall('manual');
     } catch (err) {
       console.warn('⚠️ Error in hangUp (ignored):', err.message);
     }
@@ -861,6 +897,16 @@ export default function GlobalWebCallInterface() {
       const statusData = getCallStatus(currentCallSid);
       if (statusData?.status) {
         updateCallStatus(statusData.status);
+        
+        // If call is completed/failed/canceled, disconnect the call
+        if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(statusData.status)) {
+          console.log('📞 Call ended remotely, disconnecting...');
+          disconnectCall('remote_status_update');
+          // End the call in context
+          setTimeout(() => {
+            endCall();
+          }, 500);
+        }
       }
     };
 
@@ -870,6 +916,16 @@ export default function GlobalWebCallInterface() {
       const { callStatusData } = event.detail;
       if (callStatusData?.callSid === currentCallSid) {
         updateCallStatus(callStatusData.status);
+        
+        // If call is completed/failed/canceled, disconnect the call
+        if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(callStatusData.status)) {
+          console.log('📞 Call ended remotely (socket update), disconnecting...');
+          disconnectCall('socket_status_update');
+          // End the call in context
+          setTimeout(() => {
+            endCall();
+          }, 500);
+        }
       }
     };
 
@@ -881,7 +937,7 @@ export default function GlobalWebCallInterface() {
       window.removeEventListener('callStatusUpdate', handleStatusUpdate);
       clearInterval(interval);
     };
-  }, [currentCallSid, getCallStatus, updateCallStatus]);
+  }, [currentCallSid, getCallStatus, updateCallStatus, device, endCall, disconnectCall]);
 
   // Sync mute state
   useEffect(() => {
@@ -903,6 +959,24 @@ export default function GlobalWebCallInterface() {
       }
     };
   }, [isConnected, setIsMuted]);
+
+  // Watch for call status changes and disconnect when call ends
+  useEffect(() => {
+    if (!callStatus) return;
+    
+    // If call status indicates the call has ended, disconnect
+    if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(callStatus)) {
+      // Only disconnect if we're still connected
+      if (isConnected || isWebCallConnected || activeConnection.current) {
+        console.log('📞 Call status changed to', callStatus, '- disconnecting...');
+        disconnectCall('status_change');
+        // End the call in context
+        setTimeout(() => {
+          endCall();
+        }, 500);
+      }
+    }
+  }, [callStatus, isConnected, isWebCallConnected, disconnectCall, endCall]);
 
   // Play/stop default Twilio ringing sound
   useEffect(() => {
@@ -1055,7 +1129,7 @@ export default function GlobalWebCallInterface() {
         <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-3 flex items-center justify-between">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="flex-shrink-0">
-              {callStatus === 'in-progress' ? (
+              {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) ? (
                 <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
               ) : callStatus === 'ringing' ? (
                 <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
@@ -1074,21 +1148,22 @@ export default function GlobalWebCallInterface() {
                   </div>
                 )}
                 {/* Call Status in Header */}
-                {callStatus && (
+                {((callStatus && callStatus !== 'completed') || (isWebCallConnected || isConnected)) && (
                   <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                    callStatus === 'in-progress' ? 'bg-green-500/30 text-green-100' :
+                    (callStatus === 'in-progress' || (isWebCallConnected || isConnected)) ? 'bg-green-500/30 text-green-100' :
                     callStatus === 'ringing' ? 'bg-yellow-500/30 text-yellow-100' :
                     callStatus === 'completed' ? 'bg-gray-500/30 text-gray-100' :
                     'bg-red-500/30 text-red-100'
                   }`}>
-                    {callStatus === 'in-progress' && 'In Progress'}
+                    {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) && 'In Progress'}
                     {callStatus === 'ringing' && 'Ringing'}
                     {callStatus === 'completed' && 'Completed'}
-                    {!['in-progress', 'ringing', 'completed'].includes(callStatus) && callStatus}
+                    {callStatus && !['in-progress', 'ringing', 'completed'].includes(callStatus) && callStatus}
+                    {!callStatus && (isWebCallConnected || isConnected) && 'In Progress'}
                   </div>
                 )}
                 {/* Timer in Header - only show when in-progress */}
-                {callStatus === 'in-progress' && durationToShow > 0 && (
+                {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) && durationToShow > 0 && (
                   <div className="text-xs font-bold text-white">
                     {formatTimer(durationToShow)}
                   </div>
@@ -1179,7 +1254,7 @@ export default function GlobalWebCallInterface() {
             )}
 
             {/* Mute/Unmute Button */}
-            {(isWebCallConnected || isConnected) && (callStatus === 'in-progress' || callStatus === 'ringing') && (
+            {(isWebCallConnected || isConnected) && (callStatus === 'in-progress' || callStatus === 'ringing' || !callStatus) && (
               <button
                 onClick={toggleMute}
                 className={`w-full px-4 py-2 font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 mb-3 ${
@@ -1208,7 +1283,7 @@ export default function GlobalWebCallInterface() {
             )}
 
             {/* Mute Status Indicator */}
-            {isMuted && callStatus === 'in-progress' && (
+            {isMuted && (callStatus === 'in-progress' || (isWebCallConnected || isConnected)) && (
               <div className="flex items-center justify-center gap-2 text-xs text-orange-600 bg-orange-50 p-2 rounded mb-3">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
@@ -1219,7 +1294,7 @@ export default function GlobalWebCallInterface() {
             )}
 
             {/* Hangup Button - highlight when call ended */}
-            {(callStatus === 'in-progress' || callStatus === 'ringing' || callStatus === 'connecting' || isCalling || isConnecting || callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') && (
+            {(isWebCallConnected || isConnected || callStatus === 'in-progress' || callStatus === 'ringing' || callStatus === 'connecting' || isCalling || isConnecting || callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') && (
               <button
                 onClick={handleHangup}
                 className={`w-full px-4 py-2 font-medium rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
@@ -1241,10 +1316,10 @@ export default function GlobalWebCallInterface() {
         {isMinimized && (
           <div className="p-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-            {callStatus === 'in-progress' && (
+            {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) && (
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
             )}
-            {callStatus === 'ringing' && (
+            {callStatus === 'ringing' && !(isWebCallConnected || isConnected) && (
                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
               )}
               <span className="text-sm font-medium text-gray-700">
@@ -1252,7 +1327,7 @@ export default function GlobalWebCallInterface() {
               </span>
             </div>
             {/* Timer in minimized view - only show when in-progress */}
-            {callStatus === 'in-progress' && durationToShow > 0 && (
+            {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) && durationToShow > 0 && (
               <span className="text-sm font-bold text-green-600">
                 {formatTimer(durationToShow)}
               </span>

@@ -207,7 +207,11 @@ export default function NotificationBell() {
 
       // Open the sale in the same window if saleId exists
       if (notification.lastSaleId || notification.saleId) {
-        router.push(`/add-sale?id=${notification.lastSaleId || notification.saleId}`);
+        const saleId = notification.lastSaleId || notification.saleId;
+        // Use setTimeout to ensure navigation happens after state updates
+        setTimeout(() => {
+          router.push(`/add-sale?id=${saleId}`);
+        }, 100);
       }
 
       // Close dropdown but keep notification visible

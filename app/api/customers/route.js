@@ -1,6 +1,7 @@
 import { CustomerService } from '../../../lib/sequelize-db.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth.js';
 import { Sale, User, Customer, Sequelize } from '../../../models/index.js';
+import { normalizePhoneForStorage } from '../../../lib/twilio.js';
 
 const { Op } = Sequelize;
 
@@ -169,11 +170,19 @@ export async function POST(request) {
       return (value === '' || value === null || value === undefined) ? null : value;
     };
     
-    // Sanitize the customer data
+    // Sanitize and normalize the customer data
     const sanitizedData = {
       ...customerData,
       email: sanitizeEmail(customerData.email)
     };
+    
+    // Normalize phone numbers before saving
+    if (sanitizedData.phone) {
+      sanitizedData.phone = normalizePhoneForStorage(sanitizedData.phone) || sanitizedData.phone;
+    }
+    if (sanitizedData.landline) {
+      sanitizedData.landline = normalizePhoneForStorage(sanitizedData.landline) || sanitizedData.landline;
+    }
     
     const customer = await CustomerService.create(sanitizedData);
     

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getWebhookUrl, validatePhoneNumber, getClient } from '../../../../lib/twilio';
+import { getWebhookUrl, validatePhoneNumber, getClient, normalizePhoneForMatching } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import { Op } from 'sequelize';
 import NotificationManager from '../../../../lib/notificationService';
@@ -145,18 +145,33 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
     let lastSaleId = null;
     
     try {
-      // Normalize phone number for search (remove non-digits)
-      const normalizedCallerNumber = callerNumber.replace(/\D/g, '');
+      // Normalize phone number for search (remove +1 prefix for US numbers)
+      const normalizedCallerNumber = normalizePhoneForMatching(callerNumber);
+      console.log(`🔍 Searching for customer with normalized number: ${normalizedCallerNumber} (original: ${callerNumber})`);
       
-      customer = await sequelizeDb.Customer.findOne({
-        where: {
-          [Op.or]: [
-            { phone: { [Op.like]: `%${normalizedCallerNumber}%` } },
-            { landline: { [Op.like]: `%${normalizedCallerNumber}%` } }
-          ]
-        },
-        attributes: ['id', 'firstName', 'lastName', 'phone', 'landline']
-      });
+      if (normalizedCallerNumber) {
+        // Search using normalized number - need to normalize database values too
+        // Get all customers and filter in memory to handle normalization
+        const allCustomers = await sequelizeDb.Customer.findAll({
+          attributes: ['id', 'firstName', 'lastName', 'phone', 'landline']
+        });
+        
+        // Find customer by matching normalized phone numbers
+        customer = allCustomers.find(c => {
+          const normalizedPhone = normalizePhoneForMatching(c.phone);
+          const normalizedLandline = normalizePhoneForMatching(c.landline);
+          const phoneMatch = normalizedPhone && normalizedPhone === normalizedCallerNumber;
+          const landlineMatch = normalizedLandline && normalizedLandline === normalizedCallerNumber;
+          
+          if (phoneMatch || landlineMatch) {
+            console.log(`✅ Found customer match: ID ${c.id}, Phone: ${c.phone}, Landline: ${c.landline}`);
+          }
+          
+          return phoneMatch || landlineMatch;
+        });
+      } else {
+        console.log(`⚠️ Could not normalize caller number: ${callerNumber}`);
+      }
       
       if (customer) {
         customerId = customer.id;
