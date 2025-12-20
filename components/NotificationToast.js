@@ -244,18 +244,6 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
                   View Sale
                 </button>
               )}
-              {notification.customerId && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    router.push(`/customers/${notification.customerId}`);
-                    handleClose();
-                  }}
-                  className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md transition-colors duration-200 border border-gray-200"
-                >
-                  View Customer
-                </button>
-              )}
             </div>
           ) : (
             <button

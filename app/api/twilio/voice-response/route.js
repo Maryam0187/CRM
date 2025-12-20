@@ -217,9 +217,32 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
       : `Unknown (${callerNumber})`;
     
     const notificationTitle = '📞 Inbound Call Received';
-    const notificationMessage = customerId
-      ? `Inbound call from ${customerName}`
-      : `Inbound call from ${callerNumber}`;
+    
+    // Build notification message with last sale info if available
+    let notificationMessage = `Inbound call from ${callerNumber}`;
+    
+    if (customerId && customer) {
+      notificationMessage = `Inbound call from ${callerNumber}`;
+      
+      // Add customer name and last sale date if last sale exists
+      if (lastSale) {
+        const lastSaleDate = lastSale.created_at 
+          ? new Date(lastSale.created_at).toLocaleDateString('en-US', { 
+              year: 'numeric', 
+              month: 'short', 
+              day: 'numeric' 
+            })
+          : null;
+        
+        if (lastSaleDate) {
+          notificationMessage = `Inbound call from ${callerNumber} - ${customerName} (Last sale: ${lastSaleDate})`;
+        } else {
+          notificationMessage = `Inbound call from ${callerNumber} - ${customerName}`;
+        }
+      } else {
+        notificationMessage = `Inbound call from ${callerNumber} - ${customerName}`;
+      }
+    }
 
     // Always notify all admins with conference name and last sale link
     const adminNotifications = [];
@@ -278,10 +301,21 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
         
         // Notify the last sale agent with conference name and last sale link
         try {
+          // Build agent notification message with last sale date
+          let agentMessage = `Inbound call from ${callerNumber} - ${customerName}`;
+          if (lastSale && lastSale.created_at) {
+            const lastSaleDate = new Date(lastSale.created_at).toLocaleDateString('en-US', { 
+              year: 'numeric', 
+              month: 'short', 
+              day: 'numeric' 
+            });
+            agentMessage = `Inbound call from ${callerNumber} - ${customerName} (Last sale: ${lastSaleDate})`;
+          }
+          
           const agentNotification = await NotificationManager.notifyUser(lastSaleAgentId, {
             type: 'custom',
-            title: '📞 Inbound Call - Your Customer',
-            message: `Inbound call from ${customerName} - Your previous customer`,
+            title: notificationTitle,
+            message: agentMessage,
             isRead: false,
             relatedId: customerId,
             relatedType: 'customer',
@@ -294,8 +328,8 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
               id: agentNotification.notification?.id || agentNotification.id,
               userId: lastSaleAgentId,
               type: 'custom',
-              title: '📞 Inbound Call - Your Customer',
-              message: `Inbound call from ${customerName} - Your previous customer`,
+              title: notificationTitle,
+              message: agentMessage,
               isRead: false,
               relatedId: customerId,
               relatedType: 'customer',

@@ -477,19 +477,7 @@ export default function NotificationBell() {
                               }}
                               className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 border border-blue-200"
                             >
-                              View Last Sale
-                            </button>
-                          )}
-                          {notification.customerId && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                router.push(`/customers/${notification.customerId}`);
-                                setIsOpen(false);
-                              }}
-                              className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md transition-colors duration-200 border border-gray-200"
-                            >
-                              View Customer
+                              View Sale
                             </button>
                           )}
                         </div>

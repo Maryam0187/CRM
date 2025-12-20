@@ -8,6 +8,7 @@ import { SocketProvider } from "../contexts/SocketContext";
 import { CallProvider } from "../contexts/CallContext";
 import ReduxProvider from "../components/ReduxProvider";
 import GlobalWebCallInterface from "../components/GlobalWebCallInterface";
+import InboundCallHandler from "../components/InboundCallHandler";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -40,6 +41,7 @@ export default function RootLayout({ children }) {
                   </ConditionalLayout>
                   <ToastManager />
                   <GlobalWebCallInterface />
+                  <InboundCallHandler />
                 </ToastProvider>
               </CallProvider>
             </SocketProvider>

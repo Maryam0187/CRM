@@ -1233,15 +1233,6 @@ export default function GlobalWebCallInterface() {
                     <span>View Sale</span>
                   </button>
                 )}
-                {callMetadata?.customerId && (
-                  <button
-                    onClick={() => window.open(`/customers/${callMetadata.customerId}`, '_blank')}
-                    className="w-full mt-2 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md transition-colors duration-200 border border-gray-200 flex items-center justify-center gap-1"
-                  >
-                    <span>👤</span>
-                    <span>View Customer</span>
-                  </button>
-                )}
               </div>
             )}
 
