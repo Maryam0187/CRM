@@ -88,16 +88,43 @@ async function initializeDatabase() {
       console.log('⚠️  Migrations failed, but tables already exist');
     }
     
-    // Run seeding
-    console.log('🌱 Seeding database...');
+    // Check if admin user exists before seeding
+    // This prevents resetting admin password on every deployment
+    console.log('🔍 Checking if admin user exists...');
+    let shouldSeed = false;
     try {
-      execSync(`npx sequelize-cli db:seed:all --env ${env}`, { 
-        stdio: 'inherit',
-        env: { ...process.env, NODE_ENV: env }
-      });
-      console.log('✅ Database seeded successfully');
+      const [adminCheck] = await sequelize.query(
+        "SELECT id FROM users WHERE email = 'admin@crm.com' LIMIT 1",
+        { type: Sequelize.QueryTypes.SELECT }
+      );
+      
+      if (!adminCheck) {
+        console.log('ℹ️  Admin user not found - will run seeders (first deployment)');
+        shouldSeed = true;
+      } else {
+        console.log('✅ Admin user already exists - skipping seeders to preserve data');
+        shouldSeed = false;
+      }
     } catch (error) {
-      console.log('⚠️  Seeding failed, but continuing...');
+      // If users table doesn't exist yet, we should seed
+      console.log('ℹ️  Could not check for admin user (table may not exist yet) - will run seeders');
+      shouldSeed = true;
+    }
+    
+    // Only run seeding if admin doesn't exist (first deployment) or if explicitly enabled
+    if (shouldSeed || process.env.RUN_SEEDERS === 'true') {
+      console.log('🌱 Seeding database...');
+      try {
+        execSync(`npx sequelize-cli db:seed:all --env ${env}`, { 
+          stdio: 'inherit',
+          env: { ...process.env, NODE_ENV: env }
+        });
+        console.log('✅ Database seeded successfully');
+      } catch (error) {
+        console.log('⚠️  Seeding failed, but continuing...');
+      }
+    } else {
+      console.log('⏭️  Skipping seeders (admin exists and RUN_SEEDERS not set)');
     }
     
     console.log('✅ Database initialization completed');
