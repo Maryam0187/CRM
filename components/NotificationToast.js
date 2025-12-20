@@ -165,9 +165,10 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
       onMarkAsRead(notification.id);
     }
 
-    // Navigate based on notification type and saleId
-    if (notification.saleId || notification.lastSaleId) {
-      router.push(`/add-sale?id=${notification.saleId || notification.lastSaleId}`);
+    // Navigate based on notification type - prioritize lastSaleId
+    if (notification.lastSaleId || notification.saleId) {
+      const saleId = notification.lastSaleId || notification.saleId;
+      router.push(`/add-sale?id=${saleId}`);
     } else {
       router.push('/');
     }

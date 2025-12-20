@@ -240,13 +240,14 @@ export default function NotificationBell() {
     // Close dropdown and navigate
     setIsOpen(false);
     
-    // Navigate based on notification type
-    if (notification.route) {
+    // Navigate based on notification type - prioritize lastSaleId
+    if (notification.lastSaleId || notification.saleId) {
+      const saleId = notification.lastSaleId || notification.saleId;
+      router.push(`/add-sale?id=${saleId}`);
+    } else if (notification.route) {
       router.push(notification.route);
     } else if (notification.relatedType === 'receiver') {
       router.push('/admin/receivers');
-    } else if (notification.saleId || notification.lastSaleId) {
-      router.push(`/add-sale?id=${notification.saleId || notification.lastSaleId}`);
     } else {
       router.push('/');
     }

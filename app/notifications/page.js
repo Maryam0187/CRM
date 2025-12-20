@@ -179,9 +179,13 @@ export default function NotificationsPage() {
         customerName: notification.customerName
       });
 
-      // Open the sale in a new tab if saleId exists
+      // Open the sale in the same window if saleId exists
       if (notification.lastSaleId || notification.saleId) {
-        window.open(`/add-sale?id=${notification.lastSaleId || notification.saleId}`, '_blank');
+        const saleId = notification.lastSaleId || notification.saleId;
+        // Use setTimeout to ensure navigation happens after state updates
+        setTimeout(() => {
+          router.push(`/add-sale?id=${saleId}`);
+        }, 100);
       }
 
       return;
@@ -192,13 +196,14 @@ export default function NotificationsPage() {
       await handleMarkAsRead(notification.id);
     }
     
-    // Navigate based on notification type
-    if (notification.route) {
+    // Navigate based on notification type - prioritize lastSaleId
+    if (notification.lastSaleId || notification.saleId) {
+      const saleId = notification.lastSaleId || notification.saleId;
+      router.push(`/add-sale?id=${saleId}`);
+    } else if (notification.route) {
       router.push(notification.route);
     } else if (notification.relatedType === 'receiver') {
       router.push('/admin/receivers');
-    } else if (notification.saleId || notification.lastSaleId) {
-      router.push(`/add-sale?id=${notification.saleId || notification.lastSaleId}`);
     } else {
       router.push('/');
     }

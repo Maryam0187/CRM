@@ -212,9 +212,9 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
     const admins = await NotificationManager.getAdmins();
     console.log(`📧 Found ${admins.length} admin(s) to notify`);
 
-    // Prepare notification data
+    // Prepare notification data - only use first name, not last name
     const customerName = customer 
-      ? `${customer.firstName} ${customer.lastName}` 
+      ? customer.firstName 
       : `Unknown (${callerNumber})`;
     
     const notificationTitle = '📞 Inbound Call Received';
@@ -223,9 +223,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
     let notificationMessage = `Inbound call from ${callerNumber}`;
     
     if (customerId && customer) {
-      notificationMessage = `Inbound call from ${callerNumber}`;
-      
-      // Add customer name and last sale date if last sale exists
+      // Add customer first name and last sale date if last sale exists
       if (lastSale) {
         const lastSaleDate = lastSale.created_at 
           ? new Date(lastSale.created_at).toLocaleDateString('en-US', { 
@@ -277,7 +275,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
             callSid: callSid,
             callerNumber: callerNumber,
             customerId: customerId,
-            customerName: customerName,
+            customerName: customer ? customer.firstName : customerName, // Only first name
             lastSaleId: lastSaleId, // Include last sale ID for link
             createdAt: new Date(),
             time: new Date()
@@ -292,25 +290,30 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
     }
 
     // Check if last sale agent is available
+    // Also check if agent is already an admin to avoid duplicate notifications
     let agentAvailable = false;
     if (lastSaleAgentId && lastSaleAgent) {
       // Check if agent is available (not busy and active)
       agentAvailable = lastSaleAgent.callStatus === 'available' && lastSaleAgent.isActive;
       
-      if (agentAvailable) {
+      // Check if agent is already in admins list to avoid duplicate notification
+      const isAgentAlsoAdmin = admins.some(admin => admin.id === lastSaleAgentId);
+      
+      if (agentAvailable && !isAgentAlsoAdmin) {
         console.log(`✅ Last sale agent is available, notifying agent ${lastSaleAgentId}`);
         
         // Notify the last sale agent with conference name and last sale link
         try {
-          // Build agent notification message with last sale date
-          let agentMessage = `Inbound call from ${callerNumber} - ${customerName}`;
+          // Build agent notification message with last sale date (only first name, no last name)
+          const agentCustomerName = customer ? customer.firstName : `Unknown (${callerNumber})`;
+          let agentMessage = `Inbound call from ${callerNumber} - ${agentCustomerName}`;
           if (lastSale && lastSale.created_at) {
             const lastSaleDate = new Date(lastSale.created_at).toLocaleDateString('en-US', { 
               year: 'numeric', 
               month: 'short', 
               day: 'numeric' 
             });
-            agentMessage = `Inbound call from ${callerNumber} - ${customerName} (Last sale: ${lastSaleDate})`;
+            agentMessage = `Inbound call from ${callerNumber} - ${agentCustomerName} (Last sale: ${lastSaleDate})`;
           }
           
           const agentNotification = await NotificationManager.notifyUser(lastSaleAgentId, {
@@ -339,7 +342,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
               callSid: callSid,
               callerNumber: callerNumber,
               customerId: customerId,
-              customerName: customerName,
+              customerName: agentCustomerName,
               lastSaleId: lastSaleId, // Include last sale ID for link
               createdAt: new Date(),
               time: new Date()
@@ -351,6 +354,8 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
         } catch (notifyError) {
           console.error(`❌ Failed to notify agent ${lastSaleAgentId}:`, notifyError);
         }
+      } else if (isAgentAlsoAdmin) {
+        console.log(`ℹ️ Last sale agent ${lastSaleAgentId} is also an admin, already notified`);
       } else {
         console.log(`⚠️ Last sale agent ${lastSaleAgentId} is not available (Status: ${lastSaleAgent.callStatus}, Active: ${lastSaleAgent.isActive})`);
       }
