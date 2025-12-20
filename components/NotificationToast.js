@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { useCall } from '../contexts/CallContext';
+import { useToast } from '../contexts/ToastContext';
 
 // Format notification time to be more readable
 const formatNotificationTime = (date) => {
@@ -59,6 +61,8 @@ const getNotificationIcon = (notification) => {
 
 export default function NotificationToast({ notification, onClose, onMarkAsRead }) {
   const router = useRouter();
+  const { startCall } = useCall();
+  const { showSuccess, showError } = useToast();
   const [isVisible, setIsVisible] = useState(true);
   const [isClosing, setIsClosing] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -87,15 +91,52 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
     }, 300); // Animation duration
   };
 
+  const handleJoinCall = async (e) => {
+    e.stopPropagation();
+    
+    if (!notification.conferenceName) {
+      showError('Conference name not available');
+      return;
+    }
+
+    try {
+      // Mark notification as read
+      if (!notification.isRead && onMarkAsRead) {
+        onMarkAsRead(notification.id);
+      }
+
+      // Start call using CallContext
+      startCall({
+        callSid: notification.callSid,
+        conferenceName: notification.conferenceName,
+        customerId: notification.customerId,
+        saleId: notification.lastSaleId,
+        phoneNumber: notification.callerNumber,
+        customerName: notification.customerName
+      });
+
+      handleClose();
+      showSuccess('Joining call...');
+    } catch (error) {
+      console.error('Error joining call:', error);
+      showError('Failed to join call');
+    }
+  };
+
   const handleClick = () => {
+    // Don't navigate if this is an inbound call notification (use buttons instead)
+    if (notification.conferenceName) {
+      return;
+    }
+
     // Mark as read if not already read
     if (!notification.isRead && onMarkAsRead) {
       onMarkAsRead(notification.id);
     }
 
     // Navigate based on notification type and saleId
-    if (notification.saleId) {
-      router.push(`/add-sale?id=${notification.saleId}`);
+    if (notification.saleId || notification.lastSaleId) {
+      router.push(`/add-sale?id=${notification.saleId || notification.lastSaleId}`);
     } else {
       router.push('/');
     }
@@ -150,12 +191,48 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
 
         {/* Actions */}
         <div className="flex items-center justify-between">
-          <button
-            onClick={handleClick}
-            className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
-          >
-            View Details
-          </button>
+          {notification.conferenceName ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleJoinCall}
+                className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors duration-200 flex items-center gap-1"
+              >
+                <span>📞</span>
+                <span>Join Call</span>
+              </button>
+              {notification.lastSaleId && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/add-sale?id=${notification.lastSaleId}`);
+                    handleClose();
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 border border-blue-200"
+                >
+                  View Last Sale
+                </button>
+              )}
+              {notification.customerId && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/customers/${notification.customerId}`);
+                    handleClose();
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md transition-colors duration-200 border border-gray-200"
+                >
+                  View Customer
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={handleClick}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+            >
+              View Details
+            </button>
+          )}
           <div className="flex items-center space-x-2">
             {!notification.isRead && (
               <div className="w-2 h-2 bg-blue-500 rounded-full"></div>

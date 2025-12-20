@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useSocket } from '../contexts/SocketContext';
+import { useCall } from '../contexts/CallContext';
 import { authenticatedFetch } from '../lib/apiClient';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { 
@@ -44,6 +45,7 @@ export default function NotificationBell() {
     connectionStatus, 
     reconnect
   } = useSocket();
+  const { startCall } = useCall();
   const router = useRouter();
   const dispatch = useAppDispatch();
   
@@ -81,10 +83,17 @@ export default function NotificationBell() {
             isRead: notification.isRead || notification.is_read || false,
             time: timestamp ? formatNotificationTime(new Date(timestamp)) : 'Just now',
             saleId: notification.saleId || notification.sale_id,
+            lastSaleId: notification.lastSaleId || notification.last_sale_id,
             agentName: notification.agentName || notification.agent_name,
             relatedType: notification.relatedType || notification.related_type,
             route: route,
-            createdAt: timestamp
+            createdAt: timestamp,
+            // Inbound call specific fields
+            conferenceName: notification.conferenceName || notification.conference_name,
+            callSid: notification.callSid || notification.call_sid,
+            callerNumber: notification.callerNumber || notification.caller_number,
+            customerId: notification.customerId || notification.customer_id,
+            customerName: notification.customerName || notification.customer_name
           };
         });
         
@@ -125,8 +134,54 @@ export default function NotificationBell() {
     }
   };
 
+  // Handle join call button click
+  const handleJoinCall = async (e, notification) => {
+    e.stopPropagation(); // Prevent notification click
+    
+    if (!notification.conferenceName) {
+      showError('Conference name not available');
+      return;
+    }
+
+    try {
+      // Mark notification as read
+      if (!notification.isRead) {
+        await authenticatedFetch('/api/notifications', {
+          method: 'PUT',
+          body: JSON.stringify({
+            notificationId: notification.id,
+            action: 'mark_read'
+          })
+        });
+        dispatch(markNotificationAsRead(notification.id));
+      }
+
+      // Start call using CallContext
+      startCall({
+        callSid: notification.callSid,
+        conferenceName: notification.conferenceName,
+        customerId: notification.customerId,
+        saleId: notification.lastSaleId,
+        phoneNumber: notification.callerNumber,
+        customerName: notification.customerName
+      });
+
+      // Close dropdown
+      setIsOpen(false);
+      showSuccess('Joining call...');
+    } catch (error) {
+      console.error('Error joining call:', error);
+      showError('Failed to join call');
+    }
+  };
+
   // Handle notification click
   const handleNotificationClick = async (notification) => {
+    // Don't navigate if clicking on action buttons
+    if (notification.conferenceName) {
+      return; // Let handleJoinCall handle it
+    }
+
     // Mark as read if not already read
     if (!notification.isRead) {
       try {
@@ -153,8 +208,8 @@ export default function NotificationBell() {
       router.push(notification.route);
     } else if (notification.relatedType === 'receiver') {
       router.push('/admin/receivers');
-    } else if (notification.saleId) {
-      router.push(`/add-sale?id=${notification.saleId}`);
+    } else if (notification.saleId || notification.lastSaleId) {
+      router.push(`/add-sale?id=${notification.saleId || notification.lastSaleId}`);
     } else {
       router.push('/');
     }
@@ -343,11 +398,11 @@ export default function NotificationBell() {
               displayNotifications.map((notification) => (
                 <div
                   key={notification.id}
-                  className={`p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors duration-150 ${
+                  className={`p-4 border-b border-gray-100 hover:bg-gray-50 transition-colors duration-150 ${
                     !notification.isRead ? 'bg-blue-50' : ''
-                  }`}
+                  } ${notification.conferenceName ? '' : 'cursor-pointer'}`}
                   onMouseEnter={() => handleMarkNotificationAsReadOnHover(notification)}
-                  onClick={() => handleNotificationClick(notification)}
+                  onClick={() => !notification.conferenceName && handleNotificationClick(notification)}
                 >
                   <div className="flex items-start space-x-3">
                     <div className="text-lg">{getNotificationIcon(notification)}</div>
@@ -365,13 +420,53 @@ export default function NotificationBell() {
                       <p className="text-xs text-gray-600 mt-1 line-clamp-2">
                         {notification.message}
                       </p>
+                      
+                      {/* Action buttons for inbound calls */}
+                      {notification.conferenceName && (
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            onClick={(e) => handleJoinCall(e, notification)}
+                            className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors duration-200 flex items-center gap-1"
+                          >
+                            <span>📞</span>
+                            <span>Join Call</span>
+                          </button>
+                          {notification.lastSaleId && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/add-sale?id=${notification.lastSaleId}`);
+                                setIsOpen(false);
+                              }}
+                              className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 border border-blue-200"
+                            >
+                              View Last Sale
+                            </button>
+                          )}
+                          {notification.customerId && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/customers/${notification.customerId}`);
+                                setIsOpen(false);
+                              }}
+                              className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md transition-colors duration-200 border border-gray-200"
+                            >
+                              View Customer
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      
                       <div className="flex items-center justify-between mt-2">
                         <span className="text-xs text-gray-400">
                           {notification.time}
                         </span>
-                        <span className="text-xs text-gray-300 font-mono">
-                          ID: {notification.id}
-                        </span>
+                        {!notification.conferenceName && (
+                          <span className="text-xs text-gray-300 font-mono">
+                            ID: {notification.id}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
