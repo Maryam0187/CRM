@@ -16,6 +16,11 @@ export default function InboundCallDialogManager() {
     const handleInboundCallNotification = (notification) => {
       // Check if this is an inbound call notification
       if (notification.conferenceName || notification.type === 'inbound_call') {
+        // Extract saleId from relatedId when relatedType is 'sale'
+        const relatedType = notification.relatedType || notification.related_type;
+        const relatedId = notification.relatedId || notification.related_id;
+        const saleId = notification.saleId || notification.sale_id || (relatedType === 'sale' ? relatedId : null);
+        
         // Format notification to match expected structure
         const formattedNotification = {
           id: notification.id || `call-${Date.now()}`,
@@ -26,6 +31,7 @@ export default function InboundCallDialogManager() {
           callerNumber: notification.callerNumber || notification.caller_number,
           customerId: notification.customerId || notification.customer_id,
           customerName: notification.customerName || notification.customer_name,
+          saleId: saleId,
           lastSaleId: notification.lastSaleId || notification.last_sale_id,
           isRead: notification.isRead || false
         };

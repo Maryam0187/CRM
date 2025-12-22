@@ -17,7 +17,7 @@ module.exports = (sequelize) => {
       }
     },
     type: {
-      type: DataTypes.ENUM('sale_completed', 'sale_status_updated', 'sale_created', 'custom'),
+      type: DataTypes.ENUM('sale_completed', 'sale_status_updated', 'sale_created', 'custom', 'inbound_call'),
       allowNull: false
     },
     title: {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { useCall } from '../contexts/CallContext';
@@ -21,52 +21,100 @@ export default function InboundCallDialog({ notification, onClose, onMinimize })
   const [isJoining, setIsJoining] = useState(false);
   const statusCheckInterval = useRef(null);
   
-  // Check call status periodically
+  // Helper function to update call status from status data
+  const updateCallStatusFromData = useCallback((statusData) => {
+    if (!statusData?.status) return;
+    
+    const newStatus = statusData.status;
+    setCallStatus(prevStatus => {
+      // If call ended and agent never joined, mark as missed
+      if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(newStatus) && 
+          prevStatus === 'ringing' && !isJoining) {
+        return 'missed';
+      }
+      // If call is in-progress, update status
+      if (newStatus === 'in-progress') {
+        return 'in-progress';
+      }
+      // If call ended after joining, mark as completed
+      if (['completed', 'failed', 'canceled'].includes(newStatus) && prevStatus === 'in-progress') {
+        return 'completed';
+      }
+      // If call already ended when dialog opens, mark as missed
+      if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(newStatus) && prevStatus === 'ringing') {
+        return 'missed';
+      }
+      return prevStatus;
+    });
+  }, [isJoining]);
+
+  // Listen to real-time call status updates via socket
+  useEffect(() => {
+    if (!notification?.callSid) return;
+
+    const handleCallStatusUpdate = (event) => {
+      const { callStatusData } = event.detail;
+      // Only process updates for this specific call
+      if (callStatusData?.callSid === notification.callSid) {
+        console.log('📞 Real-time call status update received:', callStatusData.status);
+        updateCallStatusFromData(callStatusData);
+      }
+    };
+
+    // Listen for real-time updates
+    window.addEventListener('callStatusUpdate', handleCallStatusUpdate);
+
+    // Also check initial status from socket context
+    const initialStatus = getCallStatus(notification.callSid);
+    if (initialStatus) {
+      updateCallStatusFromData(initialStatus);
+    }
+
+    return () => {
+      window.removeEventListener('callStatusUpdate', handleCallStatusUpdate);
+    };
+  }, [notification?.callSid, getCallStatus, updateCallStatusFromData]);
+
+  // Fallback: Check call status periodically (as backup in case socket events are missed)
   useEffect(() => {
     if (!notification?.callSid) return;
     
     const checkStatus = () => {
       const statusData = getCallStatus(notification.callSid);
       if (statusData?.status) {
-        const newStatus = statusData.status;
-        setCallStatus(prevStatus => {
-          // If call ended and agent never joined, mark as missed
-          if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(newStatus) && 
-              prevStatus === 'ringing' && !isJoining) {
-            return 'missed';
-          }
-          // If call is in-progress, update status
-          if (newStatus === 'in-progress') {
-            return 'in-progress';
-          }
-          // If call ended after joining, mark as completed
-          if (['completed', 'failed', 'canceled'].includes(newStatus) && prevStatus === 'in-progress') {
-            return 'completed';
-          }
-          // If call already ended when dialog opens, mark as missed
-          if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(newStatus) && prevStatus === 'ringing') {
-            return 'missed';
-          }
-          return prevStatus;
-        });
-      } else {
-        // If no status data, assume it's still ringing (initial state)
-        setCallStatus(prevStatus => prevStatus === 'ringing' ? 'ringing' : prevStatus);
+        updateCallStatusFromData(statusData);
       }
     };
     
     // Check immediately
     checkStatus();
     
-    // Then check every second
-    statusCheckInterval.current = setInterval(checkStatus, 1000);
+    // Then check every 2 seconds as a fallback (less frequent since we have real-time updates)
+    statusCheckInterval.current = setInterval(checkStatus, 2000);
     
     return () => {
       if (statusCheckInterval.current) {
         clearInterval(statusCheckInterval.current);
       }
     };
-  }, [notification?.callSid, getCallStatus, isJoining]);
+  }, [notification?.callSid, getCallStatus, updateCallStatusFromData]);
+  
+  // Auto-close dialog when call ends (completed or missed)
+  useEffect(() => {
+    if (callStatus === 'completed' || callStatus === 'missed') {
+      // Wait 3 seconds before auto-closing so user can see the final status
+      const autoCloseTimer = setTimeout(() => {
+        if (statusCheckInterval.current) {
+          clearInterval(statusCheckInterval.current);
+        }
+        onClose();
+      }, 3000);
+      
+      return () => {
+        clearTimeout(autoCloseTimer);
+      };
+    }
+  }, [callStatus, onClose]);
   
   // Mark notification as read when dialog opens
   useEffect(() => {
@@ -209,7 +257,7 @@ export default function InboundCallDialog({ notification, onClose, onMinimize })
   };
   
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black " style={{ background: 'rgba(0,0,0,0.5)' }}>
       <div className={`bg-white rounded-xl shadow-2xl border-4 ${statusColors[callStatus] || statusColors.ringing} max-w-md w-full mx-4 transform transition-all`}>
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200">

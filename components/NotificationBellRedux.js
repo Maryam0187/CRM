@@ -66,6 +66,11 @@ export default function NotificationBell() {
         const mappedNotifications = data.data.notifications.map(notification => {
           const timestamp = notification.createdAt || notification.created_at || notification.timestamp;
           
+          // Extract saleId from relatedId when relatedType is 'sale'
+          const relatedType = notification.relatedType || notification.related_type;
+          const relatedId = notification.relatedId || notification.related_id;
+          const saleId = notification.saleId || notification.sale_id || (relatedType === 'sale' ? relatedId : null);
+          
           return {
             id: notification.id,
             title: notification.title,
@@ -73,7 +78,7 @@ export default function NotificationBell() {
             type: notification.type,
             isRead: notification.isRead || notification.is_read || false,
             time: timestamp ? formatNotificationTime(new Date(timestamp)) : 'Just now',
-            saleId: notification.saleId || notification.sale_id,
+            saleId: saleId,
             agentName: notification.agentName || notification.agent_name,
             createdAt: timestamp
           };
