@@ -106,9 +106,6 @@ export default function AddSale() {
   // Refs to track CallButton instances for call state checking
   const callButtonRefs = useRef([]);
   
-  // Confirmation modal state for navigation with active call
-  const [showNavigateConfirm, setShowNavigateConfirm] = useState(false);
-  const [pendingNavigation, setPendingNavigation] = useState(null);
   
   // Check if we're in edit mode
   const editId = searchParams.get('id');
@@ -2830,48 +2827,6 @@ Room: `;
     return callButtonRefs.current.some(ref => ref && ref.current && ref.current.hasActiveCall && ref.current.hasActiveCall());
   };
 
-  // Handle navigation with call check
-  const handleNavigation = (navigationFn) => {
-    if (hasActiveCall()) {
-      // Store the navigation function and show confirmation
-      setPendingNavigation(() => navigationFn);
-      setShowNavigateConfirm(true);
-    } else {
-      // No active call, proceed with navigation
-      navigationFn();
-    }
-  };
-
-  // Handle confirmation to navigate and hangup - same as clicking "End Call" button
-  const handleConfirmNavigate = async () => {
-    // Hangup all active calls - this calls handleEndCall internally, same as "End Call" button
-    callButtonRefs.current.forEach(ref => {
-      if (ref && ref.current && ref.current.hangUp) {
-        try {
-          // This calls handleEndCall which:
-          // - Disconnects WebCallInterface
-          // - Cancels outbound call via backend API
-          // - Resets all state
-          // - Notifies parent component
-          ref.current.hangUp();
-        } catch (err) {
-          console.warn('Error hanging up call:', err);
-        }
-      }
-    });
-    
-    // Wait for hangup to process (same timing as handleEndCall uses)
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Close modal
-    setShowNavigateConfirm(false);
-    
-    // Execute pending navigation
-    if (pendingNavigation) {
-      pendingNavigation();
-      setPendingNavigation(null);
-    }
-  };
 
   // Handle window/tab close - hangup call
   useEffect(() => {
@@ -2946,7 +2901,7 @@ Room: `;
                 </button>
               )}
               <button
-                onClick={() => handleNavigation(() => router.back())}
+                onClick={() => router.back()}
                 className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -5530,25 +5485,6 @@ Room: `;
         </div>
       )}
 
-      {/* Navigation Confirmation Modal - when call is active */}
-      <ConfirmModal
-        isOpen={showNavigateConfirm}
-        onClose={() => {
-          setShowNavigateConfirm(false);
-          setPendingNavigation(null);
-        }}
-        onConfirm={handleConfirmNavigate}
-        title="Active Call Detected"
-        message="You have an active call. Do you want to hang up and navigate away?"
-        confirmText="Hang Up & Leave"
-        cancelText="Stay on Page"
-        confirmButtonClass="bg-red-600 hover:bg-red-700"
-        icon={
-          <svg className="w-16 h-16 text-red-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-        }
-      />
     </div>
   );
 }

@@ -280,7 +280,8 @@ export async function POST(request) {
     }
 
     // Log the status update
-    console.log(`Call ${callSid} status updated to: ${callStatus}`);
+    console.log(`📞 Call ${callSid} status updated to: ${callStatus} (mapped: ${mappedStatus})`);
+    console.log(`📞 Call direction: ${direction}, ParentCallSid: ${parentCallSid || 'none'}`);
 
     // Send Socket.IO notification for real-time updates
     const callStatusData = {
@@ -301,6 +302,14 @@ export async function POST(request) {
       twilioData: updateData.twilioData
     };
 
+    console.log('📞 Preparing to send call status update via socket:', {
+      callSid,
+      status: mappedStatus,
+      direction,
+      agentId: callLog.agentId,
+      customerId: callLog.customerId
+    });
+
     // Send to the specific agent who made the call
     if (callLog.agentId) {
       console.log('📞 Sending call status to agent:', {
@@ -312,7 +321,7 @@ export async function POST(request) {
       });
       socketManager.sendCallStatusToAgent(callLog.agentId, callSid, callStatusData);
     } else {
-      console.log('❌ No agentId found in call log, cannot send status to agent');
+      console.log('⚠️ No agentId found in call log, skipping agent-specific status update');
     }
 
     // Send to supervisors for monitoring
@@ -321,8 +330,14 @@ export async function POST(request) {
     // Send to call-specific room for real-time monitoring
     socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, callStatusData);
 
-    // Broadcast to all connected users for general call monitoring
-    socketManager.sendCallStatusUpdate(callSid, callStatusData);
+    // Broadcast to all connected users for general call monitoring (IMPORTANT: This includes all users notified about inbound calls)
+    console.log('📞 Broadcasting call status update to all connected users');
+    const broadcastSuccess = socketManager.sendCallStatusUpdate(callSid, callStatusData);
+    if (!broadcastSuccess) {
+      console.error('❌ Failed to broadcast call status update - Socket.IO may not be initialized');
+    } else {
+      console.log('✅ Call status update broadcast successfully');
+    }
 
     return NextResponse.json({
       success: true,
