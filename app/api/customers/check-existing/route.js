@@ -1,7 +1,7 @@
 import { CustomerService } from '../../../../lib/sequelize-db.js';
-
-
+import { normalizePhoneForStorage } from '../../../../lib/twilio.js';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
+
 export async function POST(request) {
   try {
     
@@ -14,7 +14,7 @@ export async function POST(request) {
       );
     }
 
-const { landline, firstName } = await request.json();
+    const { landline, firstName } = await request.json();
     
     if (!landline || !firstName) {
       return Response.json(
@@ -23,8 +23,12 @@ const { landline, firstName } = await request.json();
       );
     }
     
-    // Always get all customers with this landline
-    const landlineCustomers = await CustomerService.findAllByLandline(landline);
+    // IMPORTANT: Normalize the landline before querying (same as create endpoint)
+    // This ensures we match customers even if the format is different (+1-234-567-8901 vs 2345678901)
+    const normalizedLandline = normalizePhoneForStorage(landline) || landline;
+    
+    // Always get all customers with this landline (using normalized format)
+    const landlineCustomers = await CustomerService.findAllByLandline(normalizedLandline);
     
     if (landlineCustomers && landlineCustomers.length > 0) {
       // Check if there's an exact match (same name and landline)
