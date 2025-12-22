@@ -9,7 +9,6 @@ export async function POST(request) {
     
     // Extract call data from Twilio webhook
     const callSid = formData.get('CallSid');
-    const parentCallSid = formData.get('ParentCallSid'); // Child call leg from <Dial>
     const callStatus = formData.get('CallStatus');
     const direction = formData.get('Direction');
     const from = formData.get('From');
@@ -23,7 +22,6 @@ export async function POST(request) {
 
     console.log('📞 Call status callback received:', {
       callSid,
-      parentCallSid,
       callStatus,
       direction,
       from,
@@ -33,7 +31,7 @@ export async function POST(request) {
       endTime,
       answerTime,
       hangupCause,
-      answeredBy, // AMD result
+      answeredBy,
       timestamp: new Date().toISOString()
     });
     
@@ -42,50 +40,13 @@ export async function POST(request) {
       console.log('🔔 RINGING STATUS DETECTED - This should trigger the ringing state!');
     }
 
-    // Find the call log by call SID (try parent first if this is a child call)
-    let callLog = await sequelizeDb.CallLog.findOne({
+    // Find the call log by call SID
+    const callLog = await sequelizeDb.CallLog.findOne({
       where: { callSid }
     });
 
-    // If not found and this is a child call (has ParentCallSid), find by parent
-    if (!callLog && parentCallSid) {
-      console.log(`📞 Child call leg detected (CallSid: ${callSid}, ParentCallSid: ${parentCallSid})`);
-      callLog = await sequelizeDb.CallLog.findOne({
-        where: { callSid: parentCallSid }
-      });
-      
-      if (callLog) {
-        console.log(`✅ Found parent call log for child leg: ${parentCallSid}`);
-        // Update twilioData to include child call info
-        const twilioData = callLog.twilioData || {};
-        if (!twilioData.childCalls) {
-          twilioData.childCalls = [];
-        }
-        // Store child call info for reference
-        twilioData.childCalls.push({
-          callSid,
-          status: callStatus,
-          from,
-          to,
-          duration,
-          timestamp: new Date().toISOString()
-        });
-      }
-    }
-
-    // If still not found, this might be a child call leg we should ignore
-    // (agent leg) - we only track the parent customer call
     if (!callLog) {
-      // Check if this is a child leg - if so, ignore it
-      if (to && to.startsWith('sip:') || from && from.startsWith('sip:')) {
-        console.log(`ℹ️ Ignoring child leg callback (CallSid: ${callSid}) - only tracking parent call`);
-        return NextResponse.json({
-          success: true,
-          message: 'Child call leg ignored - only tracking parent call'
-        });
-      }
-      
-      console.error('Call log not found for SID:', callSid);
+      console.error('❌ Call log not found for SID:', callSid);
       return NextResponse.json(
         { success: false, message: 'Call log not found' },
         { status: 404 }
@@ -107,7 +68,7 @@ export async function POST(request) {
     
     let mappedStatus = statusMap[callStatus] || 'queued';
 
-    // Prepare twilioData update - preserve existing data including child calls
+    // Prepare twilioData update - preserve existing data
     const existingTwilioData = callLog.twilioData || {};
     const twilioDataUpdate = {
       ...existingTwilioData,
@@ -123,32 +84,39 @@ export async function POST(request) {
       lastUpdated: new Date().toISOString()
     };
 
-    // If this is a child call, preserve child calls array
-    if (parentCallSid && existingTwilioData.childCalls) {
-      twilioDataUpdate.childCalls = existingTwilioData.childCalls;
-    }
-
     // Update call log with new status
-    // Note: For child calls (agent leg), we update the parent call log
-    // but only update status if this is the parent call itself
     const updateData = {
       status: mappedStatus,
       duration: duration ? parseInt(duration) : null,
-      twilioData: twilioDataUpdate
+      twilioData: twilioDataUpdate,
+      updatedAt: new Date()
     };
 
-    // Only update status if this is the parent call (customer leg)
-    // Child calls (agent leg) don't change the main call status
-    if (parentCallSid) {
-      // This is a child call - don't update the main status, just log the child call info
-      delete updateData.status;
-      console.log(`ℹ️ Child call leg status update (not changing parent call status): ${callStatus}`);
+    // IMPORTANT: Update the call log BEFORE checking for active calls
+    // This ensures the current call's status is updated before we count active calls
+    try {
+      await callLog.update(updateData);
+      
+      // Reload to verify the update succeeded
+      await callLog.reload();
+      
+      console.log(`✅ Call log ${callLog.id} (CallSid: ${callSid}) updated: status = ${callLog.status}, direction = ${direction}`);
+      
+      // Verify the status was actually updated
+      if (callLog.status !== mappedStatus) {
+        console.error(`❌ WARNING: Call log status update may have failed! Expected: ${mappedStatus}, Got: ${callLog.status}`);
+        // Force update the status
+        await callLog.update({ status: mappedStatus });
+        await callLog.reload();
+        console.log(`✅ Force-updated call log ${callLog.id} status to: ${callLog.status}`);
+      }
+    } catch (updateError) {
+      console.error(`❌ Error updating call log ${callLog.id}:`, updateError);
+      throw updateError;
     }
 
-    await callLog.update(updateData);
-
     // Handle voicemail detection (AMD result) - after callLog is found and updated
-    if (answeredBy === 'machine' && callLog && !parentCallSid) {
+    if (answeredBy === 'machine' && callLog) {
       console.log('📞 Voicemail detected via AMD - will auto-hangup after 30 seconds');
       
       // Update call log to mark as voicemail
@@ -187,7 +155,7 @@ export async function POST(request) {
     }
 
     // Handle no-answer: disconnect call immediately
-    if (callStatus === 'no-answer' && callLog && !parentCallSid) {
+    if (callStatus === 'no-answer' && callLog) {
       console.log('📞 No-answer detected - disconnecting call immediately');
       
       const { getClient } = require('../../../../lib/twilio');
@@ -205,26 +173,39 @@ export async function POST(request) {
     }
 
     // Update agent status based on call status
-    // IMPORTANT: Only update agent status for parent calls (customer leg), not child calls (agent leg)
-    if (callLog.agentId && !parentCallSid) {
+    if (callLog.agentId) {
       const agent = await sequelizeDb.User.findByPk(callLog.agentId);
       if (agent) {
-        // Reset agent status to available when call ends
-        const endStatuses = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
-        if (endStatuses.includes(callStatus)) {
-          // Check if agent has other active calls
-          const activeCalls = await sequelizeDb.CallLog.count({
+        // Set agent to busy ONLY when they join the call (in-progress)
+        if (callStatus === 'in-progress') {
+          if (agent.callStatus !== 'busy') {
+            await agent.update({ callStatus: 'busy' });
+            console.log(`📞 Agent ${callLog.agentId} status set to 'busy' - call in progress (agent joined)`);
+          }
+        }
+        // Reset agent status to available when call ends (if no other active calls)
+        else if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(callStatus)) {
+          // Verify that the call log was actually updated with the new status
+          await callLog.reload();
+          console.log(`✅ Verified call log ${callLog.id} status updated to: ${callLog.status}`);
+          
+          // Check if agent has other ACTIVE calls (only in-progress, not ringing)
+          // Agent can handle multiple ringing calls, but only one in-progress call
+          const activeInProgressCalls = await sequelizeDb.CallLog.count({
             where: {
               agentId: callLog.agentId,
-              callSid: { [Op.ne]: callSid }, // Exclude current call
-              status: {
-                [Op.in]: ['queued', 'ringing', 'in-progress']
-              }
+              callSid: { [Op.ne]: callSid }, // Exclude current call that just ended
+              status: 'in-progress' // Only count calls where agent is actually talking
             }
           });
 
-          // Only set to available if no other active calls
-          if (activeCalls === 0) {
+          // Log for debugging if there are active calls
+          if (activeInProgressCalls > 0) {
+            console.log(`⚠️ Agent ${callLog.agentId} still has ${activeInProgressCalls} active in-progress call(s), keeping status as 'busy'`);
+          }
+
+          // Only set to available if no other in-progress calls
+          if (activeInProgressCalls === 0) {
             await agent.update({ 
               callStatus: 'available',
               // Update total call time if call was completed
@@ -232,26 +213,11 @@ export async function POST(request) {
                 totalCallTime: (agent.totalCallTime || 0) + parseInt(duration)
               } : {})
             });
-            console.log(`✅ Agent ${callLog.agentId} status reset to 'available' - call ended (no other active calls)`);
-          } else {
-            console.log(`⚠️ Agent ${callLog.agentId} still has ${activeCalls} active call(s), keeping status as 'busy'`);
-          }
-        } else if (callStatus === 'in-progress') {
-          // Ensure agent is marked as busy when call is in progress
-          if (agent.callStatus !== 'busy') {
-            await agent.update({ callStatus: 'busy' });
-            console.log(`📞 Agent ${callLog.agentId} status set to 'busy' - call in progress`);
-          }
-        } else if (callStatus === 'ringing') {
-          // Mark agent as busy when call is ringing
-          if (agent.callStatus !== 'busy') {
-            await agent.update({ callStatus: 'busy' });
-            console.log(`📞 Agent ${callLog.agentId} status set to 'busy' - call ringing`);
+            console.log(`✅ Agent ${callLog.agentId} status reset to 'available' - call ended (no other in-progress calls)`);
           }
         }
+        // Note: We don't change agent status for 'ringing' - agent stays available until they join
       }
-    } else if (parentCallSid) {
-      console.log(`ℹ️ Skipping agent status update - this is a child call leg, only parent call updates agent status`);
     }
 
     // If call is completed and has duration, update any related records
@@ -281,7 +247,7 @@ export async function POST(request) {
 
     // Log the status update
     console.log(`📞 Call ${callSid} status updated to: ${callStatus} (mapped: ${mappedStatus})`);
-    console.log(`📞 Call direction: ${direction}, ParentCallSid: ${parentCallSid || 'none'}`);
+    console.log(`📞 Call direction: ${direction}`);
 
     // Send Socket.IO notification for real-time updates
     const callStatusData = {
