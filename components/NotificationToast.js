@@ -237,7 +237,30 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    router.push(`/add-sale?id=${notification.lastSaleId}`);
+                    
+                    // If this is an inbound call notification, start the call first
+                    if (notification.conferenceName) {
+                      // Mark as read
+                      if (!notification.isRead && onMarkAsRead) {
+                        onMarkAsRead(notification.id);
+                      }
+
+                      // Start call to open GlobalWebCallInterface
+                      startCall({
+                        callSid: notification.callSid,
+                        conferenceName: notification.conferenceName,
+                        customerId: notification.customerId,
+                        saleId: notification.lastSaleId,
+                        phoneNumber: notification.callerNumber,
+                        customerName: notification.customerName
+                      });
+                    }
+                    
+                    // Navigate to sale page
+                    setTimeout(() => {
+                      router.push(`/add-sale?id=${notification.lastSaleId}`);
+                    }, 100);
+                    
                     handleClose();
                   }}
                   className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 border border-blue-200"
