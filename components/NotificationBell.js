@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useCall } from '../contexts/CallContext';
+import { useInboundCall } from '../contexts/InboundCallContext';
 import { authenticatedFetch } from '../lib/apiClient';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { 
@@ -41,11 +42,12 @@ export default function NotificationBell() {
   const { user } = useAuth();
   const { showSuccess, showError, showInfo } = useToast();
   const { 
+    socket,
     isConnected, 
     connectionStatus, 
     reconnect
   } = useSocket();
-  const { startCall } = useCall();
+  const { showInboundCall } = useInboundCall();
   const router = useRouter();
   const dispatch = useAppDispatch();
   
@@ -54,6 +56,51 @@ export default function NotificationBell() {
   
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
+
+  // Listen for inbound call notifications via socket
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+    
+    const handleInboundCallNotification = (notification) => {
+      // Check if this is an inbound call notification
+      if (notification.conferenceName || notification.conference_name) {
+        // Format notification to match expected structure
+        const formattedNotification = {
+          id: notification.id || `call-${Date.now()}`,
+          title: notification.title || '📞 Inbound Call Received',
+          message: notification.message || `Inbound call from ${notification.callerNumber || notification.caller_number || 'Unknown'}`,
+          conferenceName: notification.conferenceName || notification.conference_name,
+          callSid: notification.callSid || notification.call_sid,
+          callerNumber: notification.callerNumber || notification.caller_number,
+          customerId: notification.customerId || notification.customer_id,
+          customerName: notification.customerName || notification.customer_name,
+          lastSaleId: notification.lastSaleId || notification.last_sale_id,
+          isRead: notification.isRead || false
+        };
+        
+        // Show the inbound call dialog
+        showInboundCall(formattedNotification);
+      }
+    };
+    
+    // Listen for notification events from socket
+    socket.on('notification', handleInboundCallNotification);
+    
+    // Also listen for custom window events
+    const handleWindowNotification = (event) => {
+      const notification = event.detail?.notification || event.detail;
+      if (notification) {
+        handleInboundCallNotification(notification);
+      }
+    };
+    
+    window.addEventListener('inboundCallNotification', handleWindowNotification);
+    
+    return () => {
+      socket.off('notification', handleInboundCallNotification);
+      window.removeEventListener('inboundCallNotification', handleWindowNotification);
+    };
+  }, [socket, isConnected, showInboundCall]);
 
   // Fetch notifications from API and update Redux store
   const fetchNotifications = async () => {
@@ -134,87 +181,13 @@ export default function NotificationBell() {
     }
   };
 
-  // Handle join call button click
-  const handleJoinCall = async (e, notification) => {
-    e.stopPropagation(); // Prevent notification click
-    
-    if (!notification.conferenceName) {
-      showError('Conference name not available');
-      return;
-    }
-
-    try {
-      // Mark notification as read
-      if (!notification.isRead) {
-        await authenticatedFetch('/api/notifications', {
-          method: 'PUT',
-          body: JSON.stringify({
-            notificationId: notification.id,
-            action: 'mark_read'
-          })
-        });
-        dispatch(markNotificationAsRead(notification.id));
-      }
-
-      // Start call using CallContext - this opens GlobalWebCallInterface
-      startCall({
-        callSid: notification.callSid,
-        conferenceName: notification.conferenceName,
-        customerId: notification.customerId,
-        saleId: notification.lastSaleId,
-        phoneNumber: notification.callerNumber,
-        customerName: notification.customerName
-      });
-
-      // Close dropdown
-      setIsOpen(false);
-      showSuccess('Opening call interface...');
-    } catch (error) {
-      console.error('Error joining call:', error);
-      showError('Failed to open call interface');
-    }
-  };
-
   // Handle notification click
   const handleNotificationClick = async (notification) => {
-    // For inbound call notifications, open GlobalWebCallInterface and sale
+    // For inbound call notifications, show the dialog instead of directly starting call
     if (notification.conferenceName) {
-      // Mark as read
-      if (!notification.isRead) {
-        try {
-          await authenticatedFetch('/api/notifications', {
-            method: 'PUT',
-            body: JSON.stringify({
-              notificationId: notification.id,
-              action: 'mark_read'
-            })
-          });
-          dispatch(markNotificationAsRead(notification.id));
-        } catch (error) {
-          console.error('Error marking notification as read:', error);
-        }
-      }
-
-      // Open GlobalWebCallInterface by starting the call
-      startCall({
-        callSid: notification.callSid,
-        conferenceName: notification.conferenceName,
-        customerId: notification.customerId,
-        saleId: notification.lastSaleId,
-        phoneNumber: notification.callerNumber,
-        customerName: notification.customerName
-      });
-
-      // Open the sale in the same window if saleId exists
-      if (notification.lastSaleId || notification.saleId) {
-        const saleId = notification.lastSaleId || notification.saleId;
-        // Use setTimeout to ensure navigation happens after state updates
-        setTimeout(() => {
-          router.push(`/add-sale?id=${saleId}`);
-        }, 100);
-      }
-
-      // Close dropdown but keep notification visible
+      // Show the inbound call dialog
+      showInboundCall(notification);
+      // Close dropdown
       setIsOpen(false);
       return;
     }
@@ -240,10 +213,9 @@ export default function NotificationBell() {
     // Close dropdown and navigate
     setIsOpen(false);
     
-    // Navigate based on notification type - prioritize lastSaleId
-    if (notification.lastSaleId || notification.saleId) {
-      const saleId = notification.lastSaleId || notification.saleId;
-      router.push(`/add-sale?id=${saleId}`);
+    // Navigate based on notification type - use saleId (set to customer's latest sale in backend)
+    if (notification.saleId) {
+      router.push(`/add-sale?id=${notification.saleId}`);
     } else if (notification.route) {
       router.push(notification.route);
     } else if (notification.relatedType === 'receiver') {
@@ -438,9 +410,9 @@ export default function NotificationBell() {
                   key={notification.id}
                   className={`p-4 border-b border-gray-100 hover:bg-gray-50 transition-colors duration-150 ${
                     !notification.isRead ? 'bg-blue-50' : ''
-                  } ${notification.conferenceName ? '' : 'cursor-pointer'}`}
+                  } cursor-pointer`}
                   onMouseEnter={() => handleMarkNotificationAsReadOnHover(notification)}
-                  onClick={() => !notification.conferenceName && handleNotificationClick(notification)}
+                  onClick={() => handleNotificationClick(notification)}
                 >
                   <div className="flex items-start space-x-3">
                     <div className="text-lg">{getNotificationIcon(notification)}</div>
@@ -459,61 +431,12 @@ export default function NotificationBell() {
                         {notification.message}
                       </p>
                       
-                      {/* Action buttons for inbound calls */}
+                      {/* Show indicator for inbound calls */}
                       {notification.conferenceName && (
-                        <div className="flex items-center gap-2 mt-2">
-                          <button
-                            onClick={(e) => handleJoinCall(e, notification)}
-                            className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors duration-200 flex items-center gap-1"
-                          >
-                            <span>📞</span>
-                            <span>Join Call</span>
-                          </button>
-                          {notification.lastSaleId && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                
-                                // If this is an inbound call notification, start the call first
-                                if (notification.conferenceName) {
-                                  // Mark as read
-                                  if (!notification.isRead) {
-                                    authenticatedFetch('/api/notifications', {
-                                      method: 'PUT',
-                                      body: JSON.stringify({
-                                        notificationId: notification.id,
-                                        action: 'mark_read'
-                                      })
-                                    }).then(() => {
-                                      dispatch(markNotificationAsRead(notification.id));
-                                    }).catch(err => {
-                                      console.error('Error marking notification as read:', err);
-                                    });
-                                  }
-
-                                  // Start call to open GlobalWebCallInterface
-                                  startCall({
-                                    callSid: notification.callSid,
-                                    conferenceName: notification.conferenceName,
-                                    customerId: notification.customerId,
-                                    saleId: notification.lastSaleId,
-                                    phoneNumber: notification.callerNumber,
-                                    customerName: notification.customerName
-                                  });
-                                }
-                                
-                                // Navigate to sale page
-                                setTimeout(() => {
-                                  router.push(`/add-sale?id=${notification.lastSaleId}`);
-                                }, 100);
-                                
-                                setIsOpen(false);
-                              }}
-                              className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 border border-blue-200"
-                            >
-                              View Sale
-                            </button>
-                          )}
+                        <div className="mt-2">
+                          <span className="text-xs text-green-600 font-medium">
+                            📞 Click to open call dialog
+                          </span>
                         </div>
                       )}
                       

@@ -254,7 +254,8 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
           isRead: false,
           relatedId: customerId || null,
           relatedType: customerId ? 'customer' : 'call',
-          route: customerId ? `/customers/${customerId}` : '/customers'
+          route: customerId ? `/customers/${customerId}` : '/customers',
+          saleId: lastSaleId || null // Set saleId to customer's latest sale ID
         });
         
         adminNotifications.push(notification);
@@ -276,7 +277,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
             callerNumber: callerNumber,
             customerId: customerId,
             customerName: customer ? customer.firstName : customerName, // Only first name
-            lastSaleId: lastSaleId, // Include last sale ID for link
+            saleId: lastSaleId || null, // Set saleId to customer's latest sale ID
             createdAt: new Date(),
             time: new Date()
           };
@@ -323,7 +324,8 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
             isRead: false,
             relatedId: customerId,
             relatedType: 'customer',
-            route: `/customers/${customerId}`
+            route: `/customers/${customerId}`,
+            saleId: lastSaleId || null // Set saleId to customer's latest sale ID
           });
           
           // Send real-time notification via socket with conference info
@@ -343,7 +345,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
               callerNumber: callerNumber,
               customerId: customerId,
               customerName: agentCustomerName,
-              lastSaleId: lastSaleId, // Include last sale ID for link
+              saleId: lastSaleId || null, // Set saleId to customer's latest sale ID
               createdAt: new Date(),
               time: new Date()
             };

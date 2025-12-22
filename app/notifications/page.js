@@ -174,17 +174,16 @@ export default function NotificationsPage() {
         callSid: notification.callSid,
         conferenceName: notification.conferenceName,
         customerId: notification.customerId,
-        saleId: notification.lastSaleId,
+        saleId: notification.saleId,
         phoneNumber: notification.callerNumber,
         customerName: notification.customerName
       });
-
-      // Open the sale in the same window if saleId exists
-      if (notification.lastSaleId || notification.saleId) {
-        const saleId = notification.lastSaleId || notification.saleId;
+      
+      // Open the customer's last sale if available
+      if (notification.saleId) {
         // Use setTimeout to ensure navigation happens after state updates
         setTimeout(() => {
-          router.push(`/add-sale?id=${saleId}`);
+          router.push(`/add-sale?id=${notification.saleId}`);
         }, 100);
       }
 
@@ -196,10 +195,9 @@ export default function NotificationsPage() {
       await handleMarkAsRead(notification.id);
     }
     
-    // Navigate based on notification type - prioritize lastSaleId
-    if (notification.lastSaleId || notification.saleId) {
-      const saleId = notification.lastSaleId || notification.saleId;
-      router.push(`/add-sale?id=${saleId}`);
+    // Navigate based on notification type - use saleId (set to customer's latest sale in backend)
+    if (notification.saleId) {
+      router.push(`/add-sale?id=${notification.saleId}`);
     } else if (notification.route) {
       router.push(notification.route);
     } else if (notification.relatedType === 'receiver') {

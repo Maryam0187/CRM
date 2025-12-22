@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useCall } from '../contexts/CallContext';
+import { useInboundCall } from '../contexts/InboundCallContext';
 import { useToast } from '../contexts/ToastContext';
 
 // Format notification time to be more readable
@@ -61,7 +61,7 @@ const getNotificationIcon = (notification) => {
 
 export default function NotificationToast({ notification, onClose, onMarkAsRead }) {
   const router = useRouter();
-  const { startCall } = useCall();
+  const { showInboundCall } = useInboundCall();
   const { showSuccess, showError } = useToast();
   const [isVisible, setIsVisible] = useState(true);
   const [isClosing, setIsClosing] = useState(false);
@@ -97,66 +97,13 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
     }, 300); // Animation duration
   };
 
-  const handleJoinCall = async (e) => {
-    e.stopPropagation();
-    
-    if (!notification.conferenceName) {
-      showError('Conference name not available');
-      return;
-    }
-
-    try {
-      // Mark notification as read
-      if (!notification.isRead && onMarkAsRead) {
-        onMarkAsRead(notification.id);
-      }
-
-      // Start call using CallContext
-      startCall({
-        callSid: notification.callSid,
-        conferenceName: notification.conferenceName,
-        customerId: notification.customerId,
-        saleId: notification.lastSaleId,
-        phoneNumber: notification.callerNumber,
-        customerName: notification.customerName
-      });
-
-      handleClose();
-      showSuccess('Joining call...');
-    } catch (error) {
-      console.error('Error joining call:', error);
-      showError('Failed to join call');
-    }
-  };
-
   const handleClick = () => {
-    // For inbound call notifications, open GlobalWebCallInterface and sale
+    // For inbound call notifications, show the dialog instead of directly starting call
     if (notification.conferenceName) {
-      // Mark as read
-      if (!notification.isRead && onMarkAsRead) {
-        onMarkAsRead(notification.id);
-      }
-
-      // Open GlobalWebCallInterface by starting the call
-      startCall({
-        callSid: notification.callSid,
-        conferenceName: notification.conferenceName,
-        customerId: notification.customerId,
-        saleId: notification.lastSaleId,
-        phoneNumber: notification.callerNumber,
-        customerName: notification.customerName
-      });
-
-      // Open the sale in the same window if saleId exists
-      if (notification.lastSaleId || notification.saleId) {
-        const saleId = notification.lastSaleId || notification.saleId;
-        // Use setTimeout to ensure navigation happens after state updates
-        setTimeout(() => {
-          router.push(`/add-sale?id=${saleId}`);
-        }, 100);
-      }
-
-      // Don't close the notification - keep it visible
+      // Show the inbound call dialog
+      showInboundCall(notification);
+      // Close the toast
+      handleClose();
       return;
     }
 
@@ -165,10 +112,9 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
       onMarkAsRead(notification.id);
     }
 
-    // Navigate based on notification type - prioritize lastSaleId
-    if (notification.lastSaleId || notification.saleId) {
-      const saleId = notification.lastSaleId || notification.saleId;
-      router.push(`/add-sale?id=${saleId}`);
+    // Navigate based on notification type - use saleId (set to customer's latest sale in backend)
+    if (notification.saleId) {
+      router.push(`/add-sale?id=${notification.saleId}`);
     } else {
       router.push('/');
     }
@@ -226,48 +172,9 @@ export default function NotificationToast({ notification, onClose, onMarkAsRead 
         <div className="flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
           {notification.conferenceName ? (
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleJoinCall}
-                className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors duration-200 flex items-center gap-1"
-              >
-                <span>📞</span>
-                <span>Join Call</span>
-              </button>
-              {notification.lastSaleId && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    
-                    // If this is an inbound call notification, start the call first
-                    if (notification.conferenceName) {
-                      // Mark as read
-                      if (!notification.isRead && onMarkAsRead) {
-                        onMarkAsRead(notification.id);
-                      }
-
-                      // Start call to open GlobalWebCallInterface
-                      startCall({
-                        callSid: notification.callSid,
-                        conferenceName: notification.conferenceName,
-                        customerId: notification.customerId,
-                        saleId: notification.lastSaleId,
-                        phoneNumber: notification.callerNumber,
-                        customerName: notification.customerName
-                      });
-                    }
-                    
-                    // Navigate to sale page
-                    setTimeout(() => {
-                      router.push(`/add-sale?id=${notification.lastSaleId}`);
-                    }, 100);
-                    
-                    handleClose();
-                  }}
-                  className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 border border-blue-200"
-                >
-                  View Sale
-                </button>
-              )}
+              <span className="text-xs text-green-600 font-medium">
+                📞 Click to open call dialog
+              </span>
             </div>
           ) : (
             <button

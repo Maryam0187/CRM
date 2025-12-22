@@ -6,9 +6,11 @@ import { AuthProvider } from "../contexts/AuthContext";
 import { ToastProvider } from "../contexts/ToastContext";
 import { SocketProvider } from "../contexts/SocketContext";
 import { CallProvider } from "../contexts/CallContext";
+import { InboundCallProvider } from "../contexts/InboundCallContext";
 import ReduxProvider from "../components/ReduxProvider";
 import GlobalWebCallInterface from "../components/GlobalWebCallInterface";
 import InboundCallHandler from "../components/InboundCallHandler";
+import InboundCallDialogManager from "../components/InboundCallDialogManager";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,14 +37,17 @@ export default function RootLayout({ children }) {
           <AuthProvider>
             <SocketProvider>
               <CallProvider>
-                <ToastProvider>
-                  <ConditionalLayout>
-                    {children}
-                  </ConditionalLayout>
-                  <ToastManager />
-                  <GlobalWebCallInterface />
-                  <InboundCallHandler />
-                </ToastProvider>
+                <InboundCallProvider>
+                  <ToastProvider>
+                    <ConditionalLayout>
+                      {children}
+                    </ConditionalLayout>
+                    <ToastManager />
+                    <GlobalWebCallInterface />
+                    <InboundCallHandler />
+                    <InboundCallDialogManager />
+                  </ToastProvider>
+                </InboundCallProvider>
               </CallProvider>
             </SocketProvider>
           </AuthProvider>
