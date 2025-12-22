@@ -27,26 +27,28 @@ export default function InboundCallDialog({ notification, onClose, onMinimize })
     
     const newStatus = statusData.status;
     setCallStatus(prevStatus => {
-      // If call ended and agent never joined, mark as missed
-      if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(newStatus) && 
-          prevStatus === 'ringing' && !isJoining) {
-        return 'missed';
-      }
       // If call is in-progress, update status
       if (newStatus === 'in-progress') {
         return 'in-progress';
       }
-      // If call ended after joining, mark as completed
+      
+      // If call ended after joining (was in-progress), mark as completed
       if (['completed', 'failed', 'canceled'].includes(newStatus) && prevStatus === 'in-progress') {
         return 'completed';
       }
-      // If call already ended when dialog opens, mark as missed
-      if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(newStatus) && prevStatus === 'ringing') {
-        return 'missed';
+      
+      // If call ended and was never in-progress (was ringing or initial state), mark as missed
+      // This handles cases where customer ends call before agent joins
+      if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(newStatus)) {
+        // If it was never in-progress, it's a missed call
+        if (prevStatus !== 'in-progress' && prevStatus !== 'completed' && prevStatus !== 'missed') {
+          return 'missed';
+        }
       }
+      
       return prevStatus;
     });
-  }, [isJoining]);
+  }, []);
 
   // Listen to real-time call status updates via socket
   useEffect(() => {
