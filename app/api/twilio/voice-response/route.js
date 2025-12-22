@@ -361,25 +361,64 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
       }
     }
 
+    // Determine agentId for call log
+    // Use last sale agent if available, otherwise find first available admin/agent
+    let assignedAgentId = lastSaleAgentId;
+    
+    if (!assignedAgentId) {
+      // Find first available admin or agent to assign
+      // Prefer admins, then agents
+      const availableAdmin = admins.find(admin => admin.isActive && (admin.callStatus === 'available' || !admin.callStatus));
+      if (availableAdmin) {
+        assignedAgentId = availableAdmin.id;
+        console.log(`📞 No last sale agent, assigning to admin ${assignedAgentId}`);
+      } else {
+        // Fallback: find any active agent
+        const fallbackAgent = await sequelizeDb.User.findOne({
+          where: {
+            isActive: true,
+            role: { [Op.in]: ['agent', 'supervisor', 'admin'] }
+          },
+          order: [['id', 'ASC']] // Get first available agent
+        });
+        if (fallbackAgent) {
+          assignedAgentId = fallbackAgent.id;
+          console.log(`📞 No available admin, assigning to agent ${assignedAgentId}`);
+        } else {
+          // Last resort: use first admin from the list (even if busy)
+          if (admins.length > 0) {
+            assignedAgentId = admins[0].id;
+            console.log(`⚠️ No available agents, assigning to admin ${assignedAgentId} (may be busy)`);
+          }
+        }
+      }
+    }
+
     // Create call log entry for inbound call
     let callLog = null;
     try {
+      if (!assignedAgentId) {
+        throw new Error('No agent available to assign to inbound call');
+      }
+      
       callLog = await sequelizeDb.CallLog.create({
         callSid: callSid,
         customerId: customerId,
-        agentId: lastSaleAgentId || null, // Set to last sale agent if found, otherwise null
+        agentId: assignedAgentId, // Always assign a valid agentId
         direction: 'inbound',
         fromNumber: callerNumber,
         toNumber: calledNumber,
         status: 'ringing',
         callPurpose: 'support', // Default purpose for inbound calls
         twilioData: {
-          conferenceName: conferenceName // Store conference name in call log
+          conferenceName: conferenceName, // Store conference name in call log
+          assignedFrom: lastSaleAgentId ? 'last_sale_agent' : 'admin_fallback' // Track how agent was assigned
         }
       });
-      console.log(`✅ Call log created for inbound call: ${callLog.id}`);
+      console.log(`✅ Call log created for inbound call: ${callLog.id} (assigned to agent ${assignedAgentId})`);
     } catch (logError) {
       console.error('❌ Failed to create call log:', logError);
+      // Log the error but don't fail the call - the call can still proceed
     }
 
     // Generate TwiML to place caller in conference

@@ -379,6 +379,40 @@ export default function GlobalWebCallInterface() {
       return;
     }
     
+    // Check if call has already ended - check both local state and socket status
+    const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+    
+    // First check local callStatus
+    if (callStatus && endedStatuses.includes(callStatus)) {
+      const errorMsg = `Cannot join call - call has already ended (status: ${callStatus})`;
+      console.warn('⚠️', errorMsg);
+      setError(errorMsg);
+      setIsConnecting(false);
+      // End the call context to clean up
+      setTimeout(() => {
+        endCall();
+      }, 1000);
+      return;
+    }
+    
+    // Also check actual call status from socket/API if we have a callSid
+    if (currentCallSid) {
+      const actualStatusData = getCallStatus(currentCallSid);
+      if (actualStatusData?.status && endedStatuses.includes(actualStatusData.status)) {
+        const errorMsg = `Cannot join call - call has already ended (status: ${actualStatusData.status})`;
+        console.warn('⚠️', errorMsg);
+        setError(errorMsg);
+        setIsConnecting(false);
+        // Update local status to match actual status
+        updateCallStatus(actualStatusData.status);
+        // End the call context to clean up
+        setTimeout(() => {
+          endCall();
+        }, 1000);
+        return;
+      }
+    }
+    
     if (isConnected || activeConnection.current) {
       try {
         if (activeConnection.current) {
@@ -507,6 +541,22 @@ export default function GlobalWebCallInterface() {
               }
               
               // Update call status to 'in-progress' when call connects
+              // But first verify the call hasn't ended on the server
+              const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+              if (currentCallSid) {
+                const actualStatusData = getCallStatus(currentCallSid);
+                if (actualStatusData?.status && endedStatuses.includes(actualStatusData.status)) {
+                  console.warn('⚠️ Call has ended on server, disconnecting immediately');
+                  updateCallStatus(actualStatusData.status);
+                  disconnectCall('call_ended_on_server');
+                  setTimeout(() => {
+                    endCall();
+                  }, 500);
+                  return;
+                }
+              }
+              
+              // Only set to in-progress if call is still active
               updateCallStatus('in-progress');
             } else {
               console.log('✅ Already connected, skipping onAccept callback');
@@ -1210,8 +1260,9 @@ export default function GlobalWebCallInterface() {
               </div>
             )}
 
-            {/* Join Call Button for Inbound Calls - Show when not connected */}
-            {conferenceName && conferenceName.startsWith('inbound-') && !isWebCallConnected && !isConnected && !isConnecting && !isCalling && (
+            {/* Join Call Button for Inbound Calls - Show when not connected and call hasn't ended */}
+            {conferenceName && conferenceName.startsWith('inbound-') && !isWebCallConnected && !isConnected && !isConnecting && !isCalling && 
+             (!callStatus || !['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'].includes(callStatus)) && (
               <div className="mb-3">
                 <button
                   onClick={() => joinConference()}
