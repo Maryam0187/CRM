@@ -17,6 +17,8 @@ export async function GET(request) {
     const dateFilter = searchParams.get('dateFilter');
     const dateField = searchParams.get('dateField') || 'created_at'; // New parameter: 'created_at' or 'updated_at'
     const agentId = searchParams.get('agentId'); // For supervisors to view specific agent's sales
+    const numberSearch = searchParams.get('numberSearch') || null; // Search by phone/landline number (last 4 digits or full number)
+    const searchLastFour = searchParams.get('searchLastFour') === 'true'; // Toggle for searching last 4 digits only
     
     // Pagination parameters
     const page = parseInt(searchParams.get('page')) || 1;
@@ -30,24 +32,24 @@ export async function GET(request) {
       if (agentId) {
         // Show specific agent's sales
         if (status && dateFilter) {
-          result = await SaleService.findByAgentStatusAndDatePaginated(parseInt(agentId), status, dateFilter, page, limit, dateField);
+          result = await SaleService.findByAgentStatusAndDatePaginated(parseInt(agentId), status, dateFilter, page, limit, dateField, numberSearch, searchLastFour);
         } else if (status) {
-          result = await SaleService.findByAgentStatusPaginated(parseInt(agentId), status, page, limit);
+          result = await SaleService.findByAgentStatusPaginated(parseInt(agentId), status, page, limit, numberSearch, searchLastFour);
         } else if (dateFilter) {
-          result = await SaleService.findByAgentDatePaginated(parseInt(agentId), dateFilter, page, limit, dateField);
+          result = await SaleService.findByAgentDatePaginated(parseInt(agentId), dateFilter, page, limit, dateField, numberSearch, searchLastFour);
         } else {
-          result = await SaleService.findByAgentPaginated(parseInt(agentId), page, limit);
+          result = await SaleService.findByAgentPaginated(parseInt(agentId), page, limit, numberSearch, searchLastFour);
         }
       } else {
         // Show all sales when no agentId provided
         if (status && dateFilter) {
-          result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit, dateField);
+          result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit, dateField, numberSearch, searchLastFour);
         } else if (status) {
-          result = await SaleService.findByStatusPaginated(status, page, limit);
+          result = await SaleService.findByStatusPaginated(status, page, limit, numberSearch, searchLastFour);
         } else if (dateFilter) {
-          result = await SaleService.findByDatePaginated(dateFilter, page, limit, dateField);
+          result = await SaleService.findByDatePaginated(dateFilter, page, limit, dateField, numberSearch, searchLastFour);
         } else {
-          result = await SaleService.findAllPaginated(page, limit);
+          result = await SaleService.findAllPaginated(page, limit, numberSearch, searchLastFour);
         }
       }
     } else if (user.role === 'supervisor') {
@@ -63,25 +65,25 @@ export async function GET(request) {
         
         // Get sales for specific agent
         if (status && dateFilter) {
-          result = await SaleService.findByAgentStatusAndDatePaginated(parseInt(agentId), status, dateFilter, page, limit, dateField);
+          result = await SaleService.findByAgentStatusAndDatePaginated(parseInt(agentId), status, dateFilter, page, limit, dateField, numberSearch, searchLastFour);
         } else if (status) {
-          result = await SaleService.findByAgentStatusPaginated(parseInt(agentId), status, page, limit);
+          result = await SaleService.findByAgentStatusPaginated(parseInt(agentId), status, page, limit, numberSearch, searchLastFour);
         } else if (dateFilter) {
-          result = await SaleService.findByAgentDatePaginated(parseInt(agentId), dateFilter, page, limit, dateField);
+          result = await SaleService.findByAgentDatePaginated(parseInt(agentId), dateFilter, page, limit, dateField, numberSearch, searchLastFour);
         } else {
-          result = await SaleService.findByAgentPaginated(parseInt(agentId), page, limit);
+          result = await SaleService.findByAgentPaginated(parseInt(agentId), page, limit, numberSearch, searchLastFour);
         }
       } else {
         // Show only supervisor's own sales when no agentId is provided
         // Get supervisor's own sales
         if (status && dateFilter) {
-          result = await SaleService.findByAgentStatusAndDatePaginated(user.id, status, dateFilter, page, limit, dateField);
+          result = await SaleService.findByAgentStatusAndDatePaginated(user.id, status, dateFilter, page, limit, dateField, numberSearch, searchLastFour);
         } else if (status) {
-          result = await SaleService.findByAgentStatusPaginated(user.id, status, page, limit);
+          result = await SaleService.findByAgentStatusPaginated(user.id, status, page, limit, numberSearch, searchLastFour);
         } else if (dateFilter) {
-          result = await SaleService.findByAgentDatePaginated(user.id, dateFilter, page, limit, dateField);
+          result = await SaleService.findByAgentDatePaginated(user.id, dateFilter, page, limit, dateField, numberSearch, searchLastFour);
         } else {
-          result = await SaleService.findByAgentPaginated(user.id, page, limit);
+          result = await SaleService.findByAgentPaginated(user.id, page, limit, numberSearch, searchLastFour);
         }
       }
     } else if (user.role === 'agent') {
@@ -95,25 +97,25 @@ export async function GET(request) {
       // This is more secure and efficient than fetching all sales and filtering
       // These methods ensure the agent can NEVER access other agents' sales
       if (status && effectiveDateFilter) {
-        result = await SaleService.findByAgentStatusAndDatePaginated(user.id, status, effectiveDateFilter, page, limit, effectiveDateField);
+        result = await SaleService.findByAgentStatusAndDatePaginated(user.id, status, effectiveDateFilter, page, limit, effectiveDateField, numberSearch, searchLastFour);
       } else if (status) {
-        result = await SaleService.findByAgentStatusPaginated(user.id, status, page, limit);
+        result = await SaleService.findByAgentStatusPaginated(user.id, status, page, limit, numberSearch, searchLastFour);
       } else if (effectiveDateFilter) {
-        result = await SaleService.findByAgentDatePaginated(user.id, effectiveDateFilter, page, limit, effectiveDateField);
+        result = await SaleService.findByAgentDatePaginated(user.id, effectiveDateFilter, page, limit, effectiveDateField, numberSearch, searchLastFour);
       } else {
         // Fallback: use agent-specific method without date filter (should not happen with effectiveDateFilter default)
-        result = await SaleService.findByAgentPaginated(user.id, page, limit);
+        result = await SaleService.findByAgentPaginated(user.id, page, limit, numberSearch, searchLastFour);
       }
     } else {
       // Default behavior for other roles or no role specified
       if (status && dateFilter) {
-        result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit, dateField);
+        result = await SaleService.findByStatusAndDatePaginated(status, dateFilter, page, limit, dateField, numberSearch, searchLastFour);
       } else if (status) {
-        result = await SaleService.findByStatusPaginated(status, page, limit);
+        result = await SaleService.findByStatusPaginated(status, page, limit, numberSearch, searchLastFour);
       } else if (dateFilter) {
-        result = await SaleService.findByDatePaginated(dateFilter, page, limit, dateField);
+        result = await SaleService.findByDatePaginated(dateFilter, page, limit, dateField, numberSearch, searchLastFour);
       } else {
-        result = await SaleService.findAllPaginated(page, limit);
+        result = await SaleService.findAllPaginated(page, limit, numberSearch, searchLastFour);
       }
     }
     

@@ -133,19 +133,26 @@ export default function Home() {
   const { filters, updateFilter } = useFilterStorage('homeFilters', {
     status: '',
     dateFilter: 'today',
-    dateField: 'created_at'
+    dateField: 'created_at',
+    numberSearch: '',
+    searchLastFour: false // Toggle for searching last 4 digits only
   });
   
   // Extract filter values
   const status = filters.status;
   const dateFilter = filters.dateFilter;
   const dateField = filters.dateField;
+  const numberSearch = filters.numberSearch;
+  const searchLastFour = filters.searchLastFour;
   
   // Other state
   const [currentDate, setCurrentDate] = useState(new Date());
   const [salesData, setSalesData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  
+  // Debounced number search state
+  const [debouncedNumberSearch, setDebouncedNumberSearch] = useState(numberSearch);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -260,7 +267,7 @@ export default function Home() {
   };
 
   // Fetch sales data from API
-  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage, dateFieldValue = dateField) => {
+  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage, dateFieldValue = dateField, numberSearchValue = numberSearch, searchLastFourValue = searchLastFour) => {
     setLoading(true);
     setError(null);
     try {
@@ -275,6 +282,10 @@ export default function Home() {
       if (statusFilter) params.append('status', statusFilter);
       params.append('dateFilter', effectiveDateFilter);
       params.append('dateField', effectiveDateField);
+      if (numberSearchValue) {
+        params.append('numberSearch', numberSearchValue);
+        params.append('searchLastFour', searchLastFourValue ? 'true' : 'false');
+      }
       
       // Add pagination parameters
       params.append('page', page.toString());
@@ -344,6 +355,17 @@ export default function Home() {
     }
   }, [user, showingSupervisorSales, selectedAgent]);
 
+  // Debounce number search - wait 500ms after user stops typing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedNumberSearch(numberSearch);
+    }, 500); // 500ms delay
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [numberSearch]);
+
   // Load sales data when user, filters, pagination, or supervisor view changes
   useEffect(() => {
     // Only fetch data if user is loaded and we have valid filters
@@ -352,17 +374,17 @@ export default function Home() {
     if (user.role === 'supervisor') {
       // Only fetch for supervisors if showingSupervisorSales is set (initialized)
       if (showingSupervisorSales !== undefined) {
-        fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField);
+        fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
       }
     } else if (user.role === 'admin') {
       // For admins, pass selectedUserId as agentId parameter
-      fetchSalesData(status, dateFilter, selectedUserId, currentPage, itemsPerPage, dateField);
+      fetchSalesData(status, dateFilter, selectedUserId, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
     } else {
       // For agents, fetch data directly (no supervisor dependencies)
-      fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField);
+      fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, status, dateFilter, dateField, currentPage, itemsPerPage, 
+  }, [user, status, dateFilter, dateField, currentPage, itemsPerPage, debouncedNumberSearch, searchLastFour,
       // Supervisor-specific dependencies only trigger for supervisors due to conditional logic above
       selectedAgent, showingSupervisorSales, selectedUserId]);
 
@@ -594,14 +616,32 @@ export default function Home() {
     updateFilter('status', e.target.value);
     setCurrentPage(1); // Reset to first page when changing filters
     // Fetch sales data with the new status filter
-    fetchSalesData(e.target.value, dateFilter, null, 1, itemsPerPage);
+    fetchSalesData(e.target.value, dateFilter, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
   };
 
   const clearStatus = () => {
     updateFilter('status', '');
     setCurrentPage(1); // Reset to first page when clearing filters
     // Fetch sales data without status filter
-    fetchSalesData('', dateFilter, null, 1, itemsPerPage);
+    fetchSalesData('', dateFilter, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+  };
+
+  const handleNumberSearchChange = (e) => {
+    const value = e.target.value.replace(/\D/g, ''); // Only allow digits
+    updateFilter('numberSearch', value);
+    setCurrentPage(1); // Reset to first page when changing search
+    // Note: Actual search will be triggered by debouncedNumberSearch via useEffect
+  };
+
+  const clearNumberSearch = () => {
+    updateFilter('numberSearch', '');
+    setDebouncedNumberSearch(''); // Immediately clear debounced value
+    setCurrentPage(1); // Reset to first page when clearing search
+  };
+
+  const handleSearchLastFourToggle = (e) => {
+    updateFilter('searchLastFour', e.target.checked);
+    setCurrentPage(1); // Reset to first page when changing search mode
   };
 
   const handleRefresh = () => {
@@ -768,6 +808,45 @@ export default function Home() {
                   Refresh
                 </button>
               <div className="flex gap-2">
+                {/* Number Search */}
+                <div className="min-w-[300px] flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Search by number..."
+                      value={numberSearch}
+                      onChange={handleNumberSearchChange}
+                      disabled={loading}
+                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                      maxLength={20}
+                    />
+                    {numberSearch && (
+                      <button
+                        onClick={clearNumberSearch}
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
+                        title="Clear number search"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  {numberSearch && numberSearch.length >= 4 && (
+                    <label className="flex items-center gap-2 px-1 py-1.5 bg-blue-50 border border-blue-200 rounded-md text-sm text-gray-700 cursor-pointer hover:bg-blue-100 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={searchLastFour}
+                        onChange={handleSearchLastFourToggle}
+                        disabled={loading}
+                        className="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                      <span className="font-medium">
+                        {numberSearch.length === 4 
+                          ? 'Search last 4 digits only' 
+                          : 'Search last 4 digits only (when 4 digits entered)'}
+                      </span>
+                    </label>
+                  )}
+                </div>
                 {/* User Filter (Admin only) */}
                 {user?.role === 'admin' && (
                   <div className="min-w-[200px] flex gap-2">
