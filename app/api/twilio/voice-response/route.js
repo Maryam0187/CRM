@@ -399,13 +399,18 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
       // Log the error but don't fail the call - the call can still proceed
     }
 
+    // Get status callback URL for Dial verb
+    const statusCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
+    
     // Generate TwiML to place caller in conference
     // Allow up to 5 participants (caller + multiple agents/admins)
     // startConferenceOnEnter="true" means conference starts when caller enters
+    // statusCallback: URL to receive status updates when call status changes
+    // statusCallbackEvent: Events to receive callbacks for
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice">Thank you for calling. Please hold while we connect you with an agent.</Say>
-  <Dial record="false" timeout="60" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">
+  <Dial record="false" timeout="60" timeLimit="3600" answerOnMedia="false" hangupOnStar="false" statusCallback="${statusCallbackUrl}" statusCallbackEvent="initiated ringing answered completed">
     <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" waitUrl="" waitMethod="POST" maxParticipants="5" muted="false" trim="do-not-trim">${conferenceName}</Conference>
   </Dial>
 </Response>`;

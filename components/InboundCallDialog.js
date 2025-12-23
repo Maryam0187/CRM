@@ -23,17 +23,28 @@ export default function InboundCallDialog({ notification, onClose, onMinimize })
   
   // Helper function to update call status from status data
   const updateCallStatusFromData = useCallback((statusData) => {
-    if (!statusData?.status) return;
+    if (!statusData?.status) {
+      console.warn('⚠️ updateCallStatusFromData: No status in data', statusData);
+      return;
+    }
     
     const newStatus = statusData.status;
+    console.log('📞 Updating call status:', {
+      newStatus,
+      callSid: notification?.callSid,
+      previousStatus: callStatus
+    });
+    
     setCallStatus(prevStatus => {
       // If call is in-progress, update status
       if (newStatus === 'in-progress') {
+        console.log('📞 Call is now in-progress');
         return 'in-progress';
       }
       
       // If call ended after joining (was in-progress), mark as completed
       if (['completed', 'failed', 'canceled'].includes(newStatus) && prevStatus === 'in-progress') {
+        console.log('✅ Call completed after agent joined');
         return 'completed';
       }
       
@@ -42,13 +53,27 @@ export default function InboundCallDialog({ notification, onClose, onMinimize })
       if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(newStatus)) {
         // If it was never in-progress, it's a missed call
         if (prevStatus !== 'in-progress' && prevStatus !== 'completed' && prevStatus !== 'missed') {
+          console.log('❌ Call missed - customer ended before agent joined');
           return 'missed';
+        }
+      }
+      
+      // If status is completed but we haven't handled it yet, handle it
+      if (newStatus === 'completed' && prevStatus !== 'completed' && prevStatus !== 'missed') {
+        console.log('📞 Call completed, checking if missed or completed...');
+        // If it was never in-progress, it's missed
+        if (prevStatus !== 'in-progress') {
+          console.log('❌ Marking as missed (never was in-progress)');
+          return 'missed';
+        } else {
+          console.log('✅ Marking as completed (was in-progress)');
+          return 'completed';
         }
       }
       
       return prevStatus;
     });
-  }, []);
+  }, [notification?.callSid, callStatus]);
 
   // Listen to real-time call status updates via socket
   useEffect(() => {
@@ -59,6 +84,19 @@ export default function InboundCallDialog({ notification, onClose, onMinimize })
       // Only process updates for this specific call
       if (callStatusData?.callSid === notification.callSid) {
         console.log('📞 Real-time call status update received:', callStatusData.status);
+        console.log('📞 Full status data:', callStatusData);
+        
+        // Special logging for completed status
+        if (callStatusData.status === 'completed') {
+          console.log('✅ CALL COMPLETED - Customer ended the call');
+          console.log('📞 Completion details:', {
+            callSid: callStatusData.callSid,
+            duration: callStatusData.duration,
+            hangupCause: callStatusData.hangupCause,
+            direction: callStatusData.direction
+          });
+        }
+        
         updateCallStatusFromData(callStatusData);
       }
     };

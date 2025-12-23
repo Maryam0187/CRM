@@ -39,6 +39,19 @@ export async function POST(request) {
     if (callStatus === 'ringing') {
       console.log('🔔 RINGING STATUS DETECTED - This should trigger the ringing state!');
     }
+    
+    // Additional debugging for completed status (when customer ends call)
+    if (callStatus === 'completed') {
+      console.log('✅ CALL COMPLETED STATUS DETECTED - Customer ended the call!');
+      console.log('📞 Call completion details:', {
+        callSid,
+        duration,
+        hangupCause,
+        direction,
+        endTime,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     // Find the call log by call SID
     const callLog = await sequelizeDb.CallLog.findOne({
