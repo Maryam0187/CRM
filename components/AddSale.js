@@ -252,6 +252,7 @@ export default function AddSale() {
         { label: 'SSN Number Status', value: saleForm.ssn_number_status },
         { label: 'Carrier', value: saleForm.carrier },
         { label: 'Basic Package', value: saleForm.basicPackage },
+        { label: 'New Package', value: saleForm.newPackage },
         { label: 'Basic Package Status', value: saleForm.basicPackageStatus },
         { label: '# of TV', value: saleForm.NoFTV },
         { label: 'Account Holder', value: saleForm.AccHolder },
@@ -266,6 +267,7 @@ export default function AddSale() {
         { label: 'Last Payment', value: saleForm.lastPayment },
         { label: 'Last Payment Date', value: saleForm.lastPaymentDate },
         { label: 'Breakdown', value: saleForm.breakdown },
+        { label: 'Additional Info', value: saleForm.additionalInfo },
         { label: 'Notes', value: saleForm.notes },
         { label: 'Balance', value: saleForm.balance },
         { label: 'Due On', value: saleForm.dueonDate }
@@ -299,6 +301,7 @@ export default function AddSale() {
     carrier: '',
     basicPackage: '',
     basicPackageStatus: '',
+    newPackage: '',
     NoFTV: '',
     AccHolder: '',
     AccNumber: '',
@@ -312,6 +315,7 @@ export default function AddSale() {
     lastPayment: '',
     lastPaymentDate: '',
     breakdown: '',
+    additionalInfo: '',
     notes: '',
     balance: '',
     dueonDate: '',
@@ -523,6 +527,7 @@ export default function AddSale() {
           carrier: sale.carrier || '',
           basicPackage: sale.basicPackage || '',
           basicPackageStatus: sale.basicPackageStatus || '',
+          newPackage: sale.newPackage || '',
           NoFTV: sale.noOfTv || '',
           AccHolder: sale.accountHolder || '',
           AccNumber: sale.accountNumber || '',
@@ -536,6 +541,7 @@ export default function AddSale() {
           lastPayment: sale.lastPayment || '',
           lastPaymentDate: sale.lastPaymentDate || '',
           breakdown: sale.breakdown || '',
+          additionalInfo: sale.additionalInfo || '',
           notes: sale.notes || '',
           balance: sale.balance || '',
           dueonDate: sale.dueOnDate || '',
@@ -2109,6 +2115,7 @@ Room: `;
         carrier: sanitizeValue(saleForm.carrier),
         basicPackage: sanitizeValue(saleForm.basicPackage),
         basicPackageStatus: sanitizeEnumValue(saleForm.basicPackageStatus),
+        newPackage: sanitizeValue(saleForm.newPackage),
         NoFTV: sanitizeValue(saleForm.NoFTV),
         AccHolder: sanitizeValue(saleForm.AccHolder),
         AccNumber: sanitizeValue(saleForm.AccNumber),
@@ -2123,6 +2130,7 @@ Room: `;
         balance: sanitizeValue(saleForm.balance),
         dueOnDate: saleForm.dueOnDate ? new Date(saleForm.dueOnDate).toISOString() : null,
         breakdown: sanitizeValue(saleForm.breakdown),
+        additionalInfo: sanitizeValue(saleForm.additionalInfo),
         notes: (() => {
           const notesValue = saleForm.notes && saleForm.notes.trim() !== '' ? saleForm.notes : null;
           return notesValue;
@@ -2728,6 +2736,7 @@ Room: `;
         carrier: sanitizeValue(saleForm.carrier),
         basicPackage: sanitizeValue(saleForm.basicPackage),
         basicPackageStatus: sanitizeEnumValue(saleForm.basicPackageStatus),
+        newPackage: sanitizeValue(saleForm.newPackage),
         noOfTv: sanitizeValue(saleForm.NoFTV),
         noOfReceiver: sanitizeValue(saleForm.NoReceiver),
         accountHolder: sanitizeValue(saleForm.AccHolder),
@@ -2743,6 +2752,7 @@ Room: `;
         balance: sanitizeValue(saleForm.balance),
         dueOnDate: sanitizeValue(saleForm.dueonDate),
         breakdown: sanitizeValue(saleForm.breakdown),
+        additionalInfo: sanitizeValue(saleForm.additionalInfo),
         notes: (() => {
           // Use notes from additionalData if available (from appointment modal), otherwise use saleForm.notes
           const notesSource = additionalData.notes !== undefined ? additionalData.notes : saleForm.notes;
@@ -4604,36 +4614,58 @@ Room: `;
                   </div>
                 </div>
 
-                {/* Basic Package */}
-                <div>
-                  <label htmlFor="basicPackage" className="block mb-2 text-sm font-medium text-gray-900">
-                    Basic Package
-                  </label>
-                  <input
-                    type="text"
-                    id="basicPackage"
-                    value={saleForm.basicPackage}
-                    onChange={(e) => handleSaleFormChange('basicPackage', e.target.value)}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                    placeholder="Enter Basic Package"
-                  />
-                </div>
+                {/* Basic Package, Package Status, and New Package (conditional) in one row */}
+                <div className="md:col-span-2">
+                  <div className={`grid gap-6 ${saleForm.basicPackageStatus !== 'same' ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+                    {/* Basic Package */}
+                    <div>
+                      <label htmlFor="basicPackage" className="block mb-2 text-sm font-medium text-gray-900">
+                        Basic Package
+                      </label>
+                      <input
+                        type="text"
+                        id="basicPackage"
+                        value={saleForm.basicPackage}
+                        onChange={(e) => handleSaleFormChange('basicPackage', e.target.value)}
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                        placeholder="Enter Basic Package"
+                      />
+                    </div>
 
-                {/* Package Status */}
-                <div>
-                  <label className="block mb-2 text-sm font-medium text-gray-900">
-                    Package status
-                  </label>
-                  <select
-                    value={saleForm.basicPackageStatus}
-                    onChange={(e) => handleSaleFormChange('basicPackageStatus', e.target.value)}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                  >
-                    <option value="">Select Status</option>
-                    {packageStatusOptions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.text}</option>
-                    ))}
-                  </select>
+                    {/* Package Status */}
+                    <div>
+                      <label className="block mb-2 text-sm font-medium text-gray-900">
+                        Package status
+                      </label>
+                      <select
+                        value={saleForm.basicPackageStatus}
+                        onChange={(e) => handleSaleFormChange('basicPackageStatus', e.target.value)}
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                      >
+                        <option value="">Select Status</option>
+                        {packageStatusOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.text}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* New Package - Only show when status is NOT "same" */}
+                    {saleForm.basicPackageStatus !== 'same' && (
+                      <div>
+                        <label htmlFor="newPackage" className="block mb-2 text-sm font-medium text-gray-900">
+                          New Package
+                        </label>
+                        <input
+                          type="text"
+                          id="newPackage"
+                          value={saleForm.newPackage}
+                          onChange={(e) => handleSaleFormChange('newPackage', e.target.value)}
+                          className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                          placeholder="Enter New Package"
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Number of TV */}
@@ -4901,6 +4933,21 @@ Room: `;
                   onChange={(e) => handleSaleFormChange('breakdown', e.target.value)}
                   className="block p-2.5 w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
                   placeholder="Breakdown here"
+                />
+              </div>
+
+              {/* Additional Info */}
+              <div>
+                <label htmlFor="additionalInfo" className="block mb-2 text-sm font-medium text-gray-900">
+                  Additional Info
+                </label>
+                <textarea
+                  id="additionalInfo"
+                  rows={8}
+                  value={saleForm.additionalInfo}
+                  onChange={(e) => handleSaleFormChange('additionalInfo', e.target.value)}
+                  className="block p-2.5 w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Additional information here"
                 />
               </div>
 

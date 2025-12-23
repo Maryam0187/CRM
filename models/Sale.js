@@ -77,6 +77,11 @@ module.exports = (sequelize) => {
       allowNull: true,
       field: 'basic_package_status'
     },
+    newPackage: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      field: 'new_package'
+    },
     noOfTv: {
       type: DataTypes.INTEGER,
       allowNull: true,
@@ -147,6 +152,11 @@ module.exports = (sequelize) => {
     breakdown: {
       type: DataTypes.TEXT,
       allowNull: true
+    },
+    additionalInfo: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: 'additional_info'
     },
     notes: {
       type: DataTypes.TEXT,
