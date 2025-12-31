@@ -541,8 +541,7 @@ export default function GlobalWebCallInterface() {
                 callConnected();
               }
               
-              // Update call status to 'in-progress' when call connects
-              // But first verify the call hasn't ended on the server
+              // Check if call has ended on the server
               const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
               if (currentCallSid) {
                 const actualStatusData = getCallStatus(currentCallSid);
@@ -557,8 +556,19 @@ export default function GlobalWebCallInterface() {
                 }
               }
               
-              // Only set to in-progress if call is still active
-              updateCallStatus('in-progress');
+              // For inbound calls: customer is already in conference, so set to in-progress when agent joins
+              // For outbound calls: wait for Twilio to report customer answered (status will come from callbacks)
+              const isInboundCall = conferenceName && conferenceName.startsWith('inbound-');
+              if (isInboundCall) {
+                // Inbound: customer is already waiting, so when agent joins, call is in-progress
+                console.log('📞 Inbound call - agent joined, setting status to in-progress');
+                updateCallStatus('in-progress');
+              } else {
+                // Outbound: agent connected to conference, but customer may not have answered yet
+                // Don't set to in-progress here - wait for Twilio status callback to report customer answered
+                console.log('📞 Outbound call - agent connected, waiting for customer to answer (status will come from Twilio)');
+                // Status will be updated via socket/callbacks when customer actually answers
+              }
             } else {
               console.log('✅ Already connected, skipping onAccept callback');
             }

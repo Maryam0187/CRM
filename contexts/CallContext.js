@@ -84,8 +84,9 @@ export function CallProvider({ children }) {
   const callConnected = useCallback(() => {
     setIsWebCallConnected(true);
     setIsCalling(false);
-    startTimer();
-  }, [startTimer]);
+    // Note: Timer is NOT started here - it starts in updateCallStatus when status becomes 'in-progress'
+    // This ensures timer only starts when customer answers (for outbound calls), not when agent connects
+  }, []);
 
   // End call
   const endCall = useCallback(() => {

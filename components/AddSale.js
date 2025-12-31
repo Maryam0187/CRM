@@ -733,18 +733,37 @@ export default function AddSale() {
   useEffect(() => {
     // Track previous status to detect transitions
     const prevStatus = prevCallStatusRef.current;
-    prevCallStatusRef.current = callStatus;
+    const currentStatus = callStatus;
     
-    // If call status transitions to an end state, set callJustEnded to true
-    if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled' || 
-        callStatus === 'busy' || callStatus === 'no-answer' || callStatus === 'voicemail') {
+    // Define active states (call is ongoing)
+    const activeStates = ['in-progress', 'ringing', 'connecting'];
+    // Define end states (call has ended)
+    const endStates = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+    
+    // Detect transition from active state to end state or null
+    const wasActive = prevStatus && activeStates.includes(prevStatus);
+    const isEnded = currentStatus && endStates.includes(currentStatus);
+    // Also detect when status goes from active/null to null (endCall was called)
+    const transitionedToNull = prevStatus && activeStates.includes(prevStatus) && currentStatus === null;
+    
+    if (isEnded || transitionedToNull) {
+      // Call has ended - set callJustEnded to true
+      // This handles:
+      // 1. Direct end state (completed, failed, etc.)
+      // 2. Transition from active to null (endCall was called after status was set)
       setCallJustEnded(true);
-    } else if (callStatus === 'in-progress' || callStatus === 'ringing' || callStatus === 'connecting') {
-      // Reset when new call starts
+      console.log('📞 Call ended - setting callJustEnded to true', { prevStatus, currentStatus, isEnded, transitionedToNull });
+    } else if (currentStatus && activeStates.includes(currentStatus)) {
+      // New call is starting - reset callJustEnded
       setCallJustEnded(false);
     }
+    
+    // Update ref AFTER processing (so we can detect transitions next time)
+    prevCallStatusRef.current = currentStatus;
+    
     // Note: We don't reset callJustEnded when callStatus becomes null (which happens in endCall)
     // This ensures the UI stays highlighted even after endCall clears the status
+    // The callJustEnded flag will remain true until a new call starts
   }, [callStatus]);
 
   // Handle call completion
