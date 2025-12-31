@@ -3,6 +3,18 @@ import sequelizeDb from '../../../../lib/sequelize-db';
 import socketManager from '../../../../lib/socket';
 import { Op } from 'sequelize';
 
+// Handle GET requests (for Twilio webhook validation/health checks)
+export async function GET(request) {
+  return NextResponse.json(
+    { 
+      success: true, 
+      message: 'Call status callback endpoint is active',
+      timestamp: new Date().toISOString()
+    },
+    { status: 200 }
+  );
+}
+
 export async function POST(request) {
   try {
     const formData = await request.formData();
@@ -60,9 +72,11 @@ export async function POST(request) {
 
     if (!callLog) {
       console.error('❌ Call log not found for SID:', callSid);
+      // Return 200 OK to acknowledge receipt of webhook (Twilio requires successful response)
+      // Log the error but don't fail the webhook callback
       return NextResponse.json(
-        { success: false, message: 'Call log not found' },
-        { status: 404 }
+        { success: false, message: 'Call log not found - webhook received but call not in system' },
+        { status: 200 }
       );
     }
 

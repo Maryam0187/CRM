@@ -78,7 +78,7 @@ async function handleJoinConference(request) {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial record="false" answerOnMedia="false">
-    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST" maxParticipants="2" muted="false">${safeConferenceName}</Conference>
+    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" maxParticipants="2" muted="false">${safeConferenceName}</Conference>
   </Dial>
 </Response>`;
 

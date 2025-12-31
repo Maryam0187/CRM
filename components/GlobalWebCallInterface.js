@@ -92,6 +92,7 @@ export default function GlobalWebCallInterface() {
   const webCallInterfaceRef = useRef(null);
   const ringingAudioContextRef = useRef(null); // For Web Audio API
   const ringingOscillatorsRef = useRef([]); // For storing oscillators
+  const callStatusRef = useRef(callStatus); // Track current call status for interval checks
 
   // Fetch Twilio token
   const fetchToken = async () => {
@@ -1028,11 +1029,36 @@ export default function GlobalWebCallInterface() {
     }
   }, [callStatus, isConnected, isWebCallConnected, disconnectCall, endCall]);
 
+  // Update callStatus ref whenever callStatus changes
+  useEffect(() => {
+    callStatusRef.current = callStatus;
+  }, [callStatus]);
+
   // Play/stop default Twilio ringing sound
   useEffect(() => {
     let ringingInterval = null;
     
-    if (callStatus === 'ringing') {
+    // Stop any existing ringing sound first (cleanup from previous status)
+    const stopRingingSound = () => {
+      if (ringingInterval) {
+        clearInterval(ringingInterval);
+        ringingInterval = null;
+      }
+      if (ringingOscillatorsRef.current.length > 0) {
+        ringingOscillatorsRef.current.forEach(osc => {
+          try {
+            osc.stop();
+            osc.disconnect();
+          } catch (e) {
+            // Ignore errors
+          }
+        });
+        ringingOscillatorsRef.current = [];
+      }
+    };
+    
+    // Only play ringing sound if status is 'ringing' AND not connected
+    if (callStatus === 'ringing' && !isWebCallConnected && !isConnected) {
       // Create Web Audio API context for standard phone ringtone
       if (!ringingAudioContextRef.current) {
         ringingAudioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -1048,6 +1074,12 @@ export default function GlobalWebCallInterface() {
       // Standard phone ringtone: alternating between 440Hz and 480Hz
       // Pattern: 400ms sound, 200ms silence, 400ms sound, 2000ms silence (repeat)
       const playRingtone = () => {
+        // Check current status using ref (to avoid stale closure)
+        if (callStatusRef.current !== 'ringing' || isWebCallConnected || isConnected) {
+          stopRingingSound();
+          return;
+        }
+        
         // Stop any existing oscillators
         ringingOscillatorsRef.current.forEach(osc => {
           try {
@@ -1097,47 +1129,23 @@ export default function GlobalWebCallInterface() {
       
       // Then repeat: 400ms sound, 200ms silence, 400ms sound, 2000ms silence
       ringingInterval = setInterval(() => {
-        if (callStatus === 'ringing') {
+        // Check current status using ref to avoid stale closure
+        if (callStatusRef.current === 'ringing' && !isWebCallConnected && !isConnected) {
           playRingtone();
+        } else {
+          stopRingingSound();
         }
       }, 3000); // Total cycle: 400ms + 200ms + 400ms + 2000ms = 3000ms
     } else {
-      // Stop ringing when status changes
-      if (ringingInterval) {
-        clearInterval(ringingInterval);
-        ringingInterval = null;
-      }
-      if (ringingOscillatorsRef.current.length > 0) {
-        ringingOscillatorsRef.current.forEach(osc => {
-          try {
-            osc.stop();
-            osc.disconnect();
-          } catch (e) {
-            // Ignore errors
-          }
-        });
-        ringingOscillatorsRef.current = [];
-      }
+      // Stop ringing when status changes to anything other than 'ringing' or when connected
+      stopRingingSound();
     }
     
     return () => {
       // Cleanup on unmount or status change
-      if (ringingInterval) {
-        clearInterval(ringingInterval);
-      }
-      if (ringingOscillatorsRef.current.length > 0) {
-        ringingOscillatorsRef.current.forEach(osc => {
-          try {
-            osc.stop();
-            osc.disconnect();
-          } catch (e) {
-            // Ignore errors
-          }
-        });
-        ringingOscillatorsRef.current = [];
-      }
+      stopRingingSound();
     };
-  }, [callStatus]);
+  }, [callStatus, isWebCallConnected, isConnected]);
 
   // Handle hangup
   const handleHangup = async () => {
@@ -1205,11 +1213,12 @@ export default function GlobalWebCallInterface() {
                     callStatus === 'completed' ? 'bg-gray-500/30 text-gray-100' :
                     'bg-red-500/30 text-red-100'
                   }`}>
-                    {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) && 'In Progress'}
-                    {callStatus === 'ringing' && 'Ringing'}
-                    {callStatus === 'completed' && 'Completed'}
-                    {callStatus && !['in-progress', 'ringing', 'completed'].includes(callStatus) && callStatus}
-                    {!callStatus && (isWebCallConnected || isConnected) && 'In Progress'}
+                    {/* Prioritize connected/in-progress status over ringing */}
+                    {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) ? 'In Progress' :
+                     callStatus === 'ringing' ? 'Ringing' :
+                     callStatus === 'completed' ? 'Completed' :
+                     callStatus && !['in-progress', 'ringing', 'completed'].includes(callStatus) ? callStatus :
+                     !callStatus && (isWebCallConnected || isConnected) ? 'In Progress' : ''}
                   </div>
                 )}
                 {/* Timer in Header - only show when in-progress */}

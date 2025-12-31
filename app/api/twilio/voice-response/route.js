@@ -67,13 +67,12 @@ async function handleVoiceResponse(request) {
         console.log(`📞 Routing to conference: ${conferenceName}`);
         
         // Place customer in conference room
-        // Agent should already be connected via Voice SDK (connected immediately when call initiated)
         // Recording is DISABLED
-        // Optimize for immediate connection - no waitUrl, no beep, connect instantly
         // answerOnMedia="false" = connect immediately when answered, don't wait for media
-        // startConferenceOnEnter="true" = conference already started by agent (first participant)
+        // startConferenceOnEnter="false" = conference starts when BOTH participants are present (prevents hold music while waiting for agent)
+        // When agent joins with startConferenceOnEnter="true", the conference will start
         twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
-        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false" waitUrl="" waitMethod="POST" maxParticipants="2" muted="false" trim="do-not-trim">${conferenceName}</Conference>`;
+        twiml += `\n    <Conference startConferenceOnEnter="false" endConferenceOnExit="true" beep="false" maxParticipants="2" muted="false" trim="do-not-trim">${conferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
         // If agent has phone, we could call them separately to join the conference
@@ -404,14 +403,14 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
     
     // Generate TwiML to place caller in conference
     // Allow up to 5 participants (caller + multiple agents/admins)
-    // startConferenceOnEnter="true" means conference starts when caller enters
+    // startConferenceOnEnter="false" means conference starts when BOTH participants are present (prevents hold music while waiting)
     // statusCallback: URL to receive status updates when call status changes
     // statusCallbackEvent: Events to receive callbacks for
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice">Thank you for calling. Please hold while we connect you with an agent.</Say>
   <Dial record="false" timeout="60" timeLimit="3600" answerOnMedia="false" hangupOnStar="false" statusCallback="${statusCallbackUrl}" statusCallbackEvent="initiated ringing answered completed">
-    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" waitUrl="" waitMethod="POST" maxParticipants="5" muted="false" trim="do-not-trim">${conferenceName}</Conference>
+    <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="false" maxParticipants="5" muted="false" trim="do-not-trim">${conferenceName}</Conference>
   </Dial>
 </Response>`;
 

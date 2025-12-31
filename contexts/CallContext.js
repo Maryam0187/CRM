@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useRef, useCallback } from 'react';
+import { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
 import apiClient from '../lib/apiClient';
 
 const CallContext = createContext(undefined);
@@ -31,6 +31,12 @@ export function CallProvider({ children }) {
   const timerIntervalRef = useRef(null);
   const muteSyncIntervalRef = useRef(null);
   const webCallInterfaceRef = useRef(null);
+  const callStatusRef = useRef(null); // Track current call status for priority checks
+
+  // Keep callStatusRef in sync with callStatus state
+  useEffect(() => {
+    callStatusRef.current = callStatus;
+  }, [callStatus]);
 
   // Start timer
   const startTimer = useCallback(() => {
@@ -103,6 +109,7 @@ export function CallProvider({ children }) {
     setConferenceName(null);
     setCallMetadata(null);
     setCallStatus(null);
+    callStatusRef.current = null;
     
     // Hide interface after delay
     setTimeout(() => {
@@ -113,6 +120,16 @@ export function CallProvider({ children }) {
 
   // Update call status
   const updateCallStatus = useCallback((status) => {
+    // Prioritize 'in-progress' over 'ringing' - once call is in-progress, don't go back to ringing
+    const currentStatus = callStatusRef.current;
+    
+    // If we're already in-progress and new status is ringing, ignore the ringing status
+    if (currentStatus === 'in-progress' && status === 'ringing') {
+      console.log('⚠️ Ignoring ringing status - call is already in-progress');
+      return; // Don't update status
+    }
+    
+    // Update the state (ref will be updated by useEffect)
     setCallStatus(status);
     
     // Start timer when call goes to ringing (not wait for in-progress)
