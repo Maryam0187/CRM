@@ -3,23 +3,264 @@ import sequelizeDb from '../../../../lib/sequelize-db';
 import socketManager from '../../../../lib/socket';
 import { Op } from 'sequelize';
 
-// Handle GET requests (for Twilio webhook validation/health checks)
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Derive correct call status from Twilio data
+ */
+function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, existingCallLog) {
+  let derivedStatus = 'queued';
+  
+  switch (callStatus) {
+    case 'ringing':
+      derivedStatus = 'ringing';
+      break;
+      
+    case 'in-progress':
+      const existingTwilioData = existingCallLog?.twilioData || {};
+      const existingAnswerTime = existingTwilioData.answerTime || null;
+      const existingDuration = existingCallLog?.duration ? parseInt(existingCallLog.duration) : 0;
+      const hasDuration = callDuration > 0 || existingDuration > 0;
+      const hasAnswerTime = answerTime || existingAnswerTime;
+      
+      if (hasAnswerTime || answeredBy === 'human' || hasDuration) {
+        derivedStatus = 'in-progress';
+      } else {
+        derivedStatus = 'ringing';
+      }
+      break;
+      
+    case 'no-answer':
+      derivedStatus = 'no-answer';
+      break;
+      
+    case 'completed':
+      derivedStatus = callDuration > 0 ? 'completed' : 'no-answer';
+      break;
+      
+    case 'busy':
+      derivedStatus = 'busy';
+      break;
+      
+    case 'failed':
+      derivedStatus = 'failed';
+      break;
+      
+    case 'canceled':
+      derivedStatus = 'canceled';
+      break;
+      
+    case 'initiated':
+    case 'queued':
+      derivedStatus = 'queued';
+      break;
+      
+    default:
+      derivedStatus = 'queued';
+  }
+  
+  return derivedStatus;
+}
+
+/**
+ * Find or create parent call log
+ */
+async function findOrCreateParentCall(parentCallSid, callData) {
+  if (!parentCallSid) {
+    return null;
+  }
+  
+  let parentCallLog = await sequelizeDb.CallLog.findOne({
+    where: { callSid: parentCallSid }
+  });
+  
+  if (!parentCallLog) {
+    parentCallLog = await sequelizeDb.CallLog.create({
+      callSid: parentCallSid,
+      customerId: callData.customerId || null,
+      saleId: callData.saleId || null,
+      agentId: callData.agentId || null,
+      direction: callData.direction || 'outbound',
+      fromNumber: callData.from || 'unknown',
+      toNumber: callData.to || 'unknown',
+      status: 'queued',
+      callPurpose: callData.callPurpose || 'follow_up',
+      twilioData: {
+        callSid: parentCallSid,
+        isParentCall: true,
+        createdAt: new Date().toISOString()
+      }
+    });
+  }
+  
+  return parentCallLog;
+}
+
+/**
+ * Find or create call log (handles both parent and child calls)
+ */
+async function findOrCreateCallLog(callSid, parentCallLog, callData) {
+  let callLog = await sequelizeDb.CallLog.findOne({
+    where: { callSid }
+  });
+  
+  if (!callLog) {
+    // Determine if this is a client call
+    const isClientCall = callData.from && callData.from.startsWith('client:');
+    
+    callLog = await sequelizeDb.CallLog.create({
+      callSid,
+      customerId: parentCallLog?.customerId || callData.customerId || null,
+      saleId: parentCallLog?.saleId || callData.saleId || null,
+      agentId: parentCallLog?.agentId || callData.agentId || null,
+      direction: callData.direction || parentCallLog?.direction || 'outbound',
+      fromNumber: callData.from || parentCallLog?.fromNumber || 'unknown',
+      toNumber: callData.to || parentCallLog?.toNumber || 'unknown',
+      status: 'queued',
+      callPurpose: parentCallLog?.callPurpose || callData.callPurpose || 'follow_up',
+      twilioData: {
+        callSid,
+        parentCallSid: parentCallLog?.callSid || null,
+        isChildCall: !!parentCallLog,
+        isClientCall: isClientCall,
+        isParentCall: !parentCallLog && !isClientCall,
+        createdAt: new Date().toISOString()
+      }
+    });
+  } else {
+    // Update parentCallSid in twilioData if not set
+    const twilioData = callLog.twilioData || {};
+    if (!twilioData.parentCallSid && parentCallLog) {
+      await callLog.update({
+        twilioData: {
+          ...twilioData,
+          parentCallSid: parentCallLog.callSid,
+          isChildCall: true
+        }
+      });
+    }
+  }
+  
+  return callLog;
+}
+
+/**
+ * Handle voicemail detection and auto-hangup
+ */
+async function handleVoicemail(callSid) {
+  const { getClient } = require('../../../../lib/twilio');
+  const client = getClient();
+  
+  setTimeout(async () => {
+    try {
+      await client.calls(callSid).update({ status: 'completed' });
+    } catch (err) {
+      console.error('Error hanging up voicemail:', err);
+    }
+  }, 30000);
+}
+
+/**
+ * Handle no-answer: disconnect immediately
+ */
+async function handleNoAnswer(callSid) {
+  const { getClient } = require('../../../../lib/twilio');
+  const client = getClient();
+  
+  try {
+    await client.calls(callSid).update({ status: 'completed' });
+  } catch (err) {
+    console.error('Error disconnecting no-answer:', err);
+  }
+}
+
+/**
+ * Update agent status based on call status
+ */
+async function updateAgentStatus(callLog, callStatus, duration) {
+  if (!callLog.agentId) {
+    return;
+  }
+  
+  const agent = await sequelizeDb.User.findByPk(callLog.agentId);
+  if (!agent) {
+    return;
+  }
+  
+  if (callStatus === 'in-progress' && agent.callStatus !== 'busy') {
+    await agent.update({ callStatus: 'busy' });
+  } else if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(callStatus)) {
+    const activeCalls = await sequelizeDb.CallLog.count({
+      where: {
+        agentId: callLog.agentId,
+        callSid: { [Op.ne]: callLog.callSid },
+        status: 'in-progress'
+      }
+    });
+    
+    if (activeCalls === 0) {
+      const updateData = { callStatus: 'available' };
+      if (callStatus === 'completed' && duration) {
+        updateData.totalCallTime = (agent.totalCallTime || 0) + parseInt(duration);
+      }
+      await agent.update(updateData);
+    }
+  }
+}
+
+/**
+ * Update related records (customer, sale)
+ */
+async function updateRelatedRecords(callLog, duration) {
+  if (!duration || duration <= 0) {
+    return;
+  }
+  
+  if (callLog.customerId) {
+    await sequelizeDb.Customer.update(
+      { updatedAt: new Date() },
+      { where: { id: callLog.customerId } }
+    );
+  }
+  
+  if (callLog.saleId) {
+    await sequelizeDb.Sale.update(
+      { updatedAt: new Date() },
+      { where: { id: callLog.saleId } }
+    );
+  }
+}
+
+/**
+ * Broadcast status update via Socket.IO
+ */
+function broadcastStatusUpdate(callSid, callStatusData, callLog) {
+  if (callLog.agentId) {
+    socketManager.sendCallStatusToAgent(callLog.agentId, callSid, callStatusData);
+  }
+  socketManager.sendCallStatusToSupervisors(callSid, callStatusData);
+  socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, callStatusData);
+  socketManager.sendCallStatusUpdate(callSid, callStatusData);
+}
+
+// ============================================================================
+// MAIN ROUTE HANDLERS
+// ============================================================================
+
 export async function GET(request) {
-  return NextResponse.json(
-    { 
-      success: true, 
-      message: 'Call status callback endpoint is active',
-      timestamp: new Date().toISOString()
-    },
-    { status: 200 }
-  );
+  return NextResponse.json({
+    success: true,
+    message: 'Call status callback endpoint is active',
+    timestamp: new Date().toISOString()
+  }, { status: 200 });
 }
 
 export async function POST(request) {
   try {
+    // Extract form data
     const formData = await request.formData();
-    
-    // Extract call data from Twilio webhook
     const callSid = formData.get('CallSid');
     const callStatus = formData.get('CallStatus');
     const direction = formData.get('Direction');
@@ -30,152 +271,50 @@ export async function POST(request) {
     const endTime = formData.get('EndTime');
     const answerTime = formData.get('AnswerTime');
     const hangupCause = formData.get('HangupCause');
-    const answeredBy = formData.get('AnsweredBy'); // AMD result: 'human', 'machine', or 'unknown'
-
-    console.log('📞 Call status callback received:', {
-      callSid,
-      callStatus,
-      direction,
-      from,
-      to,
-      duration,
-      startTime,
-      endTime,
-      answerTime,
-      hangupCause,
-      answeredBy,
-      timestamp: new Date().toISOString()
-    });
+    const answeredBy = formData.get('AnsweredBy');
+    const parentCallSid = formData.get('ParentCallSid');
     
-    // Additional debugging for ringing status
-    if (callStatus === 'ringing') {
-      console.log('🔔 RINGING STATUS DETECTED - This should trigger the ringing state!');
-    }
-    
-    // Additional debugging for completed status (when customer ends call)
-    if (callStatus === 'completed') {
-      console.log('✅ CALL COMPLETED STATUS DETECTED - Customer ended the call!');
-      console.log('📞 Call completion details:', {
-        callSid,
-        duration,
-        hangupCause,
-        direction,
-        endTime,
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Find the call log by call SID
-    const callLog = await sequelizeDb.CallLog.findOne({
-      where: { callSid }
-    });
-
-    if (!callLog) {
-      // This can happen for several reasons:
-      // 1. Dial calls - Twilio creates child calls for <Dial> verbs, these have different SIDs
-      // 2. Calls initiated outside the system (Twilio console, other systems)
-      // 3. Race condition - callback arrived before call log was created (rare)
-      // 4. Failed call log creation (should have been logged earlier)
-      
-      console.warn('⚠️ Call log not found for SID:', {
-        callSid,
-        callStatus,
-        direction,
-        from,
-        to,
-        hangupCause,
-        message: 'This may be a Dial call, external call, or call log creation failed. Continuing without updating call log.'
-      });
-      
-      // Return 200 OK to acknowledge receipt of webhook (Twilio requires successful response)
-      // Log the warning but don't fail the webhook callback - this is expected for some cases
-      return NextResponse.json(
-        { 
-          success: false, 
-          message: 'Call log not found - webhook received but call not in system',
-          note: 'This may be a Dial call or call initiated outside the system'
-        },
-        { status: 200 }
-      );
-    }
-
-    // IMPORTANT: For outbound calls, only process status updates for the customer call
-    // The direction should be 'outbound-api' for the customer call we created
-    // Ignore callbacks from conference/Dial legs which might have different directions
-    if (callLog.direction === 'outbound' && direction && !direction.includes('outbound')) {
-      console.log('⚠️ Ignoring status callback - not from customer call leg:', {
-        callSid,
-        callStatus,
-        direction,
-        callLogDirection: callLog.direction,
-        message: 'This callback is likely from a conference/Dial leg, not the customer call'
-      });
-      // Return 200 OK but don't process this callback
+    if (!callSid) {
       return NextResponse.json({
         success: false,
-        message: 'Callback ignored - not from customer call leg',
-        note: 'This is likely a conference/Dial callback, not the customer call status'
-      }, { status: 200 });
+        message: 'Call SID is required'
+      }, { status: 400 });
     }
-
-    // Derive the actual call status based on Twilio data
-    // This ensures we get the correct status even when Twilio sends misleading status updates
-    let derivedStatus = 'queued'; // Default
     
-    // Parse duration if available
+    // Find or create parent call log if parentCallSid exists
+    let parentCallLog = null;
+    if (parentCallSid && parentCallSid !== callSid) {
+      parentCallLog = await findOrCreateParentCall(parentCallSid, {
+        from,
+        to,
+        direction,
+        customerId: null,
+        saleId: null,
+        agentId: null
+      });
+    }
+    
+    // Find or create call log (saves ALL calls including client calls and child calls)
+    const callLog = await findOrCreateCallLog(callSid, parentCallLog, {
+      from,
+      to,
+      direction,
+      customerId: null,
+      saleId: null,
+      agentId: null
+    });
+    
+    // Derive correct status
     const callDuration = duration ? parseInt(duration) : 0;
-    
-    if (callStatus === 'ringing') {
-      derivedStatus = 'ringing';
-    } else if (callStatus === 'in-progress') {
-      // For 'in-progress', verify customer actually answered
-      // Check if answeredBy is 'human' or if duration > 0 (call is actually connected)
-      if (answeredBy === 'human' || callDuration > 0 || answerTime) {
-        derivedStatus = 'in-progress'; // Customer actually answered
-        console.log('✅ Customer answered - in-progress confirmed', { answeredBy, callDuration, answerTime });
-      } else {
-        // Phone is still ringing, not actually answered
-        derivedStatus = 'ringing';
-        console.log('⚠️ Twilio reported in-progress but customer has not answered yet', { 
-          answeredBy, 
-          callDuration, 
-          answerTime,
-          message: 'Keeping status as ringing - phone still ringing'
-        });
-      }
-    } else if (callStatus === 'no-answer') {
-      derivedStatus = 'no-answer';
-    } else if (callStatus === 'completed') {
-      // For completed calls, check if it was actually answered
-      if (callDuration > 0) {
-        derivedStatus = 'completed'; // Call was answered and completed
-      } else {
-        derivedStatus = 'no-answer'; // Call completed without being answered (missed)
-        console.log('📞 Call completed without being answered - marking as no-answer', { callDuration });
-      }
-    } else if (callStatus === 'busy') {
-      derivedStatus = 'busy';
-    } else if (callStatus === 'failed') {
-      derivedStatus = 'failed';
-    } else if (callStatus === 'canceled') {
-      derivedStatus = 'canceled';
-    } else if (callStatus === 'initiated' || callStatus === 'queued') {
-      derivedStatus = 'queued';
-    }
-    
-    // Use derived status instead of direct mapping
-    const mappedStatus = derivedStatus;
-    
-    console.log('📞 Status derivation:', {
-      twilioStatus: callStatus,
-      derivedStatus: mappedStatus,
-      answeredBy,
+    const derivedStatus = deriveCallStatus(
+      callStatus,
       callDuration,
       answerTime,
-      previousStatus: callLog.status
-    });
-
-    // Prepare twilioData update - preserve existing data
+      answeredBy,
+      callLog
+    );
+    
+    // Prepare update data
     const existingTwilioData = callLog.twilioData || {};
     const twilioDataUpdate = {
       ...existingTwilioData,
@@ -188,245 +327,93 @@ export async function POST(request) {
       endTime,
       answerTime,
       hangupCause,
+      answeredBy,
+      parentCallSid: parentCallSid || existingTwilioData.parentCallSid,
       lastUpdated: new Date().toISOString()
     };
-
-    // Update call log with new status
+    
     const updateData = {
-      status: mappedStatus,
+      status: derivedStatus,
       duration: duration ? parseInt(duration) : null,
       twilioData: twilioDataUpdate,
       updatedAt: new Date()
     };
-
-    // IMPORTANT: Update the call log BEFORE checking for active calls
-    // This ensures the current call's status is updated before we count active calls
-    try {
-      await callLog.update(updateData);
-      
-      // Reload to verify the update succeeded
+    
+    // Update call log
+    await callLog.update(updateData);
+    await callLog.reload();
+    
+    if (callLog.status !== derivedStatus) {
+      await callLog.update({ status: derivedStatus });
       await callLog.reload();
-      
-      console.log(`✅ Call log ${callLog.id} (CallSid: ${callSid}) updated: status = ${callLog.status}, direction = ${direction}`);
-      
-      // Verify the status was actually updated
-      if (callLog.status !== mappedStatus) {
-        console.error(`❌ WARNING: Call log status update may have failed! Expected: ${mappedStatus}, Got: ${callLog.status}`);
-        // Force update the status
-        await callLog.update({ status: mappedStatus });
-        await callLog.reload();
-        console.log(`✅ Force-updated call log ${callLog.id} status to: ${callLog.status}`);
-      }
-    } catch (updateError) {
-      console.error(`❌ Error updating call log ${callLog.id}:`, updateError);
-      throw updateError;
     }
-
-    // Handle voicemail detection (AMD result) - after callLog is found and updated
+    
+    // Handle special cases
     if (answeredBy === 'machine' && callLog) {
-      console.log('📞 Voicemail detected via AMD - will auto-hangup after 30 seconds');
-      
-      // Update call log to mark as voicemail
-      const existingTwilioData = callLog.twilioData || {};
-      const twilioDataUpdate = {
-        ...existingTwilioData,
-        answeredBy: 'machine',
-        isVoicemail: true,
-        voicemailDetectedAt: new Date().toISOString()
-      };
-      
       await callLog.update({
         status: 'voicemail',
-        twilioData: twilioDataUpdate
-      });
-      
-      // Update mappedStatus for socket events
-      mappedStatus = 'voicemail';
-      
-      // Schedule auto-hangup after 30 seconds for voicemail
-      // Use Twilio API to update the call and hang it up after 30 seconds
-      const { getClient } = require('../../../../lib/twilio');
-      const client = getClient();
-      
-      // Schedule hangup after 30 seconds (regardless of current call status)
-      setTimeout(async () => {
-        try {
-          await client.calls(callSid).update({
-            status: 'completed'
-          });
-          console.log(`✅ Voicemail call ${callSid} auto-hung up after 30 seconds`);
-        } catch (err) {
-          console.error(`❌ Error auto-hanging up voicemail call ${callSid}:`, err);
+        twilioData: {
+          ...twilioDataUpdate,
+          answeredBy: 'machine',
+          isVoicemail: true,
+          voicemailDetectedAt: new Date().toISOString()
         }
-      }, 30000); // 30 seconds
+      });
+      await handleVoicemail(callSid);
     }
-
-    // Handle no-answer: disconnect call immediately
+    
     if (callStatus === 'no-answer' && callLog) {
-      console.log('📞 No-answer detected - disconnecting call immediately');
-      
-      const { getClient } = require('../../../../lib/twilio');
-      const client = getClient();
-      
-      // Disconnect the call immediately
-      try {
-        await client.calls(callSid).update({
-          status: 'completed'
-        });
-        console.log(`✅ No-answer call ${callSid} disconnected immediately`);
-      } catch (err) {
-        console.error(`❌ Error disconnecting no-answer call ${callSid}:`, err);
-      }
+      await handleNoAnswer(callSid);
     }
-
-    // Update agent status based on call status
-    if (callLog.agentId) {
-      const agent = await sequelizeDb.User.findByPk(callLog.agentId);
-      if (agent) {
-        // Set agent to busy ONLY when they join the call (in-progress)
-        if (callStatus === 'in-progress') {
-          if (agent.callStatus !== 'busy') {
-            await agent.update({ callStatus: 'busy' });
-            console.log(`📞 Agent ${callLog.agentId} status set to 'busy' - call in progress (agent joined)`);
-          }
-        }
-        // Reset agent status to available when call ends (if no other active calls)
-        else if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(callStatus)) {
-          // Verify that the call log was actually updated with the new status
-          await callLog.reload();
-          console.log(`✅ Verified call log ${callLog.id} status updated to: ${callLog.status}`);
-          
-          // Check if agent has other ACTIVE calls (only in-progress, not ringing)
-          // Agent can handle multiple ringing calls, but only one in-progress call
-          const activeInProgressCalls = await sequelizeDb.CallLog.count({
-            where: {
-              agentId: callLog.agentId,
-              callSid: { [Op.ne]: callSid }, // Exclude current call that just ended
-              status: 'in-progress' // Only count calls where agent is actually talking
-            }
-          });
-
-          // Log for debugging if there are active calls
-          if (activeInProgressCalls > 0) {
-            console.log(`⚠️ Agent ${callLog.agentId} still has ${activeInProgressCalls} active in-progress call(s), keeping status as 'busy'`);
-          }
-
-          // Only set to available if no other in-progress calls
-          if (activeInProgressCalls === 0) {
-            await agent.update({ 
-              callStatus: 'available',
-              // Update total call time if call was completed
-              ...(callStatus === 'completed' && duration ? {
-                totalCallTime: (agent.totalCallTime || 0) + parseInt(duration)
-              } : {})
-            });
-            console.log(`✅ Agent ${callLog.agentId} status reset to 'available' - call ended (no other in-progress calls)`);
-          }
-        }
-        // Note: We don't change agent status for 'ringing' - agent stays available until they join
-      }
+    
+    // Update agent status (only for non-client calls with agentId)
+    const isClientCall = from && from.startsWith('client:');
+    if (!isClientCall && callLog.agentId) {
+      await updateAgentStatus(callLog, callStatus, duration);
     }
-
-    // If call is completed and has duration, update any related records
-    if (callStatus === 'completed' && duration && duration > 0) {
-      // You can add logic here to update customer or sale records
-      // For example, mark a follow-up as completed, update last contact date, etc.
-      
-      if (callLog.customerId) {
-        // Update customer last contact date
-        await sequelizeDb.Customer.update(
-          { updatedAt: new Date() },
-          { where: { id: callLog.customerId } }
-        );
-      }
-
-      if (callLog.saleId) {
-        // Update sale record with call information
-        await sequelizeDb.Sale.update(
-          { 
-            updatedAt: new Date(),
-            // You could add a field like lastCallDate or callCount
-          },
-          { where: { id: callLog.saleId } }
-        );
-      }
+    
+    // Update related records (only for completed calls with duration)
+    if (callStatus === 'completed' && duration && duration > 0 && !isClientCall) {
+      await updateRelatedRecords(callLog, parseInt(duration));
     }
-
-    // Log the status update
-    console.log(`📞 Call ${callSid} status updated to: ${callStatus} (mapped: ${mappedStatus})`);
-    console.log(`📞 Call direction: ${direction}`);
-
-    // Send Socket.IO notification for real-time updates
-    const callStatusData = {
-      callSid,
-      status: mappedStatus,
-      duration: duration ? parseInt(duration) : null,
-      direction,
-      from,
-      to,
-      startTime,
-      endTime,
-      answerTime,
-      hangupCause,
-      customerId: callLog.customerId,
-      saleId: callLog.saleId,
-      agentId: callLog.agentId,
-      callPurpose: callLog.callPurpose,
-      twilioData: updateData.twilioData
-    };
-
-    console.log('📞 Preparing to send call status update via socket:', {
-      callSid,
-      status: mappedStatus,
-      direction,
-      agentId: callLog.agentId,
-      customerId: callLog.customerId
-    });
-
-    // Send to the specific agent who made the call
-    if (callLog.agentId) {
-      console.log('📞 Sending call status to agent:', {
-        agentId: callLog.agentId,
+    
+    // Prepare Socket.IO data (only broadcast for non-client calls)
+    if (!isClientCall) {
+      const callStatusData = {
         callSid,
-        status: mappedStatus,
+        status: derivedStatus,
+        duration: duration ? parseInt(duration) : null,
+        direction,
+        from,
+        to,
+        startTime,
+        endTime,
+        answerTime,
+        hangupCause,
         customerId: callLog.customerId,
-        saleId: callLog.saleId
-      });
-      socketManager.sendCallStatusToAgent(callLog.agentId, callSid, callStatusData);
-    } else {
-      console.log('⚠️ No agentId found in call log, skipping agent-specific status update');
+        saleId: callLog.saleId,
+        agentId: callLog.agentId,
+        callPurpose: callLog.callPurpose,
+        parentCallSid: parentCallSid || existingTwilioData.parentCallSid,
+        twilioData: twilioDataUpdate
+      };
+      
+      // Broadcast status update
+      broadcastStatusUpdate(callSid, callStatusData, callLog);
     }
-
-    // Send to supervisors for monitoring
-    socketManager.sendCallStatusToSupervisors(callSid, callStatusData);
-
-    // Send to call-specific room for real-time monitoring
-    socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, callStatusData);
-
-    // Broadcast to all connected users for general call monitoring (IMPORTANT: This includes all users notified about inbound calls)
-    console.log('📞 Broadcasting call status update to all connected users');
-    const broadcastSuccess = socketManager.sendCallStatusUpdate(callSid, callStatusData);
-    if (!broadcastSuccess) {
-      console.error('❌ Failed to broadcast call status update - Socket.IO may not be initialized');
-    } else {
-      console.log('✅ Call status update broadcast successfully');
-    }
-
+    
     return NextResponse.json({
       success: true,
       message: 'Call status updated successfully'
     });
-
+    
   } catch (error) {
     console.error('Error processing call status callback:', error);
     
-    return NextResponse.json(
-      { 
-        success: false, 
-        message: 'Failed to process call status callback',
-        error: error.message 
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      success: false,
+      message: 'Failed to process call status callback',
+      error: error.message
+    }, { status: 500 });
   }
 }
