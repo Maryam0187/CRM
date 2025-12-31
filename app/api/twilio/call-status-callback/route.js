@@ -71,13 +71,51 @@ export async function POST(request) {
     });
 
     if (!callLog) {
-      console.error('❌ Call log not found for SID:', callSid);
+      // This can happen for several reasons:
+      // 1. Dial calls - Twilio creates child calls for <Dial> verbs, these have different SIDs
+      // 2. Calls initiated outside the system (Twilio console, other systems)
+      // 3. Race condition - callback arrived before call log was created (rare)
+      // 4. Failed call log creation (should have been logged earlier)
+      
+      console.warn('⚠️ Call log not found for SID:', {
+        callSid,
+        callStatus,
+        direction,
+        from,
+        to,
+        hangupCause,
+        message: 'This may be a Dial call, external call, or call log creation failed. Continuing without updating call log.'
+      });
+      
       // Return 200 OK to acknowledge receipt of webhook (Twilio requires successful response)
-      // Log the error but don't fail the webhook callback
+      // Log the warning but don't fail the webhook callback - this is expected for some cases
       return NextResponse.json(
-        { success: false, message: 'Call log not found - webhook received but call not in system' },
+        { 
+          success: false, 
+          message: 'Call log not found - webhook received but call not in system',
+          note: 'This may be a Dial call or call initiated outside the system'
+        },
         { status: 200 }
       );
+    }
+
+    // IMPORTANT: For outbound calls, only process status updates for the customer call
+    // The direction should be 'outbound-api' for the customer call we created
+    // Ignore callbacks from conference/Dial legs which might have different directions
+    if (callLog.direction === 'outbound' && direction && !direction.includes('outbound')) {
+      console.log('⚠️ Ignoring status callback - not from customer call leg:', {
+        callSid,
+        callStatus,
+        direction,
+        callLogDirection: callLog.direction,
+        message: 'This callback is likely from a conference/Dial leg, not the customer call'
+      });
+      // Return 200 OK but don't process this callback
+      return NextResponse.json({
+        success: false,
+        message: 'Callback ignored - not from customer call leg',
+        note: 'This is likely a conference/Dial callback, not the customer call status'
+      }, { status: 200 });
     }
 
     // Map Twilio status to database status

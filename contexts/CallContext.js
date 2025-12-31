@@ -32,10 +32,20 @@ export function CallProvider({ children }) {
   const muteSyncIntervalRef = useRef(null);
   const webCallInterfaceRef = useRef(null);
   const callStatusRef = useRef(null); // Track current call status for priority checks
+  const ringingStartTimeRef = useRef(null); // Track when 'ringing' status started (to prevent premature transition to in-progress)
+  const pendingInProgressTimeoutRef = useRef(null); // Track pending delayed transition to in-progress
 
   // Keep callStatusRef in sync with callStatus state
   useEffect(() => {
     callStatusRef.current = callStatus;
+    
+    // Track when we enter 'ringing' state
+    if (callStatus === 'ringing') {
+      ringingStartTimeRef.current = Date.now();
+    } else if (callStatus !== 'ringing' && ringingStartTimeRef.current !== null) {
+      // Clear the ringing start time if we're no longer in ringing state
+      ringingStartTimeRef.current = null;
+    }
   }, [callStatus]);
 
   // Start timer
@@ -86,6 +96,7 @@ export function CallProvider({ children }) {
     // - 'in-progress' when customer answers
     // Setting status to null initially - it will be updated by status callbacks
     setCallStatus(null);
+    ringingStartTimeRef.current = null; // Reset ringing start time for new call
     console.log('📞 Call started - waiting for status updates from Twilio', { callSid: callData.callSid });
   }, []);
 
@@ -99,6 +110,12 @@ export function CallProvider({ children }) {
 
   // End call
   const endCall = useCallback(() => {
+    // Clear any pending status transition timeouts
+    if (pendingInProgressTimeoutRef.current) {
+      clearTimeout(pendingInProgressTimeoutRef.current);
+      pendingInProgressTimeoutRef.current = null;
+    }
+    
     // Preserve timer
     const currentTimer = callTimer;
     if (currentTimer > 0 && callStatus === 'in-progress') {
@@ -120,6 +137,7 @@ export function CallProvider({ children }) {
     setCallMetadata(null);
     setCallStatus(null);
     callStatusRef.current = null;
+    ringingStartTimeRef.current = null;
     
     // Hide interface after delay
     setTimeout(() => {
@@ -130,18 +148,66 @@ export function CallProvider({ children }) {
 
   // Update call status
   const updateCallStatus = useCallback((status) => {
-    // Prioritize 'in-progress' over 'ringing' - once call is in-progress, don't go back to ringing
     const currentStatus = callStatusRef.current;
     
     // If we're already in-progress and new status is ringing, ignore the ringing status
+    // (Don't go backwards from in-progress to ringing)
     if (currentStatus === 'in-progress' && status === 'ringing') {
       console.log('⚠️ Ignoring ringing status - call is already in-progress');
       return; // Don't update status
     }
     
+    // If we're already in-progress and status is also in-progress, no need to update
+    if (currentStatus === 'in-progress' && status === 'in-progress') {
+      return; // Already in-progress, no update needed
+    }
+    
+    // Trust Twilio's callbacks - they should be accurate
+    // The backend now filters out conference/Dial callbacks, so we only get customer call status
+    // However, we still want to ensure 'ringing' state is visible for a brief moment
+    if (status === 'in-progress' && currentStatus === 'ringing') {
+      const timeSinceRingingStarted = ringingStartTimeRef.current ? Date.now() - ringingStartTimeRef.current : 0;
+      const minRingingDuration = 500; // 500ms minimum - just enough to show ringing state briefly
+      
+      if (timeSinceRingingStarted < minRingingDuration) {
+        console.log('⏳ Brief delay to show ringing state (', timeSinceRingingStarted, 'ms < ', minRingingDuration, 'ms)');
+        
+        // Clear any existing pending timeout
+        if (pendingInProgressTimeoutRef.current) {
+          clearTimeout(pendingInProgressTimeoutRef.current);
+        }
+        
+        // Schedule the transition after the minimum duration
+        const delay = minRingingDuration - timeSinceRingingStarted;
+        pendingInProgressTimeoutRef.current = setTimeout(() => {
+          pendingInProgressTimeoutRef.current = null;
+          // Only transition if we're still in ringing state
+          if (callStatusRef.current === 'ringing') {
+            console.log('✅ Transitioning to in-progress after brief delay');
+            setCallStatus('in-progress');
+            // Start timer when we transition to in-progress
+            if (!timerIntervalRef.current) {
+              startTimer();
+            }
+          }
+        }, delay);
+        return; // Don't update status yet
+      } else {
+        // Normal flow: ringing -> in-progress (customer answered)
+        console.log('✅ Customer answered - transitioning from ringing to in-progress');
+      }
+    }
+    
+    // For outbound calls, if we get 'in-progress' without seeing 'ringing' first, 
+    // it might be from a conference connection - but backend should filter this now
+    // We'll trust the backend filtering
+    
     // Log status updates for debugging
     if (status === 'ringing') {
       console.log('🔔 RINGING status update received', { currentStatus, newStatus: status });
+    }
+    if (status === 'in-progress') {
+      console.log('📞 IN-PROGRESS status update received', { currentStatus, newStatus: status });
     }
     
     // Update the state (ref will be updated by useEffect)
