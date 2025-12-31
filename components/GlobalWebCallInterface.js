@@ -957,6 +957,8 @@ export default function GlobalWebCallInterface() {
     const updateStatus = () => {
       const statusData = getCallStatus(currentCallSid);
       if (statusData?.status) {
+        // Backend now derives the correct status based on answeredBy, duration, and answerTime
+        // We can trust the status from backend - it's already been validated
         updateCallStatus(statusData.status);
         
         // If call is completed/failed/canceled, disconnect the call
@@ -976,6 +978,8 @@ export default function GlobalWebCallInterface() {
     const handleStatusUpdate = (event) => {
       const { callStatusData } = event.detail;
       if (callStatusData?.callSid === currentCallSid) {
+        // Backend now derives the correct status based on answeredBy, duration, and answerTime
+        // We can trust the status from backend - it's already been validated
         updateCallStatus(callStatusData.status);
         
         // If call is completed/failed/canceled, disconnect the call

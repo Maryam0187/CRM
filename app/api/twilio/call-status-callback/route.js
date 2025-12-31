@@ -118,20 +118,62 @@ export async function POST(request) {
       }, { status: 200 });
     }
 
-    // Map Twilio status to database status
-    const statusMap = {
-      'initiated': 'queued',
-      'queued': 'queued',
-      'ringing': 'ringing',
-      'in-progress': 'in-progress',
-      'completed': 'completed',
-      'busy': 'busy',
-      'failed': 'failed',
-      'no-answer': 'no-answer',
-      'canceled': 'canceled'
-    };
+    // Derive the actual call status based on Twilio data
+    // This ensures we get the correct status even when Twilio sends misleading status updates
+    let derivedStatus = 'queued'; // Default
     
-    let mappedStatus = statusMap[callStatus] || 'queued';
+    // Parse duration if available
+    const callDuration = duration ? parseInt(duration) : 0;
+    
+    if (callStatus === 'ringing') {
+      derivedStatus = 'ringing';
+    } else if (callStatus === 'in-progress') {
+      // For 'in-progress', verify customer actually answered
+      // Check if answeredBy is 'human' or if duration > 0 (call is actually connected)
+      if (answeredBy === 'human' || callDuration > 0 || answerTime) {
+        derivedStatus = 'in-progress'; // Customer actually answered
+        console.log('✅ Customer answered - in-progress confirmed', { answeredBy, callDuration, answerTime });
+      } else {
+        // Phone is still ringing, not actually answered
+        derivedStatus = 'ringing';
+        console.log('⚠️ Twilio reported in-progress but customer has not answered yet', { 
+          answeredBy, 
+          callDuration, 
+          answerTime,
+          message: 'Keeping status as ringing - phone still ringing'
+        });
+      }
+    } else if (callStatus === 'no-answer') {
+      derivedStatus = 'no-answer';
+    } else if (callStatus === 'completed') {
+      // For completed calls, check if it was actually answered
+      if (callDuration > 0) {
+        derivedStatus = 'completed'; // Call was answered and completed
+      } else {
+        derivedStatus = 'no-answer'; // Call completed without being answered (missed)
+        console.log('📞 Call completed without being answered - marking as no-answer', { callDuration });
+      }
+    } else if (callStatus === 'busy') {
+      derivedStatus = 'busy';
+    } else if (callStatus === 'failed') {
+      derivedStatus = 'failed';
+    } else if (callStatus === 'canceled') {
+      derivedStatus = 'canceled';
+    } else if (callStatus === 'initiated' || callStatus === 'queued') {
+      derivedStatus = 'queued';
+    }
+    
+    // Use derived status instead of direct mapping
+    const mappedStatus = derivedStatus;
+    
+    console.log('📞 Status derivation:', {
+      twilioStatus: callStatus,
+      derivedStatus: mappedStatus,
+      answeredBy,
+      callDuration,
+      answerTime,
+      previousStatus: callLog.status
+    });
 
     // Prepare twilioData update - preserve existing data
     const existingTwilioData = callLog.twilioData || {};
