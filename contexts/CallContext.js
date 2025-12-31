@@ -78,6 +78,15 @@ export function CallProvider({ children }) {
     });
     setShowWebInterface(true);
     setError(null);
+    
+    // Don't set initial status to 'ringing' - wait for Twilio to report actual status
+    // For outbound calls: agent connects to conference first (before customer answers)
+    // Status will be updated via Twilio callbacks when:
+    // - 'ringing' when customer's phone is actually ringing
+    // - 'in-progress' when customer answers
+    // Setting status to null initially - it will be updated by status callbacks
+    setCallStatus(null);
+    console.log('📞 Call started - waiting for status updates from Twilio', { callSid: callData.callSid });
   }, []);
 
   // Call connected
@@ -130,12 +139,19 @@ export function CallProvider({ children }) {
       return; // Don't update status
     }
     
+    // Log status updates for debugging
+    if (status === 'ringing') {
+      console.log('🔔 RINGING status update received', { currentStatus, newStatus: status });
+    }
+    
     // Update the state (ref will be updated by useEffect)
     setCallStatus(status);
+    console.log('📞 Call status updated:', { from: currentStatus, to: status });
     
     // Start timer ONLY when customer picks up (call goes to in-progress)
     // Do NOT start timer during ringing state
     if (status === 'in-progress' && !timerIntervalRef.current) {
+      console.log('⏱️ Starting call timer - customer answered');
       startTimer();
     }
     
@@ -209,6 +225,9 @@ export function CallProvider({ children }) {
         }
 
         // Start call using existing startCall function
+        // Note: We don't set initial status here - it will be updated by Twilio callbacks
+        // For outbound calls: agent connects to conference first, then customer's phone rings
+        // Status will be updated via socket/callbacks when Twilio reports actual status
         startCall({
           callSid,
           conferenceName: confName,
