@@ -132,12 +132,8 @@ export function CallProvider({ children }) {
     // Update the state (ref will be updated by useEffect)
     setCallStatus(status);
     
-    // Start timer when call goes to ringing (not wait for in-progress)
-    if (status === 'ringing' && !timerIntervalRef.current) {
-      startTimer();
-    }
-    
-    // Also start timer when call goes in-progress (if not already started)
+    // Start timer ONLY when customer picks up (call goes to in-progress)
+    // Do NOT start timer during ringing state
     if (status === 'in-progress' && !timerIntervalRef.current) {
       startTimer();
     }

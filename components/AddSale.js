@@ -729,13 +729,22 @@ export default function AddSale() {
   };
 
   // Set callJustEnded based on call status from CallContext
+  const prevCallStatusRef = useRef(null);
   useEffect(() => {
-    if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') {
+    // Track previous status to detect transitions
+    const prevStatus = prevCallStatusRef.current;
+    prevCallStatusRef.current = callStatus;
+    
+    // If call status transitions to an end state, set callJustEnded to true
+    if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled' || 
+        callStatus === 'busy' || callStatus === 'no-answer' || callStatus === 'voicemail') {
       setCallJustEnded(true);
     } else if (callStatus === 'in-progress' || callStatus === 'ringing' || callStatus === 'connecting') {
       // Reset when new call starts
       setCallJustEnded(false);
     }
+    // Note: We don't reset callJustEnded when callStatus becomes null (which happens in endCall)
+    // This ensures the UI stays highlighted even after endCall clears the status
   }, [callStatus]);
 
   // Handle call completion

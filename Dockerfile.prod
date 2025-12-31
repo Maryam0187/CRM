@@ -40,6 +40,11 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Copy custom server.js, lib directory, and scripts (required for Socket.IO and DB initialization)
+COPY --from=builder --chown=nextjs:nodejs /app/server.js ./server.js
+COPY --from=builder --chown=nextjs:nodejs /app/lib ./lib
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
+
 # Environment variables will be injected at runtime by Railway
 # No need to copy .env files for security reasons
 

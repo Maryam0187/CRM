@@ -25,10 +25,12 @@ async function handleAgentConference(request) {
     // Recording is DISABLED - no calls will be recorded
     console.log(`📞 Agent joining conference: ${conferenceName}`);
     
+    // startConferenceOnEnter="false" prevents hold music while waiting for other participants
+    // Conference will start automatically when second participant joins
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial record="false">
-    <Conference startConferenceOnEnter="true" endConferenceOnExit="true" beep="false">${conferenceName}</Conference>
+    <Conference startConferenceOnEnter="false" endConferenceOnExit="true" beep="false">${conferenceName}</Conference>
   </Dial>
 </Response>`;
 
