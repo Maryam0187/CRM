@@ -541,9 +541,11 @@ export default function GlobalWebCallInterface() {
                 callConnected();
               }
               
+              // Check if this is an inbound call
+              const isInboundCall = conferenceName && conferenceName.startsWith('inbound-');
+              
               // Check if call has ended on the server (only for outbound calls)
               // For inbound calls, don't check status here as it might not be set yet
-              const isInboundCall = conferenceName && conferenceName.startsWith('inbound-');
               if (!isInboundCall && currentCallSid) {
                 const actualStatusData = getCallStatus(currentCallSid);
                 const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
@@ -560,7 +562,6 @@ export default function GlobalWebCallInterface() {
               
               // For inbound calls: customer is already in conference, so set to in-progress when agent joins
               // For outbound calls: wait for Twilio to report customer answered (status will come from callbacks)
-              const isInboundCall = conferenceName && conferenceName.startsWith('inbound-');
               if (isInboundCall) {
                 // Inbound: customer is already waiting, so when agent joins, call is in-progress
                 console.log('📞 Inbound call - agent joined, setting status to in-progress');
