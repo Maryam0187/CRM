@@ -541,10 +541,12 @@ export default function GlobalWebCallInterface() {
                 callConnected();
               }
               
-              // Check if call has ended on the server
-              const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
-              if (currentCallSid) {
+              // Check if call has ended on the server (only for outbound calls)
+              // For inbound calls, don't check status here as it might not be set yet
+              const isInboundCall = conferenceName && conferenceName.startsWith('inbound-');
+              if (!isInboundCall && currentCallSid) {
                 const actualStatusData = getCallStatus(currentCallSid);
+                const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
                 if (actualStatusData?.status && endedStatuses.includes(actualStatusData.status)) {
                   console.warn('⚠️ Call has ended on server, disconnecting immediately');
                   updateCallStatus(actualStatusData.status);
@@ -957,18 +959,27 @@ export default function GlobalWebCallInterface() {
     const updateStatus = () => {
       const statusData = getCallStatus(currentCallSid);
       if (statusData?.status) {
+        // Ignore client call status updates
+        const isClientCall = statusData.twilioData?.isClientCall;
+        if (isClientCall) {
+          return; // Don't process client call status updates
+        }
+        
         // Backend now derives the correct status based on answeredBy, duration, and answerTime
         // We can trust the status from backend - it's already been validated
         updateCallStatus(statusData.status);
         
         // If call is completed/failed/canceled, disconnect the call
+        // But only if we're actually connected (not just connecting)
         if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(statusData.status)) {
-          console.log('📞 Call ended remotely, disconnecting...');
-          disconnectCall('remote_status_update');
-          // End the call in context
-          setTimeout(() => {
-            endCall();
-          }, 500);
+          if (isConnected || isWebCallConnected) {
+            console.log('📞 Call ended remotely, disconnecting...');
+            disconnectCall('remote_status_update');
+            // End the call in context
+            setTimeout(() => {
+              endCall();
+            }, 500);
+          }
         }
       }
     };
@@ -978,18 +989,27 @@ export default function GlobalWebCallInterface() {
     const handleStatusUpdate = (event) => {
       const { callStatusData } = event.detail;
       if (callStatusData?.callSid === currentCallSid) {
+        // Ignore client call status updates (they shouldn't trigger disconnects)
+        const isClientCall = callStatusData.twilioData?.isClientCall;
+        if (isClientCall) {
+          return; // Don't process client call status updates
+        }
+        
         // Backend now derives the correct status based on answeredBy, duration, and answerTime
         // We can trust the status from backend - it's already been validated
         updateCallStatus(callStatusData.status);
         
         // If call is completed/failed/canceled, disconnect the call
+        // But only if we're actually connected (not just connecting)
         if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(callStatusData.status)) {
-          console.log('📞 Call ended remotely (socket update), disconnecting...');
-          disconnectCall('socket_status_update');
-          // End the call in context
-          setTimeout(() => {
-            endCall();
-          }, 500);
+          if (isConnected || isWebCallConnected) {
+            console.log('📞 Call ended remotely (socket update), disconnecting...');
+            disconnectCall('socket_status_update');
+            // End the call in context
+            setTimeout(() => {
+              endCall();
+            }, 500);
+          }
         }
       }
     };
@@ -1026,19 +1046,26 @@ export default function GlobalWebCallInterface() {
   }, [isConnected, setIsMuted]);
 
   // Watch for call status changes and disconnect when call ends
+  // Note: This is a backup - the main disconnection logic is in handleStatusUpdate
   useEffect(() => {
     if (!callStatus) return;
     
     // If call status indicates the call has ended, disconnect
-    if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(callStatus)) {
-      // Only disconnect if we're still connected
-      if (isConnected || isWebCallConnected || activeConnection.current) {
-        console.log('📞 Call status changed to', callStatus, '- disconnecting...');
-        disconnectCall('status_change');
-        // End the call in context
-        setTimeout(() => {
-          endCall();
-        }, 500);
+    // But only if we're actually connected (not just connecting)
+    if (['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'].includes(callStatus)) {
+      if (isConnected || isWebCallConnected) {
+        // Add a small delay to avoid race conditions with other disconnect handlers
+        const timeoutId = setTimeout(() => {
+          if (isConnected || isWebCallConnected || activeConnection.current) {
+            console.log('📞 Call status changed to', callStatus, '- disconnecting...');
+            disconnectCall('status_change');
+            setTimeout(() => {
+              endCall();
+            }, 500);
+          }
+        }, 100);
+        
+        return () => clearTimeout(timeoutId);
       }
     }
   }, [callStatus, isConnected, isWebCallConnected, disconnectCall, endCall]);

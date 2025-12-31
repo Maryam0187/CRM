@@ -377,8 +377,10 @@ export async function POST(request) {
       await updateRelatedRecords(callLog, parseInt(duration));
     }
     
-    // Prepare Socket.IO data (only broadcast for non-client calls)
-    if (!isClientCall) {
+    // Prepare Socket.IO data (only broadcast for non-client calls and non-child calls)
+    // Only broadcast status updates for the main customer call, not client calls or child calls
+    const isChildCall = existingTwilioData.isChildCall || twilioDataUpdate.isChildCall;
+    if (!isClientCall && !isChildCall) {
       const callStatusData = {
         callSid,
         status: derivedStatus,
