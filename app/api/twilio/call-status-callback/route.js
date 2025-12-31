@@ -65,6 +65,30 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, exis
 }
 
 /**
+ * Find agentId from related call logs by matching phone numbers
+ */
+async function findAgentIdFromRelatedCalls(fromNumber, toNumber) {
+  if (!fromNumber || !toNumber || fromNumber === 'unknown' || toNumber === 'unknown') {
+    return null;
+  }
+  
+  // Try to find a recent call log with matching phone numbers
+  const relatedCall = await sequelizeDb.CallLog.findOne({
+    where: {
+      [Op.or]: [
+        { fromNumber: fromNumber, toNumber: toNumber },
+        { fromNumber: toNumber, toNumber: fromNumber }
+      ],
+      agentId: { [Op.ne]: null }
+    },
+    order: [['created_at', 'DESC']],
+    limit: 1
+  });
+  
+  return relatedCall?.agentId || null;
+}
+
+/**
  * Find or create parent call log
  */
 async function findOrCreateParentCall(parentCallSid, callData) {
@@ -77,11 +101,24 @@ async function findOrCreateParentCall(parentCallSid, callData) {
   });
   
   if (!parentCallLog) {
+    // Try to find agentId from related calls if not provided
+    let agentId = callData.agentId;
+    if (!agentId) {
+      agentId = await findAgentIdFromRelatedCalls(callData.from, callData.to);
+    }
+    
+    // If still no agentId, we cannot create the call log (agentId is required)
+    // In this case, we'll skip creating the parent call log and return null
+    if (!agentId) {
+      console.warn(`⚠️ Cannot create parent call log for ${parentCallSid}: agentId is required but not found`);
+      return null;
+    }
+    
     parentCallLog = await sequelizeDb.CallLog.create({
       callSid: parentCallSid,
       customerId: callData.customerId || null,
       saleId: callData.saleId || null,
-      agentId: callData.agentId || null,
+      agentId: agentId,
       direction: callData.direction || 'outbound',
       fromNumber: callData.from || 'unknown',
       toNumber: callData.to || 'unknown',
@@ -110,11 +147,55 @@ async function findOrCreateCallLog(callSid, parentCallLog, callData) {
     // Determine if this is a client call
     const isClientCall = callData.from && callData.from.startsWith('client:');
     
+    // Try to find agentId from parent, callData, or related calls
+    let agentId = parentCallLog?.agentId || callData.agentId;
+    if (!agentId) {
+      agentId = await findAgentIdFromRelatedCalls(
+        callData.from || parentCallLog?.fromNumber,
+        callData.to || parentCallLog?.toNumber
+      );
+    }
+    
+    // If still no agentId, we cannot create the call log (agentId is required)
+    // In this case, we'll throw an error or skip - but let's try one more thing:
+    // Look for any call log with the same callSid pattern or recent calls
+    if (!agentId) {
+      // Try to find by matching the callSid pattern (sometimes Twilio uses similar SIDs)
+      // Or look for very recent calls (within last minute) with matching numbers
+      const recentCall = await sequelizeDb.CallLog.findOne({
+        where: {
+          [Op.or]: [
+            { fromNumber: callData.from || parentCallLog?.fromNumber },
+            { toNumber: callData.to || parentCallLog?.toNumber }
+          ],
+          agentId: { [Op.ne]: null },
+          createdAt: {
+            [Op.gte]: new Date(Date.now() - 60000) // Last minute
+          }
+        },
+        order: [['created_at', 'DESC']],
+        limit: 1
+      });
+      
+      agentId = recentCall?.agentId || null;
+    }
+    
+    // If we still don't have an agentId, we cannot proceed
+    // This should not happen for normal calls, but we need to handle it gracefully
+    if (!agentId) {
+      console.error(`❌ Cannot create call log for ${callSid}: agentId is required but not found`, {
+        from: callData.from || parentCallLog?.fromNumber,
+        to: callData.to || parentCallLog?.toNumber,
+        parentCallSid: parentCallLog?.callSid
+      });
+      throw new Error(`Cannot create call log: agentId is required for call ${callSid}`);
+    }
+    
     callLog = await sequelizeDb.CallLog.create({
       callSid,
       customerId: parentCallLog?.customerId || callData.customerId || null,
       saleId: parentCallLog?.saleId || callData.saleId || null,
-      agentId: parentCallLog?.agentId || callData.agentId || null,
+      agentId: agentId,
       direction: callData.direction || parentCallLog?.direction || 'outbound',
       fromNumber: callData.from || parentCallLog?.fromNumber || 'unknown',
       toNumber: callData.to || parentCallLog?.toNumber || 'unknown',
