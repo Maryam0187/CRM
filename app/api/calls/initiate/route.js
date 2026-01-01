@@ -83,7 +83,8 @@ export async function POST(request) {
       );
     }
 
-    const statusCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
+    // Include agentId in status callback URL so we don't need to extract it later
+    const statusCallbackUrl = `${getWebhookUrl('/api/twilio/call-status-callback')}?agentId=${agentId}`;
     const voiceUrl = `${getWebhookUrl('/api/twilio/voice-response')}?agentId=${agentId}`;
 
     // Conference name for agent to join via Voice SDK

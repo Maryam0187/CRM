@@ -65,6 +65,24 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, exis
 }
 
 /**
+ * Extract agentId from client call identifier (e.g., 'client:agent-1' -> 1)
+ */
+function extractAgentIdFromClientCall(clientIdentifier) {
+  if (!clientIdentifier || typeof clientIdentifier !== 'string') {
+    return null;
+  }
+  
+  // Handle format: 'client:agent-1' or 'client:agent-123'
+  const match = clientIdentifier.match(/client:agent-(\d+)/i);
+  if (match && match[1]) {
+    const agentId = parseInt(match[1], 10);
+    return isNaN(agentId) ? null : agentId;
+  }
+  
+  return null;
+}
+
+/**
  * Find agentId from related call logs by matching phone numbers
  */
 async function findAgentIdFromRelatedCalls(fromNumber, toNumber) {
@@ -168,8 +186,56 @@ async function findOrCreateCallLog(callSid, parentCallLog, callData) {
     // Determine if this is a client call
     const isClientCall = callData.from && callData.from.startsWith('client:');
     
-    // Try to find agentId from parent, callData, or related calls
+    // Try to find agentId from multiple sources
     let agentId = parentCallLog?.agentId || callData.agentId;
+    
+    // For client calls, try to extract agentId from the client identifier
+    if (!agentId && isClientCall) {
+      const extractedAgentId = extractAgentIdFromClientCall(callData.from);
+      if (extractedAgentId) {
+        // Verify the agent exists in the database
+        try {
+          const agent = await sequelizeDb.User.findByPk(extractedAgentId);
+          if (agent) {
+            agentId = extractedAgentId;
+            console.log(`✅ Extracted agentId ${agentId} from client call identifier: ${callData.from}`);
+          } else {
+            console.warn(`⚠️ Extracted agentId ${extractedAgentId} from client call but agent not found in database`);
+          }
+        } catch (error) {
+          console.error('Error verifying extracted agentId:', error);
+        }
+      }
+      
+      // If extraction didn't work, look for very recent calls (within last 5 minutes)
+      // Client calls happen shortly after parent calls
+      if (!agentId) {
+        try {
+          const recentCall = await sequelizeDb.CallLog.findOne({
+            where: {
+              agentId: { [Op.ne]: null },
+              createdAt: {
+                [Op.gte]: new Date(Date.now() - 300000) // Last 5 minutes
+              },
+              status: {
+                [Op.in]: ['queued', 'ringing', 'in-progress']
+              }
+            },
+            order: [['created_at', 'DESC']],
+            limit: 1
+          });
+          
+          if (recentCall) {
+            agentId = recentCall.agentId;
+            console.log(`✅ Found agentId ${agentId} from recent active call for client call ${callSid}`);
+          }
+        } catch (error) {
+          console.error('Error finding recent call for client call agentId:', error);
+        }
+      }
+    }
+    
+    // If still no agentId, try to find from related calls by phone numbers
     if (!agentId) {
       agentId = await findAgentIdFromRelatedCalls(
         callData.from || parentCallLog?.fromNumber,
@@ -177,17 +243,15 @@ async function findOrCreateCallLog(callSid, parentCallLog, callData) {
       );
     }
     
-    // If still no agentId, we cannot create the call log (agentId is required)
-    // In this case, we'll throw an error or skip - but let's try one more thing:
-    // Look for any call log with the same callSid pattern or recent calls
+    // If still no agentId, try one more thing: look for any call log with matching numbers
     if (!agentId) {
-      // Try to find by matching the callSid pattern (sometimes Twilio uses similar SIDs)
-      // Or look for very recent calls (within last minute) with matching numbers
       const fromNum = callData.from || parentCallLog?.fromNumber;
       const toNum = callData.to || parentCallLog?.toNumber;
       
-      // Only search if we have valid phone numbers
-      if (fromNum && toNum && fromNum !== 'unknown' && toNum !== 'unknown') {
+      // Only search if we have valid phone numbers (not client calls)
+      if (fromNum && toNum && 
+          !fromNum.startsWith('client:') && 
+          fromNum !== 'unknown' && toNum !== 'unknown') {
         try {
           const recentCall = await sequelizeDb.CallLog.findOne({
             where: {
@@ -378,6 +442,10 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
+    // Extract agentId from URL query parameters (passed when call is initiated)
+    const url = new URL(request.url);
+    const agentIdFromUrl = url.searchParams.get('agentId');
+    
     // Extract form data
     const formData = await request.formData();
     const callSid = formData.get('CallSid');
@@ -409,18 +477,19 @@ export async function POST(request) {
         direction,
         customerId: null,
         saleId: null,
-        agentId: null
+        agentId: agentIdFromUrl || null
       });
     }
     
     // Find or create call log (saves ALL calls including client calls and child calls)
+    // Use agentId from URL if available (for parent calls), otherwise extract from client identifier
     const callLog = await findOrCreateCallLog(callSid, parentCallLog, {
       from,
       to,
       direction,
       customerId: null,
       saleId: null,
-      agentId: null
+      agentId: agentIdFromUrl || null
     });
     
     // Derive correct status
