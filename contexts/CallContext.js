@@ -155,6 +155,8 @@ export function CallProvider({ children }) {
     if (status === 'in-progress' && !timerIntervalRef.current) {
       console.log('⏱️ Customer answered - starting call timer');
       startTimer();
+      // Ensure timer is visible immediately by setting it to 0
+      setCallTimer(0);
     }
     
     // Stop timer when call ends

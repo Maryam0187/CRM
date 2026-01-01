@@ -1287,7 +1287,7 @@ export default function GlobalWebCallInterface() {
                   </div>
                 )}
                 {/* Timer in Header - only show when in-progress */}
-                {callStatus === 'in-progress' && durationToShow > 0 && (
+                {callStatus === 'in-progress' && (
                   <div className="text-xs font-bold text-white">
                     {formatTimer(durationToShow)}
                   </div>
@@ -1472,7 +1472,7 @@ export default function GlobalWebCallInterface() {
               </span>
             </div>
             {/* Timer in minimized view - only show when in-progress */}
-            {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) && durationToShow > 0 && (
+            {callStatus === 'in-progress' && (
               <span className="text-sm font-bold text-green-600">
                 {formatTimer(durationToShow)}
               </span>
