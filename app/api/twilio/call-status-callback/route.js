@@ -68,24 +68,45 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, exis
  * Find agentId from related call logs by matching phone numbers
  */
 async function findAgentIdFromRelatedCalls(fromNumber, toNumber) {
-  if (!fromNumber || !toNumber || fromNumber === 'unknown' || toNumber === 'unknown') {
+  // Validate inputs - check for undefined, null, empty string, or 'unknown'
+  // Handle both null and undefined explicitly
+  if (fromNumber == null || toNumber == null || 
+      fromNumber === 'unknown' || toNumber === 'unknown' ||
+      fromNumber === '' || toNumber === '') {
     return null;
   }
   
-  // Try to find a recent call log with matching phone numbers
-  const relatedCall = await sequelizeDb.CallLog.findOne({
-    where: {
-      [Op.or]: [
-        { fromNumber: fromNumber, toNumber: toNumber },
-        { fromNumber: toNumber, toNumber: fromNumber }
-      ],
-      agentId: { [Op.ne]: null }
-    },
-    order: [['created_at', 'DESC']],
-    limit: 1
-  });
+  // Ensure values are strings and not empty after trimming
+  const from = String(fromNumber).trim();
+  const to = String(toNumber).trim();
   
-  return relatedCall?.agentId || null;
+  if (!from || !to || from === 'unknown' || to === 'unknown' || from === 'null' || to === 'null') {
+    return null;
+  }
+  
+  try {
+    // Try to find a recent call log with matching phone numbers
+    const relatedCall = await sequelizeDb.CallLog.findOne({
+      where: {
+        [Op.and]: [
+          {
+            [Op.or]: [
+              { fromNumber: from, toNumber: to },
+              { fromNumber: to, toNumber: from }
+            ]
+          },
+          { agentId: { [Op.ne]: null } }
+        ]
+      },
+      order: [['created_at', 'DESC']],
+      limit: 1
+    });
+    
+    return relatedCall?.agentId || null;
+  } catch (error) {
+    console.error('Error finding agentId from related calls:', error);
+    return null;
+  }
 }
 
 /**
@@ -162,22 +183,39 @@ async function findOrCreateCallLog(callSid, parentCallLog, callData) {
     if (!agentId) {
       // Try to find by matching the callSid pattern (sometimes Twilio uses similar SIDs)
       // Or look for very recent calls (within last minute) with matching numbers
-      const recentCall = await sequelizeDb.CallLog.findOne({
-        where: {
-          [Op.or]: [
-            { fromNumber: callData.from || parentCallLog?.fromNumber },
-            { toNumber: callData.to || parentCallLog?.toNumber }
-          ],
-          agentId: { [Op.ne]: null },
-          createdAt: {
-            [Op.gte]: new Date(Date.now() - 60000) // Last minute
-          }
-        },
-        order: [['created_at', 'DESC']],
-        limit: 1
-      });
+      const fromNum = callData.from || parentCallLog?.fromNumber;
+      const toNum = callData.to || parentCallLog?.toNumber;
       
-      agentId = recentCall?.agentId || null;
+      // Only search if we have valid phone numbers
+      if (fromNum && toNum && fromNum !== 'unknown' && toNum !== 'unknown') {
+        try {
+          const recentCall = await sequelizeDb.CallLog.findOne({
+            where: {
+              [Op.and]: [
+                {
+                  [Op.or]: [
+                    { fromNumber: fromNum },
+                    { toNumber: toNum }
+                  ]
+                },
+                { agentId: { [Op.ne]: null } },
+                {
+                  createdAt: {
+                    [Op.gte]: new Date(Date.now() - 60000) // Last minute
+                  }
+                }
+              ]
+            },
+            order: [['created_at', 'DESC']],
+            limit: 1
+          });
+          
+          agentId = recentCall?.agentId || null;
+        } catch (error) {
+          console.error('Error finding recent call for agentId:', error);
+          agentId = null;
+        }
+      }
     }
     
     // If we still don't have an agentId, we cannot proceed
