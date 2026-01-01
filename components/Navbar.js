@@ -1,17 +1,79 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '../contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { isAdmin } from '../lib/auth';
 import NotificationBell from './NotificationBell';
+import { useSocket } from '../contexts/SocketContext';
+import apiClient from '../lib/apiClient';
 
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const { user, logout, isAuthenticated } = useAuth();
   const router = useRouter();
+  const { socket } = useSocket();
+  
+  // Agent call status state
+  const [agentCallStatus, setAgentCallStatus] = useState(user?.callStatus || 'available');
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  
+  // Update agent call status
+  const updateAgentCallStatus = async (newStatus) => {
+    if (isUpdatingStatus) return;
+    
+    setIsUpdatingStatus(true);
+    try {
+      const response = await apiClient.put('/api/users/call-status', {
+        callStatus: newStatus
+      });
+      
+      if (response && response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          setAgentCallStatus(newStatus);
+        }
+      }
+    } catch (error) {
+      console.error('Error updating agent call status:', error);
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+  
+  // Listen for agent status changes from socket
+  useEffect(() => {
+    if (!user || !socket) return;
+    
+    const handleStatusChange = (data) => {
+      if (data.userId === user.id && data.callStatus) {
+        setAgentCallStatus(data.callStatus);
+      }
+    };
+    
+    const handleCallStatusChange = (data) => {
+      if (data.userId === user.id) {
+        setAgentCallStatus(data.callStatus);
+      }
+    };
+    
+    socket.on('user_status_change', handleStatusChange);
+    socket.on('user_call_status_change', handleCallStatusChange);
+    
+    return () => {
+      socket.off('user_status_change', handleStatusChange);
+      socket.off('user_call_status_change', handleCallStatusChange);
+    };
+  }, [user, socket]);
+  
+  // Initialize agent call status from user object
+  useEffect(() => {
+    if (user?.callStatus) {
+      setAgentCallStatus(user.callStatus);
+    }
+  }, [user?.callStatus]);
 
   const toggleMenu = () => {
     setIsMenuOpen(!isMenuOpen);
@@ -114,6 +176,31 @@ export default function Navbar() {
                 </Link>
               ) : (
                 <>
+                  {/* Agent Call Status - Show for agents, supervisors, and admins */}
+                  {(user?.role === 'agent' || user?.role === 'supervisor' || user?.role === 'admin') && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className={`w-2 h-2 rounded-full ${
+                        agentCallStatus === 'available' ? 'bg-green-500' :
+                        agentCallStatus === 'busy' ? 'bg-red-500' :
+                        'bg-gray-400'
+                      }`}></div>
+                      <span className="text-xs font-medium text-gray-700">
+                        <span className="capitalize">{agentCallStatus || 'available'}</span>
+                      </span>
+                      {/* Always show "Set Available" button if status is not available - allows manual reset */}
+                      {agentCallStatus !== 'available' && (
+                        <button
+                          onClick={() => updateAgentCallStatus('available')}
+                          disabled={isUpdatingStatus}
+                          className="ml-2 px-2 py-0.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Set status to available"
+                        >
+                          {isUpdatingStatus ? '...' : 'Set Available'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  
                   {/* Notification Bell */}
                   <NotificationBell />
                   

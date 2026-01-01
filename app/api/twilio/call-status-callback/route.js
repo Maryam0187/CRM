@@ -17,8 +17,10 @@ function deriveCallStatus(callStatus, callDuration) {
     case 'ringing':
       return 'ringing';
       
+    case 'answered':
     case 'in-progress':
-      // Trust Twilio immediately - if they say in-progress, customer answered
+      // Twilio sends 'answered' when customer picks up, which means call is in-progress
+      // Trust Twilio immediately - if they say answered/in-progress, customer answered
       return 'in-progress';
       
     case 'no-answer':
@@ -569,11 +571,17 @@ export async function POST(request) {
     });
     
     // BROADCAST STATUS IMMEDIATELY - before ANY database operations to minimize delay
-    // Use agentId from URL (already available) to broadcast immediately
+    // This ensures frontend gets status updates as fast as possible
     const isClientCall = from && from.startsWith('client:');
     
-    if (!isClientCall && agentIdFromUrl) {
-      // Broadcast immediately with minimal data - don't wait for database
+    // Get agentId from URL or from callLog if available
+    let agentIdForBroadcast = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
+    if (!agentIdForBroadcast && callLog && callLog.agentId) {
+      agentIdForBroadcast = callLog.agentId;
+    }
+    
+    if (!isClientCall) {
+      // Broadcast immediately with available data - don't wait for database
       const immediateStatusData = {
         callSid,
         status: derivedStatus,
@@ -585,7 +593,10 @@ export async function POST(request) {
         endTime,
         answerTime,
         hangupCause,
-        agentId: parseInt(agentIdFromUrl, 10),
+        agentId: agentIdForBroadcast,
+        customerId: callLog?.customerId || null,
+        saleId: callLog?.saleId || null,
+        callPurpose: callLog?.callPurpose || null,
         twilioData: {
           callStatus,
           direction,
@@ -600,10 +611,17 @@ export async function POST(request) {
         }
       };
       
-      // Broadcast immediately - this happens BEFORE database lookup
-      socketManager.sendCallStatusToAgent(parseInt(agentIdFromUrl, 10), callSid, immediateStatusData);
+      // Broadcast immediately - this happens BEFORE database updates
+      if (agentIdForBroadcast) {
+        socketManager.sendCallStatusToAgent(agentIdForBroadcast, callSid, immediateStatusData);
+      }
       socketManager.sendCallStatusUpdate(callSid, immediateStatusData);
-      console.log('⚡ Status broadcasted IMMEDIATELY (before DB operations)');
+      console.log('⚡ Status broadcasted IMMEDIATELY:', {
+        callSid,
+        status: derivedStatus,
+        agentId: agentIdForBroadcast,
+        twilioStatus: callStatus
+      });
     }
     
     // Prepare update data
@@ -697,10 +715,35 @@ export async function POST(request) {
       }
     }
     
-    // For error statuses, also ensure agent is set to available
-    const errorStatuses = ['failed', 'busy', 'no-answer', 'canceled'];
-    if (errorStatuses.includes(callStatus) && callLog.agentId && !isClientCall) {
-      await setAgentAvailableOnError(callLog.agentId);
+    // For error statuses and completed calls, ensure agent is set to available
+    // This is a safety net to ensure agent status is reset even if updateAgentStatus fails
+    const endStatuses = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
+    if (endStatuses.includes(derivedStatus) && callLog.agentId && !isClientCall) {
+      try {
+        // Double-check: if call ended, ensure agent is available
+        const activeCalls = await sequelizeDb.CallLog.count({
+          where: {
+            agentId: callLog.agentId,
+            callSid: { [Op.ne]: callLog.callSid },
+            status: 'in-progress'
+          }
+        });
+        
+        if (activeCalls === 0) {
+          const agent = await sequelizeDb.User.findByPk(callLog.agentId);
+          if (agent && agent.callStatus !== 'available') {
+            await agent.update({ callStatus: 'available' });
+            console.log(`✅ Safety net: Agent ${callLog.agentId} set to available after call ended (status: ${derivedStatus})`);
+            
+            // Broadcast status change
+            socketManager.broadcastUserStatusChange(callLog.agentId, agent.status, 'available');
+          }
+        }
+      } catch (error) {
+        console.error('Error in safety net agent status reset:', error);
+        // Fallback to setAgentAvailableOnError
+        await setAgentAvailableOnError(callLog.agentId);
+      }
     }
     
     // Update related records (only for completed calls with duration)
