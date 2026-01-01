@@ -7,24 +7,50 @@ import socketManager from '../../../../lib/socket';
 
 // Handle both GET and POST requests (Twilio can use either)
 export async function GET(request) {
+  console.log('📞 GET request to voice-response');
   return handleVoiceResponse(request);
 }
 
 export async function POST(request) {
+  console.log('📞 POST request to voice-response');
   return handleVoiceResponse(request);
 }
 
 async function handleVoiceResponse(request) {
   try {
-    const url = new URL(request.url);
-    let agentId = url.searchParams.get('agentId');
+    let url;
+    let agentId = null;
+    
+    try {
+      url = new URL(request.url);
+      agentId = url.searchParams.get('agentId');
+      console.log('📞 Voice response request received:', {
+        method: request.method,
+        url: request.url,
+        agentIdFromUrl: agentId,
+        hasUrl: !!url
+      });
+    } catch (urlError) {
+      console.error('❌ Error parsing URL in voice-response:', urlError);
+      console.error('❌ Request URL:', request.url);
+      // Continue without agentId - will handle as inbound call
+    }
     
     // For POST requests, also check form data
     let formData = null;
     if (request.method === 'POST') {
       try {
         formData = await request.formData();
-        agentId = agentId || formData.get('agentId');
+        const agentIdFromForm = formData.get('agentId');
+        agentId = agentId || agentIdFromForm;
+        
+        console.log('📞 Form data parsed:', {
+          agentIdFromForm,
+          finalAgentId: agentId,
+          direction: formData.get('Direction'),
+          from: formData.get('From'),
+          to: formData.get('To')
+        });
         
         // Get call direction from Twilio
         const direction = formData.get('Direction'); // 'inbound' or 'outbound-dial'
@@ -33,10 +59,13 @@ async function handleVoiceResponse(request) {
         
         // If this is an inbound call (no agentId and direction is inbound)
         if (!agentId && (direction === 'inbound' || (!direction && callerNumber && calledNumber))) {
+          console.log('📞 Detected inbound call, routing to handleInboundCall');
           return await handleInboundCall(formData, callerNumber, calledNumber);
         }
       } catch (e) {
-        console.error('Error parsing form data:', e);
+        console.error('❌ Error parsing form data in voice-response:', e);
+        console.error('❌ Error stack:', e.stack);
+        // If we can't parse form data, try to continue with what we have
       }
     }
     
@@ -51,10 +80,20 @@ async function handleVoiceResponse(request) {
       try {
         console.log(`📞 Voice response - Looking for agent ID: ${agentId}`);
         
+        // Validate agentId is a number
+        const parsedAgentId = parseInt(agentId, 10);
+        if (isNaN(parsedAgentId)) {
+          throw new Error(`Invalid agentId: ${agentId}`);
+        }
+        
         // Get agent information
-        const agent = await sequelizeDb.User.findByPk(parseInt(agentId), {
+        const agent = await sequelizeDb.User.findByPk(parsedAgentId, {
           attributes: ['id', 'firstName', 'lastName', 'phone']
         });
+        
+        if (!agent) {
+          throw new Error(`Agent ${parsedAgentId} not found in database`);
+        }
         
         console.log(`📞 Agent lookup result:`, {
           found: !!agent,
@@ -63,7 +102,7 @@ async function handleVoiceResponse(request) {
         });
         
         // Use conference for Voice SDK (agent joins via browser)
-        const conferenceName = `call-${agentId}`;
+        const conferenceName = `call-${parsedAgentId}`;
         console.log(`📞 Routing to conference: ${conferenceName}`);
         
         // Place customer in conference room
@@ -83,12 +122,17 @@ async function handleVoiceResponse(request) {
             console.log(`📞 Agent phone available: ${agentPhone} - can be called separately if needed`);
           }
         } else {
-          console.log(`📞 Agent ${agentId} will join via Voice SDK to conference: ${conferenceName}`);
+          console.log(`📞 Agent ${parsedAgentId} will join via Voice SDK to conference: ${conferenceName}`);
         }
         // No Hangup here - let the call continue in the conference
       } catch (error) {
         console.error('❌ Error in voice response:', error);
-        twiml += `\n  <Say voice="alice">We're sorry, we're unable to connect you at this time.</Say>`;
+        console.error('❌ Error details:', {
+          message: error.message,
+          stack: error.stack,
+          agentId: agentId
+        });
+        twiml += `\n  <Say voice="alice">We're sorry, we're unable to connect you at this time. Please try again later.</Say>`;
         twiml += `\n  <Hangup/>`;
       }
     } else {
@@ -100,11 +144,21 @@ async function handleVoiceResponse(request) {
     
     twiml += `\n</Response>`;
 
-    console.log('🎙️ Voice response TwiML:', twiml);
-
-    return new NextResponse(twiml, {
-      headers: { 'Content-Type': 'text/xml' }
+    console.log('🎙️ Voice response TwiML generated:', {
+      hasAgentId: !!agentId,
+      twimlLength: twiml.length,
+      twimlPreview: twiml.substring(0, 200) + '...'
     });
+
+    const response = new NextResponse(twiml, {
+      headers: { 
+        'Content-Type': 'text/xml',
+        'Cache-Control': 'no-cache'
+      }
+    });
+
+    console.log('✅ Returning TwiML response');
+    return response;
   } catch (error) {
     console.error('🎙️ Error in voice response:', error);
     

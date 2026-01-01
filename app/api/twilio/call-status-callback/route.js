@@ -186,8 +186,16 @@ async function findOrCreateCallLog(callSid, parentCallLog, callData) {
     // Determine if this is a client call
     const isClientCall = callData.from && callData.from.startsWith('client:');
     
-    // Try to find agentId from multiple sources
-    let agentId = parentCallLog?.agentId || callData.agentId;
+    // Try to find agentId from multiple sources (prioritize callData.agentId which comes from URL)
+    let agentId = callData.agentId || parentCallLog?.agentId;
+    
+    console.log('🔍 Finding agentId for call:', {
+      callSid,
+      isClientCall,
+      agentIdFromCallData: callData.agentId,
+      agentIdFromParent: parentCallLog?.agentId,
+      currentAgentId: agentId
+    });
     
     // For client calls, try to extract agentId from the client identifier
     if (!agentId && isClientCall) {
@@ -315,14 +323,24 @@ async function findOrCreateCallLog(callSid, parentCallLog, callData) {
   } else {
     // Update parentCallSid in twilioData if not set
     const twilioData = callLog.twilioData || {};
+    const updates = {};
+    
     if (!twilioData.parentCallSid && parentCallLog) {
-      await callLog.update({
-        twilioData: {
-          ...twilioData,
-          parentCallSid: parentCallLog.callSid,
-          isChildCall: true
-        }
-      });
+      updates.twilioData = {
+        ...twilioData,
+        parentCallSid: parentCallLog.callSid,
+        isChildCall: true
+      };
+    }
+    
+    // If call log exists but doesn't have agentId, try to set it from callData or parent
+    if (!callLog.agentId && (callData.agentId || parentCallLog?.agentId)) {
+      updates.agentId = callData.agentId || parentCallLog.agentId;
+      console.log(`✅ Updating existing call log ${callSid} with agentId: ${updates.agentId}`);
+    }
+    
+    if (Object.keys(updates).length > 0) {
+      await callLog.update(updates);
     }
   }
   
@@ -372,9 +390,14 @@ async function updateAgentStatus(callLog, callStatus, duration) {
     return;
   }
   
+  // Error statuses that should set agent back to available
+  const errorStatuses = ['failed', 'busy', 'no-answer', 'canceled'];
+  const endStatuses = ['completed', ...errorStatuses];
+  
   if (callStatus === 'in-progress' && agent.callStatus !== 'busy') {
     await agent.update({ callStatus: 'busy' });
-  } else if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(callStatus)) {
+  } else if (endStatuses.includes(callStatus)) {
+    // Check for other active calls
     const activeCalls = await sequelizeDb.CallLog.count({
       where: {
         agentId: callLog.agentId,
@@ -383,13 +406,52 @@ async function updateAgentStatus(callLog, callStatus, duration) {
       }
     });
     
+    // If no other active calls, set agent back to available
     if (activeCalls === 0) {
       const updateData = { callStatus: 'available' };
+      
+      // Only update call time for completed calls with duration
       if (callStatus === 'completed' && duration) {
         updateData.totalCallTime = (agent.totalCallTime || 0) + parseInt(duration);
       }
+      
       await agent.update(updateData);
+      console.log(`✅ Agent ${callLog.agentId} set back to available (call status: ${callStatus})`);
+    } else {
+      console.log(`⚠️ Agent ${callLog.agentId} still has ${activeCalls} active call(s), keeping busy status`);
     }
+  }
+}
+
+/**
+ * Set agent back to available when call fails (used in error handling)
+ */
+async function setAgentAvailableOnError(agentId) {
+  if (!agentId) {
+    return;
+  }
+  
+  try {
+    const agent = await sequelizeDb.User.findByPk(agentId);
+    if (!agent) {
+      return;
+    }
+    
+    // Check for active calls
+    const activeCalls = await sequelizeDb.CallLog.count({
+      where: {
+        agentId: agentId,
+        status: 'in-progress'
+      }
+    });
+    
+    // If no active calls, set agent to available
+    if (activeCalls === 0) {
+      await agent.update({ callStatus: 'available' });
+      console.log(`✅ Agent ${agentId} set back to available due to call error`);
+    }
+  } catch (error) {
+    console.error(`Error setting agent ${agentId} to available:`, error);
   }
 }
 
@@ -461,6 +523,16 @@ export async function POST(request) {
     const answeredBy = formData.get('AnsweredBy');
     const parentCallSid = formData.get('ParentCallSid');
     
+    console.log('📞 Call status callback received:', {
+      callSid,
+      callStatus,
+      from,
+      to,
+      agentIdFromUrl,
+      parentCallSid,
+      direction
+    });
+    
     if (!callSid) {
       return NextResponse.json({
         success: false,
@@ -483,14 +555,23 @@ export async function POST(request) {
     
     // Find or create call log (saves ALL calls including client calls and child calls)
     // Use agentId from URL if available (for parent calls), otherwise extract from client identifier
-    const callLog = await findOrCreateCallLog(callSid, parentCallLog, {
-      from,
-      to,
-      direction,
-      customerId: null,
-      saleId: null,
-      agentId: agentIdFromUrl || null
-    });
+    let callLog;
+    try {
+      callLog = await findOrCreateCallLog(callSid, parentCallLog, {
+        from,
+        to,
+        direction,
+        customerId: null,
+        saleId: null,
+        agentId: agentIdFromUrl || null
+      });
+    } catch (error) {
+      // If call log creation fails, try to set agent back to available
+      if (agentIdFromUrl) {
+        await setAgentAvailableOnError(agentIdFromUrl);
+      }
+      throw error;
+    }
     
     // Derive correct status
     const callDuration = duration ? parseInt(duration) : 0;
@@ -557,7 +638,19 @@ export async function POST(request) {
     // Update agent status (only for non-client calls with agentId)
     const isClientCall = from && from.startsWith('client:');
     if (!isClientCall && callLog.agentId) {
-      await updateAgentStatus(callLog, callStatus, duration);
+      try {
+        await updateAgentStatus(callLog, callStatus, duration);
+      } catch (error) {
+        console.error('Error updating agent status:', error);
+        // On error, try to set agent back to available
+        await setAgentAvailableOnError(callLog.agentId);
+      }
+    }
+    
+    // For error statuses, also ensure agent is set to available
+    const errorStatuses = ['failed', 'busy', 'no-answer', 'canceled'];
+    if (errorStatuses.includes(callStatus) && callLog.agentId && !isClientCall) {
+      await setAgentAvailableOnError(callLog.agentId);
     }
     
     // Update related records (only for completed calls with duration)
@@ -599,6 +692,17 @@ export async function POST(request) {
     
   } catch (error) {
     console.error('Error processing call status callback:', error);
+    
+    // Try to set agent back to available if we have agentId from URL
+    try {
+      const url = new URL(request.url);
+      const agentIdFromUrl = url.searchParams.get('agentId');
+      if (agentIdFromUrl) {
+        await setAgentAvailableOnError(parseInt(agentIdFromUrl, 10));
+      }
+    } catch (agentError) {
+      console.error('Error setting agent to available in error handler:', agentError);
+    }
     
     return NextResponse.json({
       success: false,

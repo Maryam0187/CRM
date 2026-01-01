@@ -14,14 +14,28 @@ import { NextResponse } from 'next/server';
  */
 export async function POST(request) {
   try {
-    const formData = await request.formData();
+    let formData;
+    try {
+      formData = await request.formData();
+    } catch (formError) {
+      console.error('❌ Error parsing form data in dial-status:', formError);
+      throw new Error('Failed to parse form data');
+    }
     
     const dialCallSid = formData.get('DialCallSid'); // The child call SID (agent leg)
     const dialCallStatus = formData.get('DialCallStatus'); // Status of the dial
     const dialCallDuration = formData.get('DialCallDuration'); // Duration if answered
     const callSid = formData.get('CallSid'); // Parent call SID (customer leg)
     const callStatus = formData.get('CallStatus'); // Status of parent call
-    const agentId = new URL(request.url).searchParams.get('agentId');
+    
+    // Safely get agentId from URL
+    let agentId = null;
+    try {
+      const url = new URL(request.url);
+      agentId = url.searchParams.get('agentId');
+    } catch (urlError) {
+      console.warn('⚠️ Error parsing URL for agentId:', urlError);
+    }
     
     console.log('📞 Dial status callback received:', {
       callSid,
