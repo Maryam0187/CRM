@@ -75,7 +75,71 @@ export default function GlobalWebCallInterface() {
     resetTimer
   } = useCall();
   
+  // Get user from auth context
   const { user } = useAuth();
+  
+  // Agent call status state
+  const [agentCallStatus, setAgentCallStatus] = useState(user?.callStatus || 'available');
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  
+  // Update agent call status
+  const updateAgentCallStatus = async (newStatus) => {
+    if (isUpdatingStatus) return;
+    
+    setIsUpdatingStatus(true);
+    try {
+      const response = await apiClient.put('/api/users/call-status', {
+        callStatus: newStatus
+      });
+      
+      if (response && response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          setAgentCallStatus(newStatus);
+          console.log(`✅ Agent call status updated to: ${newStatus}`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error updating agent call status:', error);
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+  
+  // Listen for agent status changes from socket
+  const { socket } = useSocket();
+  
+  useEffect(() => {
+    if (!user || !socket) return;
+    
+    const handleStatusChange = (data) => {
+      if (data.userId === user.id && data.callStatus) {
+        setAgentCallStatus(data.callStatus);
+      }
+    };
+    
+    const handleCallStatusChange = (data) => {
+      if (data.userId === user.id) {
+        setAgentCallStatus(data.callStatus);
+      }
+    };
+    
+    socket.on('user_status_change', handleStatusChange);
+    socket.on('user_call_status_change', handleCallStatusChange);
+    
+    return () => {
+      socket.off('user_status_change', handleStatusChange);
+      socket.off('user_call_status_change', handleCallStatusChange);
+    };
+  }, [user, socket]);
+  
+  // Initialize agent call status from user object
+  useEffect(() => {
+    if (user?.callStatus) {
+      setAgentCallStatus(user.callStatus);
+    }
+  }, [user?.callStatus]);
+  
   const { getCallStatus } = useSocket();
   const [isMinimized, setIsMinimized] = useState(false);
   
@@ -1360,6 +1424,29 @@ export default function GlobalWebCallInterface() {
                 )}
               </div>
             )}
+
+            {/* Agent Call Status Display */}
+            <div className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg border border-gray-200 mb-3">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${
+                  agentCallStatus === 'available' ? 'bg-green-500' :
+                  agentCallStatus === 'busy' ? 'bg-red-500' :
+                  'bg-gray-400'
+                }`}></div>
+                <span className="text-xs font-medium text-gray-700">
+                  Agent Status: <span className="capitalize">{agentCallStatus || 'available'}</span>
+                </span>
+              </div>
+              {agentCallStatus === 'busy' && (
+                <button
+                  onClick={() => updateAgentCallStatus('available')}
+                  disabled={isUpdatingStatus}
+                  className="px-2 py-1 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isUpdatingStatus ? 'Updating...' : 'Set Available'}
+                </button>
+              )}
+            </div>
 
             {/* Connected State Info */}
             {(isWebCallConnected || isConnected) && (

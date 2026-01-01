@@ -9,59 +9,41 @@ import { Op } from 'sequelize';
 
 /**
  * Derive correct call status from Twilio data
+ * Simplified: Trust Twilio's status directly - no complex checks to avoid delays
  */
-function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, existingCallLog) {
-  let derivedStatus = 'queued';
-  
+function deriveCallStatus(callStatus, callDuration) {
+  // Direct mapping - trust Twilio's status immediately
   switch (callStatus) {
     case 'ringing':
-      derivedStatus = 'ringing';
-      break;
+      return 'ringing';
       
     case 'in-progress':
-      const existingTwilioData = existingCallLog?.twilioData || {};
-      const existingAnswerTime = existingTwilioData.answerTime || null;
-      const existingDuration = existingCallLog?.duration ? parseInt(existingCallLog.duration) : 0;
-      const hasDuration = callDuration > 0 || existingDuration > 0;
-      const hasAnswerTime = answerTime || existingAnswerTime;
-      
-      if (hasAnswerTime || answeredBy === 'human' || hasDuration) {
-        derivedStatus = 'in-progress';
-      } else {
-        derivedStatus = 'ringing';
-      }
-      break;
+      // Trust Twilio immediately - if they say in-progress, customer answered
+      return 'in-progress';
       
     case 'no-answer':
-      derivedStatus = 'no-answer';
-      break;
+      return 'no-answer';
       
     case 'completed':
-      derivedStatus = callDuration > 0 ? 'completed' : 'no-answer';
-      break;
+      // If duration > 0, call was answered; otherwise no-answer
+      return callDuration > 0 ? 'completed' : 'no-answer';
       
     case 'busy':
-      derivedStatus = 'busy';
-      break;
+      return 'busy';
       
     case 'failed':
-      derivedStatus = 'failed';
-      break;
+      return 'failed';
       
     case 'canceled':
-      derivedStatus = 'canceled';
-      break;
+      return 'canceled';
       
     case 'initiated':
     case 'queued':
-      derivedStatus = 'queued';
-      break;
+      return 'queued';
       
     default:
-      derivedStatus = 'queued';
+      return 'queued';
   }
-  
-  return derivedStatus;
 }
 
 /**
@@ -530,7 +512,10 @@ export async function POST(request) {
       to,
       agentIdFromUrl,
       parentCallSid,
-      direction
+      direction,
+      answerTime,
+      answeredBy,
+      duration
     });
     
     if (!callSid) {
@@ -573,15 +558,53 @@ export async function POST(request) {
       throw error;
     }
     
-    // Derive correct status
+    // Derive correct status - simplified to trust Twilio immediately
     const callDuration = duration ? parseInt(duration) : 0;
-    const derivedStatus = deriveCallStatus(
-      callStatus,
-      callDuration,
-      answerTime,
-      answeredBy,
-      callLog
-    );
+    const derivedStatus = deriveCallStatus(callStatus, callDuration);
+    
+    console.log('📞 Status derivation:', {
+      twilioStatus: callStatus,
+      derivedStatus,
+      duration: callDuration
+    });
+    
+    // BROADCAST STATUS IMMEDIATELY - before ANY database operations to minimize delay
+    // Use agentId from URL (already available) to broadcast immediately
+    const isClientCall = from && from.startsWith('client:');
+    
+    if (!isClientCall && agentIdFromUrl) {
+      // Broadcast immediately with minimal data - don't wait for database
+      const immediateStatusData = {
+        callSid,
+        status: derivedStatus,
+        duration: duration ? parseInt(duration) : null,
+        direction,
+        from,
+        to,
+        startTime,
+        endTime,
+        answerTime,
+        hangupCause,
+        agentId: parseInt(agentIdFromUrl, 10),
+        twilioData: {
+          callStatus,
+          direction,
+          from,
+          to,
+          duration,
+          startTime,
+          endTime,
+          answerTime,
+          hangupCause,
+          answeredBy
+        }
+      };
+      
+      // Broadcast immediately - this happens BEFORE database lookup
+      socketManager.sendCallStatusToAgent(parseInt(agentIdFromUrl, 10), callSid, immediateStatusData);
+      socketManager.sendCallStatusUpdate(callSid, immediateStatusData);
+      console.log('⚡ Status broadcasted IMMEDIATELY (before DB operations)');
+    }
     
     // Prepare update data
     const existingTwilioData = callLog.twilioData || {};
@@ -601,6 +624,33 @@ export async function POST(request) {
       lastUpdated: new Date().toISOString()
     };
     
+    // Broadcast full status update after getting callLog (for complete data)
+    const isChildCall = existingTwilioData.isChildCall || twilioDataUpdate.isChildCall;
+    
+    if (!isClientCall && !isChildCall) {
+      const callStatusData = {
+        callSid,
+        status: derivedStatus,
+        duration: duration ? parseInt(duration) : null,
+        direction,
+        from,
+        to,
+        startTime,
+        endTime,
+        answerTime,
+        hangupCause,
+        customerId: callLog.customerId,
+        saleId: callLog.saleId,
+        agentId: callLog.agentId,
+        callPurpose: callLog.callPurpose,
+        parentCallSid: parentCallSid || existingTwilioData.parentCallSid,
+        twilioData: twilioDataUpdate
+      };
+      
+      // Broadcast full status update (with complete data from database)
+      broadcastStatusUpdate(callSid, callStatusData, callLog);
+    }
+    
     const updateData = {
       status: derivedStatus,
       duration: duration ? parseInt(duration) : null,
@@ -608,7 +658,7 @@ export async function POST(request) {
       updatedAt: new Date()
     };
     
-    // Update call log
+    // Update call log (after broadcasting to avoid delays)
     await callLog.update(updateData);
     await callLog.reload();
     
@@ -636,7 +686,7 @@ export async function POST(request) {
     }
     
     // Update agent status (only for non-client calls with agentId)
-    const isClientCall = from && from.startsWith('client:');
+    // Note: isClientCall already declared above
     if (!isClientCall && callLog.agentId) {
       try {
         await updateAgentStatus(callLog, callStatus, duration);
@@ -658,32 +708,7 @@ export async function POST(request) {
       await updateRelatedRecords(callLog, parseInt(duration));
     }
     
-    // Prepare Socket.IO data (only broadcast for non-client calls and non-child calls)
-    // Only broadcast status updates for the main customer call, not client calls or child calls
-    const isChildCall = existingTwilioData.isChildCall || twilioDataUpdate.isChildCall;
-    if (!isClientCall && !isChildCall) {
-      const callStatusData = {
-        callSid,
-        status: derivedStatus,
-        duration: duration ? parseInt(duration) : null,
-        direction,
-        from,
-        to,
-        startTime,
-        endTime,
-        answerTime,
-        hangupCause,
-        customerId: callLog.customerId,
-        saleId: callLog.saleId,
-        agentId: callLog.agentId,
-        callPurpose: callLog.callPurpose,
-        parentCallSid: parentCallSid || existingTwilioData.parentCallSid,
-        twilioData: twilioDataUpdate
-      };
-      
-      // Broadcast status update
-      broadcastStatusUpdate(callSid, callStatusData, callLog);
-    }
+    // Note: Status was already broadcasted above (before database updates) to avoid delays
     
     return NextResponse.json({
       success: true,
