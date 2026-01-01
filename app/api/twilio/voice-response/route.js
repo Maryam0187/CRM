@@ -125,7 +125,7 @@ async function handleVoiceResponse(request) {
         // startConferenceOnEnter="false" = conference starts when BOTH participants are present (prevents hold music while waiting for agent)
         // When agent joins with startConferenceOnEnter="true", the conference will start
         twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
-        twiml += `\n    <Conference startConferenceOnEnter="false" endConferenceOnExit="true" beep="false" maxParticipants="2" muted="false" trim="do-not-trim">${conferenceName}</Conference>`;
+        twiml += `\n    <Conference startConferenceOnEnter="false" endConferenceOnExit="true" beep="false" maxParticipants="2" muted="false">${conferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
         // If agent has phone, we could call them separately to join the conference
@@ -478,7 +478,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
 <Response>
   <Say voice="alice">Thank you for calling. Please hold while we connect you with an agent.</Say>
   <Dial record="false" timeout="60" timeLimit="3600" answerOnMedia="false" hangupOnStar="false" statusCallback="${statusCallbackUrl}" statusCallbackEvent="initiated ringing answered completed">
-    <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="false" maxParticipants="5" muted="false" trim="do-not-trim">${conferenceName}</Conference>
+    <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="false" maxParticipants="5" muted="false">${conferenceName}</Conference>
   </Dial>
 </Response>`;
 
