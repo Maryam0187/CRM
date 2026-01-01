@@ -26,18 +26,28 @@ export default function Navbar() {
     
     setIsUpdatingStatus(true);
     try {
+      console.log(`🔄 Updating agent call status to: ${newStatus}`);
       const response = await apiClient.put('/api/users/call-status', {
         callStatus: newStatus
       });
       
       if (response && response.ok) {
         const result = await response.json();
+        console.log('📞 Status update response:', result);
         if (result.success) {
           setAgentCallStatus(newStatus);
+          console.log(`✅ Agent call status updated to: ${newStatus}`);
+        } else {
+          console.error('❌ Status update failed:', result);
         }
+      } else {
+        const errorText = await response?.text();
+        console.error('❌ Status update failed - response not ok:', response?.status, errorText);
       }
     } catch (error) {
-      console.error('Error updating agent call status:', error);
+      console.error('❌ Error updating agent call status:', error);
+      // Show user-friendly error
+      alert(`Failed to update status: ${error.message || 'Unknown error'}`);
     } finally {
       setIsUpdatingStatus(false);
     }
@@ -48,19 +58,25 @@ export default function Navbar() {
     if (!user || !socket) return;
     
     const handleStatusChange = (data) => {
+      console.log('📡 Received user_status_change:', data);
       if (data.userId === user.id && data.callStatus) {
+        console.log(`✅ Updating agent call status from socket: ${data.callStatus}`);
         setAgentCallStatus(data.callStatus);
       }
     };
     
     const handleCallStatusChange = (data) => {
-      if (data.userId === user.id) {
+      console.log('📡 Received user_call_status_change:', data);
+      if (data.userId === user.id && data.callStatus) {
+        console.log(`✅ Updating agent call status from socket: ${data.callStatus}`);
         setAgentCallStatus(data.callStatus);
       }
     };
     
     socket.on('user_status_change', handleStatusChange);
     socket.on('user_call_status_change', handleCallStatusChange);
+    
+    console.log('👂 Listening for agent status changes via socket');
     
     return () => {
       socket.off('user_status_change', handleStatusChange);
@@ -74,6 +90,34 @@ export default function Navbar() {
       setAgentCallStatus(user.callStatus);
     }
   }, [user?.callStatus]);
+  
+  // Periodically sync status from API (fallback if socket updates are missed)
+  useEffect(() => {
+    if (!user || !isAuthenticated) return;
+    
+    const syncStatus = async () => {
+      try {
+        const response = await apiClient.get('/api/users/call-status');
+        if (response && response.ok) {
+          const result = await response.json();
+          if (result.success && result.callStatus) {
+            setAgentCallStatus(result.callStatus);
+          }
+        }
+      } catch (error) {
+        // Silently fail - socket updates are primary, this is just a fallback
+        console.debug('Status sync failed (non-critical):', error);
+      }
+    };
+    
+    // Sync immediately on mount
+    syncStatus();
+    
+    // Then sync every 30 seconds as fallback
+    const interval = setInterval(syncStatus, 30000);
+    
+    return () => clearInterval(interval);
+  }, [user, isAuthenticated]);
 
   const toggleMenu = () => {
     setIsMenuOpen(!isMenuOpen);

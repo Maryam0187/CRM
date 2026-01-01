@@ -378,8 +378,13 @@ async function updateAgentStatus(callLog, callStatus, duration) {
   const errorStatuses = ['failed', 'busy', 'no-answer', 'canceled'];
   const endStatuses = ['completed', ...errorStatuses];
   
+  let statusChanged = false;
+  let newCallStatus = agent.callStatus;
+  
   if (callStatus === 'in-progress' && agent.callStatus !== 'busy') {
     await agent.update({ callStatus: 'busy' });
+    newCallStatus = 'busy';
+    statusChanged = true;
   } else if (endStatuses.includes(callStatus)) {
     // Check for other active calls
     const activeCalls = await sequelizeDb.CallLog.count({
@@ -400,10 +405,19 @@ async function updateAgentStatus(callLog, callStatus, duration) {
       }
       
       await agent.update(updateData);
+      newCallStatus = 'available';
+      statusChanged = true;
       console.log(`✅ Agent ${callLog.agentId} set back to available (call status: ${callStatus})`);
     } else {
       console.log(`⚠️ Agent ${callLog.agentId} still has ${activeCalls} active call(s), keeping busy status`);
     }
+  }
+  
+  // Broadcast status change if it changed
+  if (statusChanged) {
+    await agent.reload();
+    socketManager.broadcastUserStatusChange(callLog.agentId, agent.status, newCallStatus);
+    console.log(`📡 Broadcasted agent ${callLog.agentId} status change: ${newCallStatus}`);
   }
 }
 
@@ -432,7 +446,12 @@ async function setAgentAvailableOnError(agentId) {
     // If no active calls, set agent to available
     if (activeCalls === 0) {
       await agent.update({ callStatus: 'available' });
+      await agent.reload();
       console.log(`✅ Agent ${agentId} set back to available due to call error`);
+      
+      // Broadcast status change
+      socketManager.broadcastUserStatusChange(agentId, agent.status, 'available');
+      console.log(`📡 Broadcasted agent ${agentId} status change to available (error recovery)`);
     }
   } catch (error) {
     console.error(`Error setting agent ${agentId} to available:`, error);
@@ -707,7 +726,17 @@ export async function POST(request) {
     // Note: isClientCall already declared above
     if (!isClientCall && callLog.agentId) {
       try {
-        await updateAgentStatus(callLog, callStatus, duration);
+        const agent = await sequelizeDb.User.findByPk(callLog.agentId);
+        if (agent) {
+          await updateAgentStatus(callLog, callStatus, duration);
+          
+          // Reload agent to get updated status
+          await agent.reload();
+          
+          // Broadcast status change to frontend immediately
+          socketManager.broadcastUserStatusChange(callLog.agentId, agent.status, agent.callStatus);
+          console.log(`📡 Broadcasted agent ${callLog.agentId} status change: ${agent.callStatus}`);
+        }
       } catch (error) {
         console.error('Error updating agent status:', error);
         // On error, try to set agent back to available
@@ -733,9 +762,10 @@ export async function POST(request) {
           const agent = await sequelizeDb.User.findByPk(callLog.agentId);
           if (agent && agent.callStatus !== 'available') {
             await agent.update({ callStatus: 'available' });
+            await agent.reload();
             console.log(`✅ Safety net: Agent ${callLog.agentId} set to available after call ended (status: ${derivedStatus})`);
             
-            // Broadcast status change
+            // Broadcast status change immediately
             socketManager.broadcastUserStatusChange(callLog.agentId, agent.status, 'available');
           }
         }

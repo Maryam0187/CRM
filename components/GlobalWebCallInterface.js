@@ -562,18 +562,11 @@ export default function GlobalWebCallInterface() {
                 }
               }
               
-              // For inbound calls: customer is already in conference, so set to in-progress when agent joins
-              // For outbound calls: wait for Twilio to report customer answered (status will come from callbacks)
-              if (isInboundCall) {
-                // Inbound: customer is already waiting, so when agent joins, call is in-progress
-                console.log('📞 Inbound call - agent joined, setting status to in-progress');
-                updateCallStatus('in-progress');
-              } else {
-                // Outbound: agent connected to conference, but customer may not have answered yet
-                // Don't set to in-progress here - wait for Twilio status callback to report customer answered
-                console.log('📞 Outbound call - agent connected, waiting for customer to answer (status will come from Twilio)');
-                // Status will be updated via socket/callbacks when customer actually answers
-              }
+              // Don't set status to in-progress here - wait for Twilio status callback to report customer answered
+              // This ensures timer only starts when customer actually picks up, not when agent joins
+              // Status will be updated via socket/callbacks when customer actually answers
+              console.log('📞 Agent connected to conference, waiting for customer to answer (status will come from Twilio callbacks)');
+              // Status will be updated via socket/callbacks when customer actually answers
             } else {
               console.log('✅ Already connected, skipping onAccept callback');
             }
