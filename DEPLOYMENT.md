@@ -56,7 +56,7 @@ MYSQL_URL="mysql://root:xQrBBebNhzHWOpeNjxINXSTpuGyONqgG@hopper.proxy.rlwy.net:5
 DATABASE_URL=mysql://root:xQrBBebNhzHWOpeNjxINXSTpuGyONqgG@hopper.proxy.rlwy.net:58283/railway
 
 # Authentication
-NEXTAUTH_URL=https://crm-production-0339.up.railway.app
+NEXTAUTH_URL=https://crm.itechsoft.net
 NEXTAUTH_SECRET=YrxHTYeoZe33bwxERRPBFYC/tJzDc80H0eoFom39vGg=
 
 # Encryption
@@ -69,7 +69,7 @@ NODE_ENV=production
 TWILIO_ACCOUNT_SID=your_twilio_account_sid
 TWILIO_AUTH_TOKEN=your_twilio_auth_token
 TWILIO_PHONE_NUMBER=your_twilio_phone_number
-TWILIO_WEBHOOK_BASE_URL=https://crm-production-0339.up.railway.app
+TWILIO_WEBHOOK_BASE_URL=https://crm.itechsoft.net
 ```
 
 ### Step 4: Add Variables to App Service
@@ -163,7 +163,7 @@ This automatically:
    ```
 
 ### 2. Test Your App
-1. **Visit:** `https://crm-production-0339.up.railway.app`
+1. **Visit:** `https://crm.itechsoft.net`
 2. **Try to sign in**
 3. **Check if database operations work**
 

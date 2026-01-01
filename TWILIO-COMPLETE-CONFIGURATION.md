@@ -16,10 +16,10 @@ Your Twilio setup requires **TWO separate configurations**:
 **Configuration**:
 - **Friendly Name**: CRM Web Calls (or your preferred name)
 - **A CALL COMES IN**:
-  - URL: `https://crm-production-0339.up.railway.app/api/twilio/join-conference`
+  - URL: `https://crm.itechsoft.net/api/twilio/join-conference`
   - Method: **HTTP POST**
 - **CALL STATUS CHANGES** (Optional):
-  - URL: `https://crm-production-0339.up.railway.app/api/twilio/call-status-callback`
+  - URL: `https://crm.itechsoft.net/api/twilio/call-status-callback`
   - Method: **HTTP POST**
 
 **TwiML App SID**: Should be set in your environment variables as `TWILIO_APP_SID`
@@ -45,12 +45,12 @@ Your Twilio setup requires **TWO separate configurations**:
 
 **Update "A call comes in":**
 - **Webhook**: Select "Webhook"
-- **URL**: `https://crm-production-0339.up.railway.app/api/twilio/voice-response`
+- **URL**: `https://crm.itechsoft.net/api/twilio/voice-response`
 - **HTTP**: Select **HTTP POST**
 - Click **Save**
 
 **Configure "Call status changes":**
-- **URL**: `https://crm-production-0339.up.railway.app/api/twilio/call-status-callback`
+- **URL**: `https://crm.itechsoft.net/api/twilio/call-status-callback`
 - **HTTP**: Select **HTTP POST**
 - Click **Save**
 
@@ -63,11 +63,11 @@ Your Twilio setup requires **TWO separate configurations**:
 Friendly Name: CRM Web Calls
 ├── A CALL COMES IN
 │   ├── Webhook
-│   ├── URL: https://crm-production-0339.up.railway.app/api/twilio/join-conference
+│   ├── URL: https://crm.itechsoft.net/api/twilio/join-conference
 │   └── Method: HTTP POST
 │
 └── CALL STATUS CHANGES (Optional)
-    ├── URL: https://crm-production-0339.up.railway.app/api/twilio/call-status-callback
+    ├── URL: https://crm.itechsoft.net/api/twilio/call-status-callback
     └── Method: HTTP POST
 ```
 
@@ -79,14 +79,14 @@ Phone Number: +1XXXXXXXXXX
 │   │
 │   ├── A call comes in
 │   │   ├── Webhook
-│   │   ├── URL: https://crm-production-0339.up.railway.app/api/twilio/voice-response ⚠️ UPDATE THIS
+│   │   ├── URL: https://crm.itechsoft.net/api/twilio/voice-response ⚠️ UPDATE THIS
 │   │   └── Method: HTTP POST
 │   │
 │   ├── Primary handler fails
 │   │   └── (Leave empty or set fallback)
 │   │
 │   └── Call status changes
-│       ├── URL: https://crm-production-0339.up.railway.app/api/twilio/call-status-callback ⚠️ ADD THIS
+│       ├── URL: https://crm.itechsoft.net/api/twilio/call-status-callback ⚠️ ADD THIS
 │       └── Method: HTTP POST
 │
 └── Caller Name Lookup: Disabled ✅
@@ -128,7 +128,7 @@ TWILIO_PHONE_NUMBER=+1XXXXXXXXXX
 TWILIO_APP_SID=APxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # Webhook Base URL (used by both TwiML App and Phone Number)
-TWILIO_WEBHOOK_BASE_URL=https://crm-production-0339.up.railway.app
+TWILIO_WEBHOOK_BASE_URL=https://crm.itechsoft.net
 
 # For local development:
 # TWILIO_WEBHOOK_BASE_URL=http://localhost:3000
@@ -151,19 +151,19 @@ TWILIO_WEBHOOK_BASE_URL=https://crm-production-0339.up.railway.app
 
 ### Test 1: TwiML App Webhook (Already Working)
 ```bash
-curl https://crm-production-0339.up.railway.app/api/twilio/join-conference?To=test-conference
+curl https://crm.itechsoft.net/api/twilio/join-conference?To=test-conference
 ```
 Should return TwiML XML with Conference instructions.
 
 ### Test 2: Phone Number Voice Response Webhook (Need to Update)
 ```bash
-curl https://crm-production-0339.up.railway.app/api/twilio/voice-response?agentId=1
+curl https://crm.itechsoft.net/api/twilio/voice-response?agentId=1
 ```
 Should return TwiML XML with Dial/Conference instructions.
 
 ### Test 3: Call Status Callback Webhook
 ```bash
-curl -X POST https://crm-production-0339.up.railway.app/api/twilio/call-status-callback
+curl -X POST https://crm.itechsoft.net/api/twilio/call-status-callback
 ```
 Should return empty response (200 OK) or handle the webhook.
 

@@ -13,7 +13,7 @@ A TwiML App is a configuration in Twilio that tells Twilio what to do when a cal
 First, determine your webhook base URL:
 
 - **Local Development**: `http://localhost:3000`
-- **Production**: `https://crm-production-0339.up.railway.app`
+- **Production**: `https://crm.itechsoft.net`
 
 ### Step 2: Create TwiML App in Twilio Console
 
@@ -35,13 +35,13 @@ First, determine your webhook base URL:
    **Voice Configuration**:
    - **A CALL COMES IN**: 
      - Select: **"Webhook"**
-     - URL: `https://crm-production-0339.up.railway.app/api/twilio/join-conference`
+     - URL: `https://crm.itechsoft.net/api/twilio/join-conference`
      - Method: **POST** (or GET, both work)
    
    **Important**: This URL is used when the agent connects via web interface. The `To` parameter will contain the conference name.
    
    - **CALL STATUS CHANGES** (Optional but recommended):
-     - URL: `https://crm-production-0339.up.railway.app/api/twilio/call-status-callback`
+     - URL: `https://crm.itechsoft.net/api/twilio/call-status-callback`
      - Method: **POST**
 
    **Important**: Make sure the TwiML App SID matches your environment variable:
@@ -67,7 +67,7 @@ TWILIO_PHONE_NUMBER=+1234567890
 TWILIO_APP_SID=APxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # Webhook Base URL (for TwiML App webhooks)
-TWILIO_WEBHOOK_BASE_URL=https://crm-production-0339.up.railway.app
+TWILIO_WEBHOOK_BASE_URL=https://crm.itechsoft.net
 # Or for local development:
 # TWILIO_WEBHOOK_BASE_URL=http://localhost:3000
 ```
@@ -127,9 +127,9 @@ If testing locally, you need to expose your local server:
 
 ```
 Friendly Name: CRM Web Calls
-Voice URL: https://crm-production-0339.up.railway.app/api/twilio/join-conference
+Voice URL: https://crm.itechsoft.net/api/twilio/join-conference
 Voice Method: POST
-Status Callback URL: https://crm-production-0339.up.railway.app/api/twilio/call-status-callback
+Status Callback URL: https://crm.itechsoft.net/api/twilio/call-status-callback
 Status Callback Method: POST
 ```
 

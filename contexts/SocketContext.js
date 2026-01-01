@@ -76,7 +76,7 @@ export const SocketProvider = ({ children }) => {
     let socketUrl;
     if (isProduction) {
       // Production: Use environment variable or fallback to Railway URL
-      socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'https://crm-production-0339.up.railway.app';
+      socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'https://crm.itechsoft.net';
     } else {
       // Development: Use localhost with current port
       const port = window.location.port || '3000';

@@ -78,7 +78,7 @@ In Railway Dashboard:
 ### Step 2: Test Token Generation
 
 1. **Check the token endpoint:**
-   - URL: `https://crm-production-0339.up.railway.app/api/twilio/token`
+   - URL: `https://crm.itechsoft.net/api/twilio/token`
    - Method: GET
    - Headers: Include your JWT auth token
 
@@ -104,8 +104,8 @@ In Railway Dashboard:
    - Verify the SID matches `TWILIO_APP_SID` in your env
 
 2. **Check TwiML App Configuration:**
-   - Voice URL should be: `https://crm-production-0339.up.railway.app/api/twilio/join-conference`
-   - Status Callback should be: `https://crm-production-0339.up.railway.app/api/twilio/call-status-callback`
+   - Voice URL should be: `https://crm.itechsoft.net/api/twilio/join-conference`
+   - Status Callback should be: `https://crm.itechsoft.net/api/twilio/call-status-callback`
 
 ### Step 4: Restart Application
 
@@ -130,7 +130,7 @@ After making changes:
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=your_auth_token_here
 TWILIO_APP_SID=APxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_WEBHOOK_BASE_URL=https://crm-production-0339.up.railway.app
+TWILIO_WEBHOOK_BASE_URL=https://crm.itechsoft.net
 
 # Optional (but recommended)
 TWILIO_API_KEY=SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

@@ -110,8 +110,17 @@ export async function POST(request) {
       machineDetectionSpeechEndThreshold: 2400, // 2.4 seconds of silence to confirm machine
       // Route agent via SIP Domain
       // We'll dial the customer first, then connect to agent via SIP in the voice response
-      answerOnMedia: false
+      answerOnMedia: false,
+      // Method for TwiML URL - Twilio will use POST by default, but we support both
+      method: 'POST'
     };
+
+    console.log('📞 Creating Twilio call with options:', {
+      url: voiceUrl,
+      to: formattedNumber,
+      from: twilioPhoneNumber,
+      method: callOptions.method
+    });
 
     const call = await client.calls.create(callOptions);
     

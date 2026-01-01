@@ -2,7 +2,7 @@
 
 A modern, responsive CRM application built with Next.js and Tailwind CSS to help manage sales processes, customers, leads, and deals efficiently.
 
-**Live Application**: [https://crm-production-0339.up.railway.app/](https://crm-production-0339.up.railway.app/)
+**Live Application**: [https://crm.itechsoft.net/](https://crm.itechsoft.net/)
 
 ## Features
 
@@ -57,7 +57,7 @@ A modern, responsive CRM application built with Next.js and Tailwind CSS to help
 
 3. **Open in Browser**
    - **Local Development**: Navigate to [http://localhost:3000](http://localhost:3000)
-   - **Production**: Visit [https://crm-production-0339.up.railway.app/](https://crm-production-0339.up.railway.app/)
+   - **Production**: Visit [https://crm.itechsoft.net/](https://crm.itechsoft.net/)
 
 ## Project Structure
 
