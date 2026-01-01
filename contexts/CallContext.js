@@ -150,16 +150,20 @@ export function CallProvider({ children }) {
     // Update status
     setCallStatus(status);
     
-    // Start timer ONLY when customer picks up
+    // Start timer ONLY when customer picks up (status = 'in-progress')
+    // This happens when customer answers, NOT when agent joins conference
     if (status === 'in-progress' && !timerIntervalRef.current) {
+      console.log('⏱️ Customer answered - starting call timer');
       startTimer();
     }
     
     // Stop timer when call ends
-    if (status === 'completed' || status === 'failed' || status === 'canceled' || 
-        status === 'busy' || status === 'no-answer' || status === 'voicemail') {
+    const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+    if (endedStatuses.includes(status)) {
+      console.log(`⏱️ Call ended (${status}) - stopping timer`);
       stopTimer();
       
+      // Preserve final duration if call was in progress
       if (callTimer > 0 && (status === 'completed' || status === 'failed' || status === 'canceled')) {
         setFinalDuration(callTimer);
       }

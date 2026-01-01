@@ -102,7 +102,7 @@ export async function POST(request) {
       to: formattedNumber,  // Customer phone number
       from: twilioPhoneNumber,
       statusCallback: statusCallbackUrl,
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+      statusCallbackEvent: ['initiated', 'queued', 'ringing', 'answered', 'completed'],
       // Enable Answering Machine Detection (AMD) to detect voicemail
       machineDetection: 'Enable',
       machineDetectionTimeout: 30, // Wait up to 30 seconds for AMD result

@@ -868,28 +868,40 @@ export default function GlobalWebCallInterface() {
     try {
       console.log(`📞 Disconnecting call (reason: ${reason})`);
       
-      // Disconnect the active connection
+      // Disconnect the active connection first
       if (activeConnection.current) {
         try {
           const call = activeConnection.current;
+          // Try multiple methods to ensure disconnection
           if (typeof call.disconnect === 'function') {
             call.disconnect();
+          }
+          // Also try status method if available
+          if (typeof call.status === 'function' && call.status() !== 'closed') {
+            // Force disconnect if still open
+            try {
+              call.disconnect();
+            } catch (e) {
+              // Ignore
+            }
           }
         } catch (err) {
           console.warn('⚠️ Error disconnecting call:', err);
         }
       }
       
-      // Also disconnect via device
-      if (device && typeof device.disconnectAll === 'function') {
+      // Also disconnect via device (this is more reliable)
+      if (device) {
         try {
-          device.disconnectAll();
+          if (typeof device.disconnectAll === 'function') {
+            device.disconnectAll();
+          }
         } catch (err) {
           console.warn('⚠️ Error disconnecting all calls:', err);
         }
       }
       
-      // Clean up state
+      // Clean up state immediately
       setIsConnected(false);
       setIsConnecting(false);
       activeConnection.current = null;
@@ -1000,16 +1012,19 @@ export default function GlobalWebCallInterface() {
         // We can trust the status from backend - it's already been validated
         updateCallStatus(callStatusData.status);
         
-        // If call is completed/failed/canceled, disconnect the call
-        // But only if we're actually connected (not just connecting)
-        if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(callStatusData.status)) {
-          if (isConnected || isWebCallConnected) {
-            console.log('📞 Call ended remotely (socket update), disconnecting...');
-            disconnectCall('socket_status_update');
+        // If call is completed/failed/canceled, disconnect the call IMMEDIATELY
+        // This handles the case when customer hangs up - agent browser should disconnect too
+        const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+        if (endedStatuses.includes(callStatusData.status)) {
+          // Disconnect immediately if we have any connection (even if just connecting)
+          if (isConnected || isWebCallConnected || activeConnection.current) {
+            console.log(`📞 Call ended remotely (status: ${callStatusData.status}) - disconnecting agent browser immediately...`);
+            // Disconnect immediately - no delay
+            disconnectCall('customer_ended_call');
             // End the call in context
             setTimeout(() => {
               endCall();
-            }, 500);
+            }, 200);
           }
         }
       }
@@ -1047,26 +1062,22 @@ export default function GlobalWebCallInterface() {
   }, [isConnected, setIsMuted]);
 
   // Watch for call status changes and disconnect when call ends
-  // Note: This is a backup - the main disconnection logic is in handleStatusUpdate
+  // This is a backup mechanism - ensures disconnection even if socket update is missed
   useEffect(() => {
     if (!callStatus) return;
     
-    // If call status indicates the call has ended, disconnect
-    // But only if we're actually connected (not just connecting)
-    if (['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'].includes(callStatus)) {
-      if (isConnected || isWebCallConnected) {
-        // Add a small delay to avoid race conditions with other disconnect handlers
-        const timeoutId = setTimeout(() => {
-          if (isConnected || isWebCallConnected || activeConnection.current) {
-            console.log('📞 Call status changed to', callStatus, '- disconnecting...');
-            disconnectCall('status_change');
-            setTimeout(() => {
-              endCall();
-            }, 500);
-          }
-        }, 100);
-        
-        return () => clearTimeout(timeoutId);
+    // If call status indicates the call has ended, disconnect IMMEDIATELY
+    // This handles the case when customer hangs up - agent browser should disconnect too
+    const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+    if (endedStatuses.includes(callStatus)) {
+      // Disconnect immediately if we have any connection (even if just connecting)
+      if (isConnected || isWebCallConnected || activeConnection.current) {
+        console.log(`📞 Call status changed to ${callStatus} - disconnecting agent browser immediately...`);
+        // Disconnect immediately - no delay
+        disconnectCall('customer_ended_call_status');
+        setTimeout(() => {
+          endCall();
+        }, 200);
       }
     }
   }, [callStatus, isConnected, isWebCallConnected, disconnectCall, endCall]);
@@ -1229,10 +1240,14 @@ export default function GlobalWebCallInterface() {
         <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-3 flex items-center justify-between">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="flex-shrink-0">
-              {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) ? (
+              {callStatus === 'in-progress' ? (
                 <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
               ) : callStatus === 'ringing' ? (
+                // Customer's phone is ringing
                 <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
+              ) : callStatus === 'queued' ? (
+                // Call is queued (not ringing yet)
+                <div className="w-3 h-3 bg-gray-400 rounded-full animate-pulse"></div>
               ) : (
                 <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
               )}
@@ -1247,24 +1262,32 @@ export default function GlobalWebCallInterface() {
                     {callMetadata.phoneNumber}
                   </div>
                 )}
-                {/* Call Status in Header */}
-                {((callStatus && callStatus !== 'completed') || (isWebCallConnected || isConnected)) && (
+                {/* Call Status in Header - show for all active call states */}
+                {(callStatus || (isWebCallConnected || isConnected)) && (
                   <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                    (callStatus === 'in-progress' || (isWebCallConnected || isConnected)) ? 'bg-green-500/30 text-green-100' :
+                    callStatus === 'in-progress' ? 'bg-green-500/30 text-green-100' :
                     callStatus === 'ringing' ? 'bg-yellow-500/30 text-yellow-100' :
+                    callStatus === 'queued' ? 'bg-gray-500/30 text-gray-100' :
                     callStatus === 'completed' ? 'bg-gray-500/30 text-gray-100' :
                     'bg-red-500/30 text-red-100'
                   }`}>
-                    {/* Prioritize connected/in-progress status over ringing */}
-                    {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) ? 'In Progress' :
+                    {/* 
+                      Outbound call status flow:
+                      - "Queued": Call initiated, customer phone not ringing yet
+                      - "Ringing": Customer's phone is ringing
+                      - "In Progress": Customer answered, call active
+                      - "Completed": Call ended (by customer or agent)
+                    */}
+                    {callStatus === 'in-progress' ? 'In Progress' :
                      callStatus === 'ringing' ? 'Ringing' :
+                     callStatus === 'queued' ? 'Queued' :
                      callStatus === 'completed' ? 'Completed' :
-                     callStatus && !['in-progress', 'ringing', 'completed'].includes(callStatus) ? callStatus :
-                     !callStatus && (isWebCallConnected || isConnected) ? 'In Progress' : ''}
+                     callStatus && !['in-progress', 'ringing', 'queued', 'completed'].includes(callStatus) ? callStatus :
+                     !callStatus && (isWebCallConnected || isConnected) ? 'Connecting' : ''}
                   </div>
                 )}
                 {/* Timer in Header - only show when in-progress */}
-                {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) && durationToShow > 0 && (
+                {callStatus === 'in-progress' && durationToShow > 0 && (
                   <div className="text-xs font-bold text-white">
                     {formatTimer(durationToShow)}
                   </div>
@@ -1340,9 +1363,38 @@ export default function GlobalWebCallInterface() {
 
             {/* Connected State Info */}
             {(isWebCallConnected || isConnected) && (
-              <div className="flex items-center gap-3 py-2 px-3 bg-green-50 rounded-lg border border-green-200 mb-3">
-                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                <div className="text-sm font-semibold text-green-700">Call Connected</div>
+              <div className={`flex items-center gap-3 py-2 px-3 rounded-lg border mb-3 ${
+                callStatus === 'in-progress' 
+                  ? 'bg-green-50 border-green-200' 
+                  : callStatus === 'ringing'
+                  ? 'bg-yellow-50 border-yellow-200'
+                  : callStatus === 'queued'
+                  ? 'bg-gray-50 border-gray-200'
+                  : 'bg-green-50 border-green-200'
+              }`}>
+                <div className={`w-3 h-3 rounded-full animate-pulse ${
+                  callStatus === 'in-progress' 
+                    ? 'bg-green-500' 
+                    : callStatus === 'ringing'
+                    ? 'bg-yellow-500'
+                    : callStatus === 'queued'
+                    ? 'bg-gray-500'
+                    : 'bg-green-500'
+                }`}></div>
+                <div className={`text-sm font-semibold ${
+                  callStatus === 'in-progress' 
+                    ? 'text-green-700' 
+                    : callStatus === 'ringing'
+                    ? 'text-yellow-700'
+                    : callStatus === 'queued'
+                    ? 'text-gray-700'
+                    : 'text-green-700'
+                }`}>
+                  {callStatus === 'in-progress' ? 'Call Connected' :
+                   callStatus === 'ringing' ? 'Customer Phone Ringing' :
+                   callStatus === 'queued' ? 'Call Queued' :
+                   'Call Connected'}
+                </div>
               </div>
             )}
 
