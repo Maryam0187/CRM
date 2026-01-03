@@ -150,10 +150,10 @@ export function CallProvider({ children }) {
     // Update status
     setCallStatus(status);
     
-    // Start timer ONLY when conference becomes active (status = 'in-progress')
-    // This happens when BOTH customer and agent are in the conference (conference active)
+    // Start timer ONLY when customer picks up (status = 'in-progress')
+    // This happens when customer answers, NOT when agent joins conference
     if (status === 'in-progress' && !timerIntervalRef.current) {
-      console.log('⏱️ Conference active (both participants present) - starting call timer');
+      console.log('⏱️ Customer answered - starting call timer');
       startTimer();
       // Ensure timer is visible immediately by setting it to 0
       setCallTimer(0);
