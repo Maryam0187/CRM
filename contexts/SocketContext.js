@@ -291,6 +291,34 @@ export const SocketProvider = ({ children }) => {
       window.dispatchEvent(callStatusEvent);
     });
 
+    // Participant update handlers (real-time participant status)
+    socketInstance.on('participant_update', (data) => {
+      console.log('📊 Participant update received:', data);
+      
+      // Update call status with participant data if it exists
+      if (data.callSid) {
+        setCallStatusUpdates(prev => {
+          const newMap = new Map(prev);
+          const existingData = newMap.get(data.callSid) || {};
+          // Merge participant data into existing call status
+          newMap.set(data.callSid, {
+            ...existingData,
+            participants: data.participants,
+            participantCount: data.count,
+            conferenceName: data.conferenceName
+          });
+          return newMap;
+        });
+      }
+
+      // Dispatch custom event for components to listen to
+      const participantEvent = new CustomEvent('participantUpdate', {
+        detail: { participantData: data }
+      });
+      console.log('📊 Dispatching participant update event:', participantEvent);
+      window.dispatchEvent(participantEvent);
+    });
+
     // Force logout handler
     socketInstance.on('force_logout', (data) => {
       console.log('🔐 Force logout received:', data);

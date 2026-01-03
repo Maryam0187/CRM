@@ -25,6 +25,27 @@ function deriveCallStatus(callStatus) {
   return statusMap[callStatus] || 'ringing';
 }
 
+// Helper: Normalize Twilio direction to database enum values
+function normalizeDirection(twilioDirection) {
+  if (!twilioDirection) return 'outbound';
+  
+  const direction = String(twilioDirection).toLowerCase();
+  
+  // Twilio sends various direction values, normalize to 'inbound' or 'outbound'
+  if (direction === 'inbound' || direction === 'inbound-api') {
+    return 'inbound';
+  }
+  
+  // All outbound variations map to 'outbound'
+  // 'outbound-api', 'outbound-dial', 'outbound', etc.
+  if (direction.startsWith('outbound')) {
+    return 'outbound';
+  }
+  
+  // Default to outbound if unknown
+  return 'outbound';
+}
+
 // Helper: Check if number is a phone number
 function isPhoneNumber(num) {
   if (!num) return false;
@@ -175,7 +196,7 @@ async function saveCallLog(callSid, data, callLog) {
     agentId,
     customerId: customerId ? parseInt(customerId, 10) : null,
     saleId: saleId ? parseInt(saleId, 10) : null,
-    direction: direction || 'outbound',
+    direction: normalizeDirection(direction) || 'outbound', // Ensure direction is normalized
     fromNumber: from || 'unknown',
     toNumber: to || 'unknown',
     status,
@@ -223,7 +244,8 @@ export async function POST(request) {
     const formData = await request.formData();
     const callSid = formData.get('CallSid');
     const callStatus = formData.get('CallStatus');
-    const direction = formData.get('Direction') || directionFromUrl || 'outbound';
+    const twilioDirection = formData.get('Direction') || directionFromUrl || 'outbound';
+    const direction = normalizeDirection(twilioDirection); // Normalize to 'inbound' or 'outbound'
     const from = formData.get('From');
     const to = formData.get('To');
     const duration = formData.get('CallDuration');
@@ -298,7 +320,8 @@ export async function POST(request) {
       participants: participantStatuses, // Include participant statuses
       twilioData: {
         callStatus,
-        direction,
+        direction: twilioDirection, // Keep original Twilio direction in twilioData
+        normalizedDirection: direction, // Store normalized direction
         from,
         to,
         duration,
@@ -314,6 +337,22 @@ export async function POST(request) {
     // Broadcast status immediately (before database operations)
     broadcastCallStatus(callSid, statusData, agentId);
 
+    // Send dedicated participant update if participants are available
+    if (participantStatuses && participantStatuses.length > 0) {
+      socketManager.sendParticipantUpdate(callSid, conferenceName, participantStatuses, agentId);
+    }
+
+    // Register/Unregister call for automatic participant monitoring
+    if (conferenceName && agentId) {
+      if (!CALL_END_STATUSES.includes(derivedStatus)) {
+        // Register for monitoring (active call)
+        socketManager.registerActiveCall(callSid, conferenceName, agentId);
+      } else {
+        // Unregister when call ends
+        socketManager.unregisterActiveCall(callSid);
+      }
+    }
+
     // Save to database only when call ends
     const isCallEnded = CALL_END_STATUSES.includes(derivedStatus) || CALL_END_STATUSES.includes(callStatus);
     let finalCallLog = callLog;
@@ -322,7 +361,8 @@ export async function POST(request) {
       const twilioData = {
         callSid,
         callStatus,
-        direction,
+        direction: twilioDirection, // Keep original Twilio direction
+        normalizedDirection: direction, // Store normalized direction
         from,
         to,
         duration,

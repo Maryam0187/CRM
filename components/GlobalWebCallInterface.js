@@ -75,8 +75,8 @@ export default function GlobalWebCallInterface() {
     resetTimer
   } = useCall();
   
-  // Get user from auth context (needed for device setup)
-  const { user } = useAuth();
+  // Get user and access token from auth context (needed for device setup)
+  const { user, accessToken } = useAuth();
   
   const { getCallStatus } = useSocket();
   const [isMinimized, setIsMinimized] = useState(false);
@@ -1042,11 +1042,25 @@ export default function GlobalWebCallInterface() {
     };
 
     window.addEventListener('callStatusUpdate', handleStatusUpdate);
+
+    // Listen for dedicated participant updates
+    const handleParticipantUpdate = (event) => {
+      const { participantData } = event.detail;
+      if (participantData?.callSid === currentCallSid) {
+        if (participantData.participants && Array.isArray(participantData.participants)) {
+          setParticipants(participantData.participants);
+          console.log('📊 Participants updated via socket:', participantData.participants);
+        }
+      }
+    };
+
+    window.addEventListener('participantUpdate', handleParticipantUpdate);
     
     const interval = setInterval(updateStatus, 1000);
 
     return () => {
       window.removeEventListener('callStatusUpdate', handleStatusUpdate);
+      window.removeEventListener('participantUpdate', handleParticipantUpdate);
       clearInterval(interval);
     };
   }, [currentCallSid, getCallStatus, updateCallStatus, device, endCall, disconnectCall]);
