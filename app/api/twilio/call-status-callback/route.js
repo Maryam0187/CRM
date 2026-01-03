@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import socketManager from '../../../../lib/socket';
 import { Op } from 'sequelize';
+import { getConferenceParticipants, getParticipantStatus } from '../../../../lib/twilio';
 
 // Constants
 const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
@@ -250,6 +251,33 @@ export async function POST(request) {
     const derivedStatus = deriveCallStatus(callStatus);
     const agentId = await resolveAgentId(agentIdFromUrl, callLog, from, to);
 
+    // Get conference name from call log or construct it
+    const conferenceName = callLog?.twilioData?.conferenceName || 
+                          (agentId ? `call-${agentId}` : null);
+
+    // Fetch participant statuses if conference exists and call is active
+    let participantStatuses = null;
+    if (conferenceName && !CALL_END_STATUSES.includes(derivedStatus)) {
+      try {
+        const participants = await getConferenceParticipants(conferenceName);
+        participantStatuses = participants.map(p => ({
+          callSid: p.callSid,
+          status: p.status, // queued, connecting, ringing, connected, complete, failed
+          muted: p.muted,
+          hold: p.hold
+        }));
+        
+        console.log('📊 Conference participants status:', {
+          conferenceName,
+          participantsCount: participantStatuses.length,
+          statuses: participantStatuses.map(p => `${p.callSid.substring(0, 10)}...: ${p.status}`)
+        });
+      } catch (participantError) {
+        console.warn('⚠️ Could not fetch participant statuses:', participantError.message);
+        // Don't fail the callback if participant fetch fails
+      }
+    }
+
     // Prepare status data for broadcasting
     const statusData = {
       callSid,
@@ -266,6 +294,8 @@ export async function POST(request) {
       customerId: callLog?.customerId || customerIdFromUrl || null,
       saleId: callLog?.saleId || saleIdFromUrl || null,
       callPurpose: callLog?.callPurpose || callPurposeFromUrl || null,
+      conferenceName,
+      participants: participantStatuses, // Include participant statuses
       twilioData: {
         callStatus,
         direction,
