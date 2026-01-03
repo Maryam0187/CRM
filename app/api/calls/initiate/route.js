@@ -41,24 +41,13 @@ export async function POST(request) {
 
     // Get agent information
     const agent = await sequelizeDb.User.findByPk(parseInt(agentId), {
-      attributes: ['id', 'firstName', 'lastName', 'callStatus']
+      attributes: ['id', 'firstName', 'lastName']
     });
 
     if (!agent) {
       return NextResponse.json(
         { success: false, message: 'Agent not found' },
         { status: 404 }
-      );
-    }
-
-    // Check if agent is available
-    if (agent.callStatus === 'busy') {
-      return NextResponse.json(
-        { 
-          success: false, 
-          message: 'Agent is currently busy on another call' 
-        },
-        { status: 409 }
       );
     }
 
@@ -83,8 +72,15 @@ export async function POST(request) {
       );
     }
 
-    // Include agentId in status callback URL so we don't need to extract it later
-    const statusCallbackUrl = `${getWebhookUrl('/api/twilio/call-status-callback')}?agentId=${agentId}`;
+    // Build status callback URL with call metadata - we'll save the log only when call ends
+    const statusCallbackBaseUrl = getWebhookUrl('/api/twilio/call-status-callback');
+    const statusCallbackUrl = new URL(statusCallbackBaseUrl);
+    statusCallbackUrl.searchParams.set('agentId', agentId.toString());
+    if (customerId) statusCallbackUrl.searchParams.set('customerId', customerId.toString());
+    if (saleId) statusCallbackUrl.searchParams.set('saleId', saleId.toString());
+    statusCallbackUrl.searchParams.set('callPurpose', callPurpose);
+    statusCallbackUrl.searchParams.set('direction', 'outbound');
+    
     const voiceUrl = `${getWebhookUrl('/api/twilio/voice-response')}?agentId=${agentId}`;
 
     // Conference name for agent to join via Voice SDK
@@ -101,7 +97,7 @@ export async function POST(request) {
       url: voiceUrl,
       to: formattedNumber,  // Customer phone number
       from: twilioPhoneNumber,
-      statusCallback: statusCallbackUrl,
+      statusCallback: statusCallbackUrl.toString(),
       statusCallbackEvent: ['initiated', 'queued', 'ringing', 'answered', 'completed'],
       // Enable Answering Machine Detection (AMD) to detect voicemail
       machineDetection: 'Enable',
@@ -139,28 +135,6 @@ export async function POST(request) {
       totalCalls: (agent.totalCalls || 0) + 1
     });
 
-    // Create call log entry
-    const callLog = await sequelizeDb.CallLog.create({
-      callSid: call.sid,
-      customerId: customerId || null,
-      saleId: saleId || null,
-      agentId,
-      direction: 'outbound',
-      fromNumber: twilioPhoneNumber,
-      toNumber: formattedNumber,
-      status: 'queued',
-      callPurpose,
-      twilioData: {
-        callSid: call.sid,
-        accountSid: call.accountSid,
-        to: call.to,
-        from: call.from,
-        status: call.status,
-        direction: call.direction,
-        conferenceName: conferenceName
-      }
-    });
-
     // Return call info for agent
     return NextResponse.json({
       success: true,
@@ -169,9 +143,8 @@ export async function POST(request) {
         status: call.status,
         to: call.to,
         from: call.from,
-        callLogId: callLog.id,
         conferenceName: conferenceName,
-        message: 'Call initiated - agent should join via Voice SDK'
+        message: 'Call initiated - agent should join via Voice SDK. Call log will be saved when call ends.'
       },
       message: 'Call initiated successfully'
     });

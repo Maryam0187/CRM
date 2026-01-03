@@ -49,24 +49,6 @@ function deriveCallStatus(callStatus, callDuration) {
 }
 
 /**
- * Extract agentId from client call identifier (e.g., 'client:agent-1' -> 1)
- */
-function extractAgentIdFromClientCall(clientIdentifier) {
-  if (!clientIdentifier || typeof clientIdentifier !== 'string') {
-    return null;
-  }
-  
-  // Handle format: 'client:agent-1' or 'client:agent-123'
-  const match = clientIdentifier.match(/client:agent-(\d+)/i);
-  if (match && match[1]) {
-    const agentId = parseInt(match[1], 10);
-    return isNaN(agentId) ? null : agentId;
-  }
-  
-  return null;
-}
-
-/**
  * Find agentId from related call logs by matching phone numbers
  */
 async function findAgentIdFromRelatedCalls(fromNumber, toNumber) {
@@ -109,226 +91,6 @@ async function findAgentIdFromRelatedCalls(fromNumber, toNumber) {
     console.error('Error finding agentId from related calls:', error);
     return null;
   }
-}
-
-/**
- * Find or create parent call log
- */
-async function findOrCreateParentCall(parentCallSid, callData) {
-  if (!parentCallSid) {
-    return null;
-  }
-  
-  let parentCallLog = await sequelizeDb.CallLog.findOne({
-    where: { callSid: parentCallSid }
-  });
-  
-  if (!parentCallLog) {
-    // Try to find agentId from related calls if not provided
-    let agentId = callData.agentId;
-    if (!agentId) {
-      agentId = await findAgentIdFromRelatedCalls(callData.from, callData.to);
-    }
-    
-    // If still no agentId, we cannot create the call log (agentId is required)
-    // In this case, we'll skip creating the parent call log and return null
-    if (!agentId) {
-      console.warn(`⚠️ Cannot create parent call log for ${parentCallSid}: agentId is required but not found`);
-      return null;
-    }
-    
-    parentCallLog = await sequelizeDb.CallLog.create({
-      callSid: parentCallSid,
-      customerId: callData.customerId || null,
-      saleId: callData.saleId || null,
-      agentId: agentId,
-      direction: callData.direction || 'outbound',
-      fromNumber: callData.from || 'unknown',
-      toNumber: callData.to || 'unknown',
-      status: 'queued',
-      callPurpose: callData.callPurpose || 'follow_up',
-      twilioData: {
-        callSid: parentCallSid,
-        isParentCall: true,
-        createdAt: new Date().toISOString()
-      }
-    });
-  }
-  
-  return parentCallLog;
-}
-
-/**
- * Find or create call log (handles both parent and child calls)
- */
-async function findOrCreateCallLog(callSid, parentCallLog, callData) {
-  let callLog = await sequelizeDb.CallLog.findOne({
-    where: { callSid }
-  });
-  
-  if (!callLog) {
-    // Determine if this is a client call
-    const isClientCall = callData.from && callData.from.startsWith('client:');
-    
-    // Try to find agentId from multiple sources (prioritize callData.agentId which comes from URL)
-    let agentId = callData.agentId || parentCallLog?.agentId;
-    
-    console.log('🔍 Finding agentId for call:', {
-      callSid,
-      isClientCall,
-      agentIdFromCallData: callData.agentId,
-      agentIdFromParent: parentCallLog?.agentId,
-      currentAgentId: agentId
-    });
-    
-    // For client calls, try to extract agentId from the client identifier
-    if (!agentId && isClientCall) {
-      const extractedAgentId = extractAgentIdFromClientCall(callData.from);
-      if (extractedAgentId) {
-        // Verify the agent exists in the database
-        try {
-          const agent = await sequelizeDb.User.findByPk(extractedAgentId);
-          if (agent) {
-            agentId = extractedAgentId;
-            console.log(`✅ Extracted agentId ${agentId} from client call identifier: ${callData.from}`);
-          } else {
-            console.warn(`⚠️ Extracted agentId ${extractedAgentId} from client call but agent not found in database`);
-          }
-        } catch (error) {
-          console.error('Error verifying extracted agentId:', error);
-        }
-      }
-      
-      // If extraction didn't work, look for very recent calls (within last 5 minutes)
-      // Client calls happen shortly after parent calls
-      if (!agentId) {
-        try {
-          const recentCall = await sequelizeDb.CallLog.findOne({
-            where: {
-              agentId: { [Op.ne]: null },
-              createdAt: {
-                [Op.gte]: new Date(Date.now() - 300000) // Last 5 minutes
-              },
-              status: {
-                [Op.in]: ['queued', 'ringing', 'in-progress']
-              }
-            },
-            order: [['created_at', 'DESC']],
-            limit: 1
-          });
-          
-          if (recentCall) {
-            agentId = recentCall.agentId;
-            console.log(`✅ Found agentId ${agentId} from recent active call for client call ${callSid}`);
-          }
-        } catch (error) {
-          console.error('Error finding recent call for client call agentId:', error);
-        }
-      }
-    }
-    
-    // If still no agentId, try to find from related calls by phone numbers
-    if (!agentId) {
-      agentId = await findAgentIdFromRelatedCalls(
-        callData.from || parentCallLog?.fromNumber,
-        callData.to || parentCallLog?.toNumber
-      );
-    }
-    
-    // If still no agentId, try one more thing: look for any call log with matching numbers
-    if (!agentId) {
-      const fromNum = callData.from || parentCallLog?.fromNumber;
-      const toNum = callData.to || parentCallLog?.toNumber;
-      
-      // Only search if we have valid phone numbers (not client calls)
-      if (fromNum && toNum && 
-          !fromNum.startsWith('client:') && 
-          fromNum !== 'unknown' && toNum !== 'unknown') {
-        try {
-          const recentCall = await sequelizeDb.CallLog.findOne({
-            where: {
-              [Op.and]: [
-                {
-                  [Op.or]: [
-                    { fromNumber: fromNum },
-                    { toNumber: toNum }
-                  ]
-                },
-                { agentId: { [Op.ne]: null } },
-                {
-                  createdAt: {
-                    [Op.gte]: new Date(Date.now() - 60000) // Last minute
-                  }
-                }
-              ]
-            },
-            order: [['created_at', 'DESC']],
-            limit: 1
-          });
-          
-          agentId = recentCall?.agentId || null;
-        } catch (error) {
-          console.error('Error finding recent call for agentId:', error);
-          agentId = null;
-        }
-      }
-    }
-    
-    // If we still don't have an agentId, we cannot proceed
-    // This should not happen for normal calls, but we need to handle it gracefully
-    if (!agentId) {
-      console.error(`❌ Cannot create call log for ${callSid}: agentId is required but not found`, {
-        from: callData.from || parentCallLog?.fromNumber,
-        to: callData.to || parentCallLog?.toNumber,
-        parentCallSid: parentCallLog?.callSid
-      });
-      throw new Error(`Cannot create call log: agentId is required for call ${callSid}`);
-    }
-    
-    callLog = await sequelizeDb.CallLog.create({
-      callSid,
-      customerId: parentCallLog?.customerId || callData.customerId || null,
-      saleId: parentCallLog?.saleId || callData.saleId || null,
-      agentId: agentId,
-      direction: callData.direction || parentCallLog?.direction || 'outbound',
-      fromNumber: callData.from || parentCallLog?.fromNumber || 'unknown',
-      toNumber: callData.to || parentCallLog?.toNumber || 'unknown',
-      status: 'queued',
-      callPurpose: parentCallLog?.callPurpose || callData.callPurpose || 'follow_up',
-      twilioData: {
-        callSid,
-        parentCallSid: parentCallLog?.callSid || null,
-        isChildCall: !!parentCallLog,
-        isClientCall: isClientCall,
-        isParentCall: !parentCallLog && !isClientCall,
-        createdAt: new Date().toISOString()
-      }
-    });
-  } else {
-    // Update parentCallSid in twilioData if not set
-    const twilioData = callLog.twilioData || {};
-    const updates = {};
-    
-    if (!twilioData.parentCallSid && parentCallLog) {
-      updates.twilioData = {
-        ...twilioData,
-        parentCallSid: parentCallLog.callSid,
-        isChildCall: true
-      };
-    }
-    
-    // If call log exists but doesn't have agentId, try to set it from callData or parent
-    if (!callLog.agentId && (callData.agentId || parentCallLog?.agentId)) {
-      updates.agentId = callData.agentId || parentCallLog.agentId;
-      console.log(`✅ Updating existing call log ${callSid} with agentId: ${updates.agentId}`);
-    }
-    
-    if (Object.keys(updates).length > 0) {
-      await callLog.update(updates);
-    }
-  }
-  
-  return callLog;
 }
 
 /**
@@ -507,9 +269,13 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    // Extract agentId from URL query parameters (passed when call is initiated)
+    // Extract call metadata from URL query parameters (passed when call is initiated)
     const url = new URL(request.url);
     const agentIdFromUrl = url.searchParams.get('agentId');
+    const customerIdFromUrl = url.searchParams.get('customerId');
+    const saleIdFromUrl = url.searchParams.get('saleId');
+    const callPurposeFromUrl = url.searchParams.get('callPurpose');
+    const directionFromUrl = url.searchParams.get('direction');
     
     // Extract form data
     const formData = await request.formData();
@@ -546,38 +312,50 @@ export async function POST(request) {
       }, { status: 400 });
     }
     
-    // Find or create parent call log if parentCallSid exists
-    let parentCallLog = null;
-    if (parentCallSid && parentCallSid !== callSid) {
-      parentCallLog = await findOrCreateParentCall(parentCallSid, {
-        from,
-        to,
-        direction,
-        customerId: null,
-        saleId: null,
-        agentId: agentIdFromUrl || null
-      });
+    // Determine if this is a client call (agent browser call) - SKIP SAVING THESE
+    const isClientCall = from && from.startsWith('client:');
+    
+    // Skip saving logs for client calls (agent browser calls) - only save customer leg
+    if (isClientCall) {
+      console.log('⏭️ Skipping log save for client call (agent browser):', callSid);
+      // Still broadcast status for real-time UI, but don't save to database
+      const agentIdForBroadcast = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
+      if (agentIdForBroadcast) {
+        const immediateStatusData = {
+          callSid,
+          status: deriveCallStatus(callStatus, duration ? parseInt(duration) : 0),
+          duration: duration ? parseInt(duration) : null,
+          direction,
+          from,
+          to,
+          startTime,
+          endTime,
+          answerTime,
+          hangupCause,
+          agentId: agentIdForBroadcast,
+          twilioData: {
+            callStatus,
+            direction,
+            from,
+            to,
+            duration,
+            startTime,
+            endTime,
+            answerTime,
+            hangupCause
+          }
+        };
+        socketManager.sendCallStatusToAgent(agentIdForBroadcast, callSid, immediateStatusData);
+        socketManager.sendCallStatusUpdate(callSid, immediateStatusData);
+      }
+      return NextResponse.xml('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     }
     
-    // Find or create call log (saves ALL calls including client calls and child calls)
-    // Use agentId from URL if available (for parent calls), otherwise extract from client identifier
-    let callLog;
-    try {
-      callLog = await findOrCreateCallLog(callSid, parentCallLog, {
-        from,
-        to,
-        direction,
-        customerId: null,
-        saleId: null,
-        agentId: agentIdFromUrl || null
-      });
-    } catch (error) {
-      // If call log creation fails, try to set agent back to available
-      if (agentIdFromUrl) {
-        await setAgentAvailableOnError(agentIdFromUrl);
-      }
-      throw error;
-    }
+    // For customer calls, check if call log already exists (might exist from inbound calls)
+    // We'll only create/update it when the call ends
+    let callLog = await sequelizeDb.CallLog.findOne({
+      where: { callSid }
+    });
     
     // Derive correct status - simplified to trust Twilio immediately
     const callDuration = duration ? parseInt(duration) : 0;
@@ -589,142 +367,193 @@ export async function POST(request) {
       duration: callDuration
     });
     
-    // BROADCAST STATUS IMMEDIATELY - before ANY database operations to minimize delay
-    // This ensures frontend gets status updates as fast as possible
-    const isClientCall = from && from.startsWith('client:');
-    
     // Get agentId from URL or from callLog if available
     let agentIdForBroadcast = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
     if (!agentIdForBroadcast && callLog && callLog.agentId) {
       agentIdForBroadcast = callLog.agentId;
     }
     
-    if (!isClientCall) {
-      // Broadcast immediately with available data - don't wait for database
-      const immediateStatusData = {
-        callSid,
-        status: derivedStatus,
-        duration: duration ? parseInt(duration) : null,
-        direction,
-        from,
-        to,
-        startTime,
-        endTime,
-        answerTime,
-        hangupCause,
-        agentId: agentIdForBroadcast,
-        customerId: callLog?.customerId || null,
-        saleId: callLog?.saleId || null,
-        callPurpose: callLog?.callPurpose || null,
-        twilioData: {
-          callStatus,
-          direction,
-          from,
-          to,
-          duration,
-          startTime,
-          endTime,
-          answerTime,
-          hangupCause,
-          answeredBy
-        }
-      };
-      
-      // Broadcast immediately - this happens BEFORE database updates
-      if (agentIdForBroadcast) {
-        socketManager.sendCallStatusToAgent(agentIdForBroadcast, callSid, immediateStatusData);
-      }
-      socketManager.sendCallStatusUpdate(callSid, immediateStatusData);
-      console.log('⚡ Status broadcasted IMMEDIATELY:', {
-        callSid,
-        status: derivedStatus,
-        agentId: agentIdForBroadcast,
-        twilioStatus: callStatus
-      });
-    }
-    
-    // Prepare update data
-    const existingTwilioData = callLog.twilioData || {};
-    const twilioDataUpdate = {
-      ...existingTwilioData,
-      callStatus,
+    // Broadcast immediately with available data - don't wait for database
+    // This ensures frontend gets status updates as fast as possible
+    const immediateStatusData = {
+      callSid,
+      status: derivedStatus,
+      duration: duration ? parseInt(duration) : null,
       direction,
       from,
       to,
-      duration,
       startTime,
       endTime,
       answerTime,
       hangupCause,
-      answeredBy,
-      parentCallSid: parentCallSid || existingTwilioData.parentCallSid,
-      lastUpdated: new Date().toISOString()
-    };
-    
-    // Broadcast full status update after getting callLog (for complete data)
-    const isChildCall = existingTwilioData.isChildCall || twilioDataUpdate.isChildCall;
-    
-    if (!isClientCall && !isChildCall) {
-      const callStatusData = {
-        callSid,
-        status: derivedStatus,
-        duration: duration ? parseInt(duration) : null,
+      agentId: agentIdForBroadcast,
+      customerId: callLog?.customerId || customerIdFromUrl || null,
+      saleId: callLog?.saleId || saleIdFromUrl || null,
+      callPurpose: callLog?.callPurpose || callPurposeFromUrl || null,
+      twilioData: {
+        callStatus,
         direction,
         from,
         to,
+        duration,
         startTime,
         endTime,
         answerTime,
         hangupCause,
-        customerId: callLog.customerId,
-        saleId: callLog.saleId,
-        agentId: callLog.agentId,
-        callPurpose: callLog.callPurpose,
-        parentCallSid: parentCallSid || existingTwilioData.parentCallSid,
-        twilioData: twilioDataUpdate
-      };
-      
-      // Broadcast full status update (with complete data from database)
-      broadcastStatusUpdate(callSid, callStatusData, callLog);
-    }
-    
-    const updateData = {
-      status: derivedStatus,
-      duration: duration ? parseInt(duration) : null,
-      twilioData: twilioDataUpdate,
-      updatedAt: new Date()
+        answeredBy
+      }
     };
     
-    // Update call log (after broadcasting to avoid delays)
-    await callLog.update(updateData);
-    await callLog.reload();
+    // Broadcast ALL status updates immediately - this happens BEFORE database updates
+    // This ensures frontend receives real-time updates for ALL callback statuses
+    if (agentIdForBroadcast) {
+      socketManager.sendCallStatusToAgent(agentIdForBroadcast, callSid, immediateStatusData);
+    }
+    socketManager.sendCallStatusUpdate(callSid, immediateStatusData);
     
-    if (callLog.status !== derivedStatus) {
-      await callLog.update({ status: derivedStatus });
-      await callLog.reload();
+    // Also broadcast via broadcastStatusUpdate for supervisors/admins (if we have callLog)
+    if (callLog && callLog.agentId) {
+      broadcastStatusUpdate(callSid, immediateStatusData, callLog);
+    } else if (agentIdForBroadcast) {
+      // Even if callLog doesn't exist yet, broadcast to supervisors/admins
+      socketManager.sendCallStatusToSupervisors(callSid, immediateStatusData);
+      socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, immediateStatusData);
     }
     
-    // Handle special cases
-    if (answeredBy === 'machine' && callLog) {
-      await callLog.update({
-        status: 'voicemail',
-        twilioData: {
-          ...twilioDataUpdate,
-          answeredBy: 'machine',
-          isVoicemail: true,
-          voicemailDetectedAt: new Date().toISOString()
+    console.log('⚡ Status broadcasted IMMEDIATELY (all statuses):', {
+      callSid,
+      status: derivedStatus,
+      agentId: agentIdForBroadcast,
+      twilioStatus: callStatus
+    });
+    
+    // Only save call log when call ends (completed, failed, busy, no-answer, canceled)
+    const callEndStatuses = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
+    const isCallEnded = callEndStatuses.includes(derivedStatus) || callEndStatuses.includes(callStatus);
+    
+    if (isCallEnded) {
+      // Call has ended - save to database (status already broadcasted above for all statuses)
+      // Now do database operations (after broadcasting for real-time notifications)
+      if (!callLog) {
+        // Create new call log with all data
+        console.log('💾 Creating call log (call ended):', {
+          callSid,
+          status: derivedStatus,
+          agentId: agentIdFromUrl
+        });
+        
+        // Get agentId - prioritize from URL, then try to find from related calls
+        let agentId = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
+        if (!agentId) {
+          // Try to find from related calls by phone numbers
+          agentId = await findAgentIdFromRelatedCalls(from, to);
         }
+        
+        if (!agentId) {
+          console.error(`❌ Cannot create call log for ${callSid}: agentId is required but not found`);
+          // Status already broadcasted above, so we're good
+        } else {
+          const twilioDataUpdate = {
+            callSid,
+            callStatus,
+            direction: direction || directionFromUrl || 'outbound',
+            from,
+            to,
+            duration,
+            startTime,
+            endTime,
+            answerTime,
+            hangupCause,
+            answeredBy,
+            parentCallSid,
+            createdAt: new Date().toISOString(),
+            lastUpdated: new Date().toISOString()
+          };
+          
+          const newCallLog = await sequelizeDb.CallLog.create({
+            callSid,
+            customerId: customerIdFromUrl ? parseInt(customerIdFromUrl, 10) : null,
+            saleId: saleIdFromUrl ? parseInt(saleIdFromUrl, 10) : null,
+            agentId: agentId,
+            direction: directionFromUrl || direction || 'outbound',
+            fromNumber: from || 'unknown',
+            toNumber: to || 'unknown',
+            status: derivedStatus,
+            duration: duration ? parseInt(duration) : null,
+            callPurpose: callPurposeFromUrl || 'follow_up',
+            twilioData: twilioDataUpdate
+          });
+          
+          callLog = newCallLog;
+        }
+      } else {
+        // Update existing call log with final status
+        console.log('💾 Updating call log (call ended):', {
+          callSid,
+          oldStatus: callLog.status,
+          newStatus: derivedStatus,
+          twilioStatus: callStatus
+        });
+        
+        const existingTwilioData = callLog.twilioData || {};
+        const twilioDataUpdate = {
+          ...existingTwilioData,
+          callStatus,
+          direction: direction || existingTwilioData.direction,
+          from: from || existingTwilioData.from,
+          to: to || existingTwilioData.to,
+          duration: duration || existingTwilioData.duration,
+          startTime: startTime || existingTwilioData.startTime,
+          endTime: endTime || existingTwilioData.endTime,
+          answerTime: answerTime || existingTwilioData.answerTime,
+          hangupCause: hangupCause || existingTwilioData.hangupCause,
+          answeredBy: answeredBy || existingTwilioData.answeredBy,
+          parentCallSid: parentCallSid || existingTwilioData.parentCallSid,
+          lastUpdated: new Date().toISOString()
+        };
+        
+        const updateData = {
+          status: derivedStatus,
+          duration: duration ? parseInt(duration) : (callLog.duration || null),
+          twilioData: twilioDataUpdate,
+          updatedAt: new Date()
+        };
+        
+        // Update call log
+        await callLog.update(updateData);
+        await callLog.reload();
+      }
+    } else {
+      // Call is still in progress - don't save to database, just broadcast
+      console.log('⏭️ Skipping database save (call in progress):', {
+        callSid,
+        status: derivedStatus,
+        twilioStatus: callStatus
       });
-      await handleVoicemail(callSid);
     }
     
-    if (callStatus === 'no-answer' && callLog) {
-      await handleNoAnswer(callSid);
+    // Handle special cases (only if call ended and we saved the log)
+    if (isCallEnded && callLog) {
+      if (answeredBy === 'machine' && callLog) {
+        await callLog.update({
+          status: 'voicemail',
+          twilioData: {
+            ...(callLog.twilioData || {}),
+            answeredBy: 'machine',
+            isVoicemail: true,
+            voicemailDetectedAt: new Date().toISOString()
+          }
+        });
+        await handleVoicemail(callSid);
+      }
+      
+      if (callStatus === 'no-answer' && callLog) {
+        await handleNoAnswer(callSid);
+      }
     }
     
-    // Update agent status (only for non-client calls with agentId)
-    // Note: isClientCall already declared above
-    if (!isClientCall && callLog.agentId) {
+    // Update agent status (only for customer calls with agentId)
+    if (callLog && callLog.agentId) {
       try {
         const agent = await sequelizeDb.User.findByPk(callLog.agentId);
         if (agent) {
@@ -747,7 +576,7 @@ export async function POST(request) {
     // For error statuses and completed calls, ensure agent is set to available
     // This is a safety net to ensure agent status is reset even if updateAgentStatus fails
     const endStatuses = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
-    if (endStatuses.includes(derivedStatus) && callLog.agentId && !isClientCall) {
+    if (endStatuses.includes(derivedStatus) && callLog && callLog.agentId) {
       try {
         // Double-check: if call ended, ensure agent is available
         const activeCalls = await sequelizeDb.CallLog.count({
@@ -777,7 +606,7 @@ export async function POST(request) {
     }
     
     // Update related records (only for completed calls with duration)
-    if (callStatus === 'completed' && duration && duration > 0 && !isClientCall) {
+    if (callStatus === 'completed' && duration && duration > 0 && callLog) {
       await updateRelatedRecords(callLog, parseInt(duration));
     }
     

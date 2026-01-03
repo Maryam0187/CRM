@@ -446,28 +446,22 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
         throw new Error('No agent available to assign to inbound call');
       }
       
-      callLog = await sequelizeDb.CallLog.create({
-        callSid: callSid,
-        customerId: customerId,
-        agentId: assignedAgentId, // Always assign a valid agentId
-        direction: 'inbound',
-        fromNumber: callerNumber,
-        toNumber: calledNumber,
-        status: 'ringing',
-        callPurpose: 'support', // Default purpose for inbound calls
-        twilioData: {
-          conferenceName: conferenceName, // Store conference name in call log
-          assignedFrom: lastSaleAgentId ? 'last_sale_agent' : 'admin_fallback' // Track how agent was assigned
-        }
-      });
-      console.log(`✅ Call log created for inbound call: ${callLog.id} (assigned to agent ${assignedAgentId})`);
+      // Don't create call log here - it will be created when call ends in status callback
+      // Store metadata in status callback URL so we can save it later
+      console.log(`📞 Inbound call received: ${callSid} (assigned to agent ${assignedAgentId}) - log will be saved when call ends`);
     } catch (logError) {
-      console.error('❌ Failed to create call log:', logError);
+      console.error('❌ Failed to process inbound call:', logError);
       // Log the error but don't fail the call - the call can still proceed
     }
 
-    // Get status callback URL for Dial verb
-    const statusCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
+    // Get status callback URL for Dial verb - include metadata so we can save log when call ends
+    const statusCallbackBaseUrl = getWebhookUrl('/api/twilio/call-status-callback');
+    const statusCallbackUrl = new URL(statusCallbackBaseUrl);
+    statusCallbackUrl.searchParams.set('agentId', assignedAgentId.toString());
+    if (customerId) statusCallbackUrl.searchParams.set('customerId', customerId.toString());
+    if (lastSaleId) statusCallbackUrl.searchParams.set('saleId', lastSaleId.toString());
+    statusCallbackUrl.searchParams.set('callPurpose', 'support');
+    statusCallbackUrl.searchParams.set('direction', 'inbound');
     
     // Generate TwiML to place caller in conference
     // Allow up to 5 participants (caller + multiple agents/admins)
@@ -477,7 +471,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice">Thank you for calling. Please hold while we connect you with an agent.</Say>
-  <Dial record="false" timeout="60" timeLimit="3600" answerOnMedia="false" hangupOnStar="false" statusCallback="${statusCallbackUrl}" statusCallbackEvent="initiated ringing answered completed">
+  <Dial record="false" timeout="60" timeLimit="3600" answerOnMedia="false" hangupOnStar="false" statusCallback="${statusCallbackUrl.toString()}" statusCallbackEvent="initiated ringing answered completed">
     <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="false" maxParticipants="5" muted="false">${conferenceName}</Conference>
   </Dial>
 </Response>`;
