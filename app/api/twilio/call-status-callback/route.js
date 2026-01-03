@@ -9,18 +9,26 @@ import { Op } from 'sequelize';
 
 /**
  * Derive correct call status from Twilio data
- * Since we're only processing customer leg callbacks, we can trust Twilio's status directly
+ * Since we're only processing customer leg callbacks, we can mostly trust Twilio's status
+ * But we still need to validate 'in-progress' to ensure customer actually answered
  */
-function deriveCallStatus(callStatus, callDuration) {
-  // Direct mapping - trust Twilio's status for customer leg
+function deriveCallStatus(callStatus, callDuration, answerTime) {
   switch (callStatus) {
     case 'ringing':
       return 'ringing';
       
     case 'answered':
     case 'in-progress':
-      // Customer leg: if Twilio says in-progress/answered, customer answered
-      return 'in-progress';
+      // Even for customer leg, Twilio can send 'in-progress' prematurely
+      // Only consider in-progress if we have proof customer answered:
+      // - duration > 0 (call has been connected)
+      // - answerTime is present (customer picked up)
+      if (callDuration > 0 || (answerTime && answerTime.trim() !== '')) {
+        return 'in-progress';
+      } else {
+        // Still ringing - Twilio sent premature status
+        return 'ringing';
+      }
       
     case 'no-answer':
       return 'no-answer';
@@ -333,7 +341,10 @@ export async function POST(request) {
         isCustomerLeg: false
       });
       // Return success but don't process - this prevents confusion from agent leg status
-      return NextResponse.xml('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      const twiml = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
+      return new NextResponse(twiml, {
+        headers: { 'Content-Type': 'text/xml' }
+      });
     }
     
     console.log('✅ Processing customer leg callback:', {
@@ -350,9 +361,9 @@ export async function POST(request) {
       where: { callSid }
     });
     
-    // Derive correct status - since we're only processing customer leg, trust Twilio's status
+    // Derive correct status - validate 'in-progress' to ensure customer actually answered
     const callDuration = duration ? parseInt(duration) : 0;
-    const derivedStatus = deriveCallStatus(callStatus, callDuration);
+    const derivedStatus = deriveCallStatus(callStatus, callDuration, answerTime);
     
     console.log('📞 Status derivation:', {
       twilioStatus: callStatus,
