@@ -7,50 +7,72 @@ import { Op } from 'sequelize';
 // HELPER FUNCTIONS
 // ============================================================================
 
+// Track call status in memory (since we don't save until call ends)
+const callStatusCache = new Map(); // callSid -> lastStatus
+
+// Track conference participants to determine when conference is active (both agent + customer present)
+// conferenceName -> { agentPresent: boolean, customerPresent: boolean, customerCallSid: string, agentCallSid: string }
+const conferenceParticipants = new Map();
+
 /**
  * Derive correct call status from Twilio data
- * Since we're only processing customer leg callbacks, we can mostly trust Twilio's status
- * But we still need to validate 'in-progress' to ensure customer actually answered
+ * Since we're only processing customer leg callbacks, we can trust Twilio's status
+ * For 'in-progress', we check if it's a valid transition from 'ringing' state
  */
-function deriveCallStatus(callStatus, callDuration, answerTime) {
+function deriveCallStatus(callStatus, callDuration, answerTime, callSid) {
+  // Get previous status from cache
+  const previousStatus = callStatusCache.get(callSid) || null;
+  
   switch (callStatus) {
     case 'ringing':
+      callStatusCache.set(callSid, 'ringing');
       return 'ringing';
       
     case 'answered':
     case 'in-progress':
-      // Even for customer leg, Twilio can send 'in-progress' prematurely
-      // Only consider in-progress if we have proof customer answered:
-      // - duration > 0 (call has been connected)
-      // - answerTime is present (customer picked up)
-      if (callDuration > 0 || (answerTime && answerTime.trim() !== '')) {
+      // For customer leg: if we were in 'ringing' state and now get 'in-progress', customer answered
+      // OR if we have answerTime/duration, customer definitely answered
+      const hasAnswerIndicator = callDuration > 0 || (answerTime && answerTime.trim() !== '');
+      const wasRinging = previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === null;
+      
+      if (hasAnswerIndicator || wasRinging) {
+        // Customer answered - valid transition
+        callStatusCache.set(callSid, 'in-progress');
         return 'in-progress';
       } else {
-        // Still ringing - Twilio sent premature status
+        // Premature status - still ringing
+        callStatusCache.set(callSid, 'ringing');
         return 'ringing';
       }
       
     case 'no-answer':
+      callStatusCache.delete(callSid);
       return 'no-answer';
       
     case 'completed':
+      callStatusCache.delete(callSid);
       // If duration > 0, call was answered; otherwise no-answer
       return callDuration > 0 ? 'completed' : 'no-answer';
       
     case 'busy':
+      callStatusCache.delete(callSid);
       return 'busy';
       
     case 'failed':
+      callStatusCache.delete(callSid);
       return 'failed';
       
     case 'canceled':
+      callStatusCache.delete(callSid);
       return 'canceled';
       
     case 'initiated':
     case 'queued':
+      callStatusCache.set(callSid, 'queued');
       return 'queued';
       
     default:
+      callStatusCache.set(callSid, 'queued');
       return 'queued';
   }
 }
@@ -330,7 +352,126 @@ export async function POST(request) {
     const isPhoneNumber = (num) => num && (num.startsWith('+') || /^\+?[1-9]\d{1,14}$/.test(num.replace(/[^\d+]/g, '')));
     const isCustomerLeg = !isAgentLeg && (isPhoneNumber(from) || isPhoneNumber(to));
     
-    // Skip all non-customer leg callbacks - only process customer leg
+    // Extract conference name from agent leg (to field contains conference name like "call-1")
+    let conferenceName = null;
+    if (isAgentLeg) {
+      // Agent leg: from = "client:agent-1", to = "call-1" (conference name)
+      if (to && to.startsWith('call-')) {
+        conferenceName = to;
+      } else if (from && from.startsWith('client:agent-')) {
+        // Extract agentId from "client:agent-1" and construct conference name
+        const agentIdMatch = from.match(/client:agent-(\d+)/);
+        if (agentIdMatch) {
+          conferenceName = `call-${agentIdMatch[1]}`;
+        }
+      }
+    } else if (isCustomerLeg) {
+      // Customer leg: conference name comes from agentId in URL or from callLog
+      const agentId = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
+      if (agentId) {
+        conferenceName = `call-${agentId}`;
+      } else {
+        // Try to find from existing callLog
+        const existingCallLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
+        if (existingCallLog?.agentId) {
+          conferenceName = `call-${existingCallLog.agentId}`;
+        }
+      }
+    }
+    
+    // Track agent leg callbacks to detect when agent joins conference
+    if (isAgentLeg && conferenceName) {
+      // Extract agentId from "client:agent-{id}" format
+      let agentIdFromAgentLeg = null;
+      if (from && from.startsWith('client:agent-')) {
+        const agentIdMatch = from.match(/client:agent-(\d+)/);
+        if (agentIdMatch) {
+          agentIdFromAgentLeg = parseInt(agentIdMatch[1], 10);
+        }
+      }
+      
+      console.log('👤 Agent leg callback received:', {
+        callSid,
+        from,
+        to,
+        callStatus,
+        conferenceName,
+        agentId: agentIdFromAgentLeg || agentIdFromUrl
+      });
+      
+      // Update conference participants tracking
+      if (!conferenceParticipants.has(conferenceName)) {
+        conferenceParticipants.set(conferenceName, {
+          agentPresent: false,
+          customerPresent: false,
+          customerCallSid: null,
+          agentCallSid: callSid,
+          agentId: agentIdFromAgentLeg || (agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null)
+        });
+      }
+      
+      const participants = conferenceParticipants.get(conferenceName);
+      participants.agentCallSid = callSid;
+      if (agentIdFromAgentLeg) {
+        participants.agentId = agentIdFromAgentLeg;
+      } else if (agentIdFromUrl) {
+        participants.agentId = parseInt(agentIdFromUrl, 10);
+      }
+      
+      // When agent leg becomes "in-progress" or "answered", agent has joined
+      if (callStatus === 'in-progress' || callStatus === 'answered') {
+        participants.agentPresent = true;
+        console.log('✅ Agent joined conference:', conferenceName);
+        
+        // Check if customer is also present - if so, conference is active
+        if (participants.customerPresent && participants.customerCallSid) {
+          console.log('🎉 Conference is ACTIVE (both participants present):', conferenceName);
+          // Broadcast "in-progress" status for customer call
+          const agentIdForBroadcast = participants.agentId || (agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null);
+          
+          const customerStatusData = {
+            callSid: participants.customerCallSid,
+            status: 'in-progress',
+            duration: duration ? parseInt(duration) : null,
+            direction: direction || directionFromUrl || 'outbound',
+            from: null, // Will be filled from customer leg
+            to: null,
+            startTime,
+            endTime,
+            answerTime,
+            hangupCause,
+            agentId: agentIdForBroadcast,
+            customerId: customerIdFromUrl || null,
+            saleId: saleIdFromUrl || null,
+            callPurpose: callPurposeFromUrl || null,
+            conferenceActive: true,
+            twilioData: {
+              callStatus: 'in-progress',
+              conferenceName,
+              bothParticipantsPresent: true
+            }
+          };
+          
+          // Broadcast to agent
+          if (agentIdForBroadcast) {
+            socketManager.sendCallStatusToAgent(agentIdForBroadcast, participants.customerCallSid, customerStatusData);
+          }
+          socketManager.sendCallStatusUpdate(participants.customerCallSid, customerStatusData);
+        }
+      } else if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') {
+        // Agent disconnected
+        participants.agentPresent = false;
+        console.log('👤 Agent left conference:', conferenceName);
+      }
+      
+      // Return success for agent leg (don't process further)
+      const twiml = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
+      return new NextResponse(twiml, {
+        headers: { 'Content-Type': 'text/xml' }
+      });
+    }
+    
+    // Skip all other non-customer leg callbacks
     if (!isCustomerLeg) {
       console.log('⏭️ Skipping non-customer leg callback:', {
         callSid,
@@ -340,7 +481,6 @@ export async function POST(request) {
         isAgentLeg,
         isCustomerLeg: false
       });
-      // Return success but don't process - this prevents confusion from agent leg status
       const twiml = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
       return new NextResponse(twiml, {
         headers: { 'Content-Type': 'text/xml' }
@@ -361,9 +501,9 @@ export async function POST(request) {
       where: { callSid }
     });
     
-    // Derive correct status - validate 'in-progress' to ensure customer actually answered
+    // Derive correct status - function tracks previous status in memory cache
     const callDuration = duration ? parseInt(duration) : 0;
-    const derivedStatus = deriveCallStatus(callStatus, callDuration, answerTime);
+    const derivedStatus = deriveCallStatus(callStatus, callDuration, answerTime, callSid);
     
     console.log('📞 Status derivation:', {
       twilioStatus: callStatus,
@@ -377,11 +517,74 @@ export async function POST(request) {
       agentIdForBroadcast = callLog.agentId;
     }
     
+    // Track customer leg in conference participants
+    if (conferenceName) {
+      if (!conferenceParticipants.has(conferenceName)) {
+        conferenceParticipants.set(conferenceName, {
+          agentPresent: false,
+          customerPresent: false,
+          customerCallSid: callSid,
+          agentCallSid: null,
+          agentId: agentIdForBroadcast
+        });
+      }
+      
+      const participants = conferenceParticipants.get(conferenceName);
+      participants.customerCallSid = callSid;
+      
+      // Use agentId from conference participants if available (more accurate, from agent leg)
+      if (participants.agentId) {
+        agentIdForBroadcast = participants.agentId;
+      } else if (agentIdForBroadcast) {
+        participants.agentId = agentIdForBroadcast;
+      }
+      
+      // When customer answers (in-progress), mark customer as present
+      if (derivedStatus === 'in-progress') {
+        participants.customerPresent = true;
+        console.log('✅ Customer answered:', conferenceName);
+        
+        // Check if agent is also present - if so, conference is active
+        if (participants.agentPresent) {
+          console.log('🎉 Conference is ACTIVE (both participants present):', conferenceName);
+          // Both are present - broadcast "in-progress" for the conference
+        } else {
+          console.log('⏳ Customer answered but agent not yet in conference:', conferenceName);
+          // Customer answered but agent not yet connected - broadcast "ringing" or "hold" status
+          // Don't broadcast "in-progress" yet - wait for agent to join
+        }
+      } else if (callStatus === 'ringing' || derivedStatus === 'ringing') {
+        participants.customerPresent = false;
+      } else if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') {
+        // Customer disconnected
+        participants.customerPresent = false;
+        console.log('📞 Customer left conference:', conferenceName);
+      }
+    }
+    
+    // Determine final status to broadcast:
+    // - If customer answered AND agent is present → "in-progress" (conference active)
+    // - If customer answered but agent NOT present → "ringing" (waiting for agent)
+    // - Otherwise → use derivedStatus
+    let statusToBroadcast = derivedStatus;
+    if (conferenceName && derivedStatus === 'in-progress') {
+      const participants = conferenceParticipants.get(conferenceName);
+      if (participants && participants.agentPresent && participants.customerPresent) {
+        // Both are present - conference is active
+        statusToBroadcast = 'in-progress';
+        console.log('🎉 Broadcasting "in-progress" - Conference ACTIVE (both participants present)');
+      } else {
+        // Customer answered but agent not yet connected - show "ringing" or "hold"
+        statusToBroadcast = 'ringing';
+        console.log('⏳ Broadcasting "ringing" - Customer answered but waiting for agent');
+      }
+    }
+    
     // Broadcast immediately with available data - don't wait for database
     // This ensures frontend gets status updates as fast as possible
     const immediateStatusData = {
       callSid,
-      status: derivedStatus,
+      status: statusToBroadcast,
       duration: duration ? parseInt(duration) : null,
       direction,
       from,
@@ -394,6 +597,9 @@ export async function POST(request) {
       customerId: callLog?.customerId || customerIdFromUrl || null,
       saleId: callLog?.saleId || saleIdFromUrl || null,
       callPurpose: callLog?.callPurpose || callPurposeFromUrl || null,
+      conferenceActive: conferenceName && conferenceParticipants.has(conferenceName) && 
+                        conferenceParticipants.get(conferenceName).agentPresent && 
+                        conferenceParticipants.get(conferenceName).customerPresent,
       twilioData: {
         callStatus,
         direction,
@@ -404,7 +610,8 @@ export async function POST(request) {
         endTime,
         answerTime,
         hangupCause,
-        answeredBy
+        answeredBy,
+        conferenceName: conferenceName || null
       }
     };
     
@@ -424,12 +631,27 @@ export async function POST(request) {
       socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, immediateStatusData);
     }
     
-    console.log('⚡ Status broadcasted IMMEDIATELY (all statuses):', {
+    console.log('⚡ Status broadcasted IMMEDIATELY:', {
       callSid,
-      status: derivedStatus,
+      status: statusToBroadcast,
+      derivedStatus,
       agentId: agentIdForBroadcast,
-      twilioStatus: callStatus
+      twilioStatus: callStatus,
+      conferenceActive: immediateStatusData.conferenceActive
     });
+    
+    // Clean up conference participants when call ends
+    if (conferenceName) {
+      const callEndStatuses = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
+      if (callEndStatuses.includes(derivedStatus) || callEndStatuses.includes(callStatus)) {
+        const participants = conferenceParticipants.get(conferenceName);
+        if (participants && participants.customerCallSid === callSid) {
+          // Customer call ended - clean up
+          console.log('🧹 Cleaning up conference participants (customer call ended):', conferenceName);
+          conferenceParticipants.delete(conferenceName);
+        }
+      }
+    }
     
     // Only save call log when call ends (completed, failed, busy, no-answer, canceled)
     const callEndStatuses = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
