@@ -9,18 +9,17 @@ import { Op } from 'sequelize';
 
 /**
  * Derive correct call status from Twilio data
- * Simplified: Trust Twilio's status directly - no complex checks to avoid delays
+ * Since we're only processing customer leg callbacks, we can trust Twilio's status directly
  */
 function deriveCallStatus(callStatus, callDuration) {
-  // Direct mapping - trust Twilio's status immediately
+  // Direct mapping - trust Twilio's status for customer leg
   switch (callStatus) {
     case 'ringing':
       return 'ringing';
       
     case 'answered':
     case 'in-progress':
-      // Twilio sends 'answered' when customer picks up, which means call is in-progress
-      // Trust Twilio immediately - if they say answered/in-progress, customer answered
+      // Customer leg: if Twilio says in-progress/answered, customer answered
       return 'in-progress';
       
     case 'no-answer':
@@ -312,44 +311,38 @@ export async function POST(request) {
       }, { status: 400 });
     }
     
-    // Determine if this is a client call (agent browser call) - SKIP SAVING THESE
-    const isClientCall = from && from.startsWith('client:');
+    // Extract ONLY customer leg callbacks - filter out agent leg and conference leg
+    // Customer leg identification:
+    // - Outbound: from = Twilio phone number (starts with +), to = customer phone number
+    // - Inbound: from = customer phone number (starts with +), to = Twilio phone number
+    // - Agent leg: from = client:agent-{id} (starts with 'client:')
+    // - Conference leg: from/to might be conference name or SIP endpoint
     
-    // Skip saving logs for client calls (agent browser calls) - only save customer leg
-    if (isClientCall) {
-      console.log('⏭️ Skipping log save for client call (agent browser):', callSid);
-      // Still broadcast status for real-time UI, but don't save to database
-      const agentIdForBroadcast = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
-      if (agentIdForBroadcast) {
-        const immediateStatusData = {
-          callSid,
-          status: deriveCallStatus(callStatus, duration ? parseInt(duration) : 0),
-          duration: duration ? parseInt(duration) : null,
-          direction,
-          from,
-          to,
-          startTime,
-          endTime,
-          answerTime,
-          hangupCause,
-          agentId: agentIdForBroadcast,
-          twilioData: {
-            callStatus,
-            direction,
-            from,
-            to,
-            duration,
-            startTime,
-            endTime,
-            answerTime,
-            hangupCause
-          }
-        };
-        socketManager.sendCallStatusToAgent(agentIdForBroadcast, callSid, immediateStatusData);
-        socketManager.sendCallStatusUpdate(callSid, immediateStatusData);
-      }
+    const isAgentLeg = from && from.startsWith('client:');
+    const isPhoneNumber = (num) => num && (num.startsWith('+') || /^\+?[1-9]\d{1,14}$/.test(num.replace(/[^\d+]/g, '')));
+    const isCustomerLeg = !isAgentLeg && (isPhoneNumber(from) || isPhoneNumber(to));
+    
+    // Skip all non-customer leg callbacks - only process customer leg
+    if (!isCustomerLeg) {
+      console.log('⏭️ Skipping non-customer leg callback:', {
+        callSid,
+        from,
+        to,
+        callStatus,
+        isAgentLeg,
+        isCustomerLeg: false
+      });
+      // Return success but don't process - this prevents confusion from agent leg status
       return NextResponse.xml('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     }
+    
+    console.log('✅ Processing customer leg callback:', {
+      callSid,
+      from,
+      to,
+      callStatus,
+      direction
+    });
     
     // For customer calls, check if call log already exists (might exist from inbound calls)
     // We'll only create/update it when the call ends
@@ -357,7 +350,7 @@ export async function POST(request) {
       where: { callSid }
     });
     
-    // Derive correct status - simplified to trust Twilio immediately
+    // Derive correct status - since we're only processing customer leg, trust Twilio's status
     const callDuration = duration ? parseInt(duration) : 0;
     const derivedStatus = deriveCallStatus(callStatus, callDuration);
     
