@@ -255,14 +255,50 @@ export async function POST(request) {
     const hangupCause = formData.get('HangupCause');
     const answeredBy = formData.get('AnsweredBy');
     const parentCallSid = formData.get('ParentCallSid');
+    
+    // Identify callback source: Dial verb callbacks have DialCallStatus parameter
+    const dialCallStatus = formData.get('DialCallStatus');
+    const dialCallSid = formData.get('DialCallSid');
+    const callbackSource = dialCallStatus ? 'dial-conference' : 'voice-api';
 
     if (!callSid) {
       return NextResponse.json({ success: false, message: 'Call SID is required' }, { status: 400 });
     }
 
-    // Skip non-customer leg callbacks
+    // Log callback source for debugging
+    console.log(`📞 Call status callback received [${callbackSource}]:`, {
+      callSid,
+      dialCallSid: dialCallSid || null,
+      callStatus,
+      dialCallStatus: dialCallStatus || null,
+      from,
+      to,
+      direction: twilioDirection
+    });
+
+    // Handle Dial verb callbacks (from <Dial> wrapping Conference)
+    // Note: Both Voice API callbacks and Dial callbacks use the same endpoint
+    // - Voice API: Direct call status updates (CallSid = customer leg)
+    // - Dial: Dial operation status (CallSid = parent, DialCallSid = dialed call)
+    // For conference calls, we care about the customer leg status, so we use CallSid
+    if (dialCallStatus && dialCallSid) {
+      console.log('📞 Dial callback received (Dial operation status):', {
+        callSid, // Parent call (the one executing Dial)
+        dialCallSid, // The call that was dialed (customer leg in conference)
+        dialCallStatus,
+        from,
+        to
+      });
+      
+      // For Dial callbacks, the CallSid is the parent call executing the Dial
+      // The DialCallSid is the actual customer call leg we care about
+      // But we'll continue with CallSid since that's what we track in CallLog
+      // The Dial callback provides additional context but doesn't change the main tracking
+    }
+
+    // Skip non-customer leg callbacks (agent browser connections)
     if (!isCustomerLeg(from, to)) {
-      console.log('⏭️ Skipping non-customer leg callback:', { callSid, from, to, callStatus });
+      console.log('⏭️ Skipping non-customer leg callback:', { callSid, from, to, callStatus, callbackSource });
       return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
         headers: { 'Content-Type': 'text/xml' }
       });
