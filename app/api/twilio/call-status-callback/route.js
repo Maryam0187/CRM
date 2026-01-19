@@ -31,28 +31,53 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
   // Twilio can send 'in-progress' when agent joins conference, even if customer hasn't answered
   if (callStatus === 'in-progress') {
     // Validate that customer actually answered by checking:
-    // 1. answerTime is present (customer picked up)
+    // 1. answerTime is present (customer picked up) - STRONGEST indicator
     // 2. answeredBy is 'human' (not voicemail)
-    // 3. duration > 0 (call has been connected for at least 1 second)
-    // 4. Previous status was 'ringing' (valid transition)
+    // 3. duration > 0 (call has been connected)
+    // 4. Previous status was 'ringing' (valid transition from ringing to in-progress)
     const hasAnswerTime = answerTime && answerTime.trim() !== '';
     const isHumanAnswer = answeredBy === 'human';
-    const hasDuration = callDuration && parseInt(callDuration) > 0;
+    const hasDuration = callDuration && parseInt(callDuration) >= 0; // Allow 0 (just answered)
     const wasRinging = previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated';
     
-    // Only return 'in-progress' if we have clear evidence customer answered
-    if (hasAnswerTime || (isHumanAnswer && hasDuration) || (hasDuration && wasRinging)) {
+    // Customer answered if ANY of these are true:
+    // - answerTime is present (strongest indicator)
+    // - answeredBy is 'human' (even without duration, if it's human, they answered)
+    // - duration exists AND previous status was ringing (valid transition)
+    // - duration > 0 (call has been active)
+    if (hasAnswerTime) {
+      // answerTime is the strongest indicator - if present, customer definitely answered
+      console.log('✅ Customer answered - answerTime present');
+      return 'in-progress';
+    }
+    
+    if (isHumanAnswer) {
+      // If answeredBy is 'human', customer answered (even if duration is 0)
+      console.log('✅ Customer answered - answeredBy is human');
+      return 'in-progress';
+    }
+    
+    if (hasDuration && wasRinging) {
+      // Valid transition from ringing with duration
+      console.log('✅ Customer answered - valid transition from ringing with duration');
+      return 'in-progress';
+    }
+    
+    if (hasDuration && parseInt(callDuration) > 0) {
+      // Duration > 0 means call has been active
+      console.log('✅ Customer answered - duration > 0');
       return 'in-progress';
     }
     
     // If no clear evidence, keep as 'ringing' (customer hasn't answered yet)
+    // This happens when agent joins conference before customer answers
     console.log('⚠️ Received "in-progress" but customer may not have answered:', {
       callStatus,
       answerTime: answerTime || null,
       answeredBy: answeredBy || null,
       duration: callDuration || 0,
       previousStatus: previousStatus || null,
-      decision: 'keeping as ringing'
+      decision: 'keeping as ringing - no evidence customer answered'
     });
     return 'ringing';
   }
@@ -397,16 +422,20 @@ export async function POST(request) {
     const previousStatus = callLog?.status || null;
     const derivedStatus = deriveCallStatus(callStatus, duration, answerTime, answeredBy, previousStatus);
     
-    // Log status derivation result
-    if (derivedStatus !== callStatus) {
-      console.log(`📊 Status derived: "${callStatus}" → "${derivedStatus}"`, {
-        reason: derivedStatus === 'ringing' ? 'Customer has not answered yet' : 'Customer answered',
-        answerTime: answerTime || null,
-        answeredBy: answeredBy || null,
-        duration: duration || 0,
-        previousStatus: previousStatus || null
-      });
-    }
+    // Log status derivation result (always log for debugging)
+    console.log(`📊 Status derivation: "${callStatus}" → "${derivedStatus}"`, {
+      reason: derivedStatus === 'ringing' ? 'Customer has not answered yet' : 'Customer answered',
+      answerTime: answerTime || null,
+      answeredBy: answeredBy || null,
+      duration: duration || 0,
+      previousStatus: previousStatus || null,
+      validation: {
+        hasAnswerTime: answerTime && answerTime.trim() !== '',
+        isHumanAnswer: answeredBy === 'human',
+        hasDuration: duration && parseInt(duration) >= 0,
+        wasRinging: previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated'
+      }
+    });
     const agentId = await resolveAgentId(agentIdFromUrl, callLog, from, to);
 
     // Get conference name from call log or construct it
