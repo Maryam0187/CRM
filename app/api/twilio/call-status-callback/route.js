@@ -15,6 +15,8 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
     'ringing': 'ringing',
     'queued': 'ringing',
     'initiated': 'ringing',
+    'in-progress': 'in-progress',
+    'answered': 'in-progress', // 'answered' maps to 'in-progress'
     'completed': 'completed',
     'no-answer': 'no-answer',
     'busy': 'busy',
@@ -53,14 +55,17 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
     // 4. Previous status was 'ringing' (valid transition from ringing to in-progress)
     const hasAnswerTime = answerTime && answerTime.trim() !== '';
     const isHumanAnswer = answeredBy === 'human';
+    const isMachineAnswer = answeredBy && (answeredBy === 'machine' || answeredBy === 'machine_start' || answeredBy === 'fax');
     const hasDuration = callDuration !== null && callDuration !== undefined; // Duration field exists (even if 0)
     const wasRinging = previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated' || previousStatus === null;
     
     // Customer answered if ANY of these are true:
     // - answerTime is present (strongest indicator)
     // - answeredBy is 'human' (even without duration, if it's human, they answered)
+    // - answeredBy indicates machine/fax (call was answered, even if by machine)
     // - Previous status was ringing/null AND duration exists (valid transition - Twilio sends this when customer answers)
     // - duration > 0 (call has been active)
+    // - Previous status was ringing/null (most lenient - if we were ringing and now in-progress, customer likely answered)
     if (hasAnswerTime) {
       // answerTime is the strongest indicator - if present, customer definitely answered
       console.log('✅ Customer answered - answerTime present');
@@ -73,8 +78,20 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
       return 'in-progress';
     }
     
+    if (isMachineAnswer) {
+      // If answeredBy indicates machine/fax, call was answered (even if by machine)
+      console.log('✅ Call answered (by machine/fax) - treating as in-progress');
+      return 'in-progress';
+    }
+    
+    // If previous status was ringing/null, this is a valid transition to in-progress
+    // This is the most common case - Twilio sends 'in-progress' when customer answers
+    if (wasRinging) {
+      console.log('✅ Customer answered - valid transition from ringing to in-progress');
+      return 'in-progress';
+    }
+    
     // If previous status was ringing/null and we have duration (even 0), customer likely answered
-    // This is the most common case - Twilio sends 'in-progress' with duration=0 when customer first answers
     if (wasRinging && hasDuration) {
       console.log('✅ Customer answered - valid transition from ringing with duration field');
       return 'in-progress';
@@ -97,6 +114,7 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
       validation: {
         hasAnswerTime,
         isHumanAnswer,
+        isMachineAnswer,
         hasDuration,
         wasRinging
       },
@@ -588,9 +606,46 @@ export async function POST(request) {
       }
     }
 
-    // Save to database only when call ends
+    // Save to database when call ends OR when status becomes 'in-progress' (to track state)
     const isCallEnded = CALL_END_STATUSES.includes(derivedStatus) || CALL_END_STATUSES.includes(callStatus);
+    const shouldSaveInProgress = derivedStatus === 'in-progress' && (!callLog || callLog.status !== 'in-progress');
     let finalCallLog = callLog;
+
+    // Save 'in-progress' status to database so subsequent callbacks have correct previousStatus
+    if (shouldSaveInProgress) {
+      console.log('💾 Saving in-progress status to database');
+      const inProgressTwilioData = {
+        ...(callLog?.twilioData || {}),
+        callStatus,
+        derivedStatus: 'in-progress',
+        direction: twilioDirection,
+        normalizedDirection: direction,
+        from,
+        to,
+        duration,
+        startTime,
+        endTime,
+        answerTime,
+        hangupCause,
+        answeredBy,
+        parentCallSid,
+        conferenceName,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      finalCallLog = await saveCallLog(callSid, {
+        status: 'in-progress',
+        duration: duration ? parseInt(duration) : null,
+        direction,
+        fromNumber: from,
+        toNumber: to,
+        agentId,
+        customerId: callLog?.customerId || customerIdFromUrl || null,
+        saleId: callLog?.saleId || saleIdFromUrl || null,
+        callPurpose: callLog?.callPurpose || callPurposeFromUrl || null,
+        twilioData: inProgressTwilioData
+      }, callLog);
+    }
 
     if (isCallEnded) {
       const twilioData = {
