@@ -33,17 +33,17 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
     // Validate that customer actually answered by checking:
     // 1. answerTime is present (customer picked up) - STRONGEST indicator
     // 2. answeredBy is 'human' (not voicemail)
-    // 3. duration > 0 (call has been connected)
+    // 3. duration exists (even if 0, it means call is active)
     // 4. Previous status was 'ringing' (valid transition from ringing to in-progress)
     const hasAnswerTime = answerTime && answerTime.trim() !== '';
     const isHumanAnswer = answeredBy === 'human';
-    const hasDuration = callDuration && parseInt(callDuration) >= 0; // Allow 0 (just answered)
-    const wasRinging = previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated';
+    const hasDuration = callDuration !== null && callDuration !== undefined; // Duration field exists (even if 0)
+    const wasRinging = previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated' || previousStatus === null;
     
     // Customer answered if ANY of these are true:
     // - answerTime is present (strongest indicator)
     // - answeredBy is 'human' (even without duration, if it's human, they answered)
-    // - duration exists AND previous status was ringing (valid transition)
+    // - Previous status was ringing/null AND duration exists (valid transition - Twilio sends this when customer answers)
     // - duration > 0 (call has been active)
     if (hasAnswerTime) {
       // answerTime is the strongest indicator - if present, customer definitely answered
@@ -57,9 +57,10 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
       return 'in-progress';
     }
     
-    if (hasDuration && wasRinging) {
-      // Valid transition from ringing with duration
-      console.log('✅ Customer answered - valid transition from ringing with duration');
+    // If previous status was ringing/null and we have duration (even 0), customer likely answered
+    // This is the most common case - Twilio sends 'in-progress' with duration=0 when customer first answers
+    if (wasRinging && hasDuration) {
+      console.log('✅ Customer answered - valid transition from ringing with duration field');
       return 'in-progress';
     }
     
@@ -75,8 +76,14 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
       callStatus,
       answerTime: answerTime || null,
       answeredBy: answeredBy || null,
-      duration: callDuration || 0,
+      duration: callDuration || null,
       previousStatus: previousStatus || null,
+      validation: {
+        hasAnswerTime,
+        isHumanAnswer,
+        hasDuration,
+        wasRinging
+      },
       decision: 'keeping as ringing - no evidence customer answered'
     });
     return 'ringing';
@@ -504,6 +511,14 @@ export async function POST(request) {
 
     // Broadcast status immediately (before database operations)
     // Only broadcasts phone-number callbacks (customer calls), not TwiML App callbacks
+    console.log(`📡 About to broadcast status:`, {
+      callSid,
+      derivedStatus,
+      originalStatus: callStatus,
+      agentId,
+      webhookSource,
+      willBroadcast: webhookSource === 'phone-number'
+    });
     broadcastCallStatus(callSid, statusData, agentId, webhookSource);
 
     // Send dedicated participant update if participants are available
