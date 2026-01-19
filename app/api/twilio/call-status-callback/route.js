@@ -9,19 +9,55 @@ const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled
 const ERROR_STATUSES = ['failed', 'busy', 'no-answer', 'canceled'];
 
 // Helper: Derive call status from Twilio status
-function deriveCallStatus(callStatus) {
+// Helper: Derive call status with validation to ensure customer actually answered
+function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, previousStatus) {
   const statusMap = {
     'ringing': 'ringing',
     'queued': 'ringing',
     'initiated': 'ringing',
-    'in-progress': 'in-progress',
-    'answered': 'in-progress',
     'completed': 'completed',
     'no-answer': 'no-answer',
     'busy': 'busy',
     'failed': 'failed',
     'canceled': 'canceled'
   };
+  
+  // Handle 'answered' status - always means customer answered
+  if (callStatus === 'answered') {
+    return 'in-progress';
+  }
+  
+  // Handle 'in-progress' status - need to validate customer actually answered
+  // Twilio can send 'in-progress' when agent joins conference, even if customer hasn't answered
+  if (callStatus === 'in-progress') {
+    // Validate that customer actually answered by checking:
+    // 1. answerTime is present (customer picked up)
+    // 2. answeredBy is 'human' (not voicemail)
+    // 3. duration > 0 (call has been connected for at least 1 second)
+    // 4. Previous status was 'ringing' (valid transition)
+    const hasAnswerTime = answerTime && answerTime.trim() !== '';
+    const isHumanAnswer = answeredBy === 'human';
+    const hasDuration = callDuration && parseInt(callDuration) > 0;
+    const wasRinging = previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated';
+    
+    // Only return 'in-progress' if we have clear evidence customer answered
+    if (hasAnswerTime || (isHumanAnswer && hasDuration) || (hasDuration && wasRinging)) {
+      return 'in-progress';
+    }
+    
+    // If no clear evidence, keep as 'ringing' (customer hasn't answered yet)
+    console.log('⚠️ Received "in-progress" but customer may not have answered:', {
+      callStatus,
+      answerTime: answerTime || null,
+      answeredBy: answeredBy || null,
+      duration: callDuration || 0,
+      previousStatus: previousStatus || null,
+      decision: 'keeping as ringing'
+    });
+    return 'ringing';
+  }
+  
+  // For all other statuses, use the map
   return statusMap[callStatus] || 'ringing';
 }
 
@@ -342,7 +378,8 @@ export async function POST(request) {
 
     // Get existing call log and derive status
     const callLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
-    const derivedStatus = deriveCallStatus(callStatus);
+    const previousStatus = callLog?.status || null;
+    const derivedStatus = deriveCallStatus(callStatus, duration, answerTime, answeredBy, previousStatus);
     const agentId = await resolveAgentId(agentIdFromUrl, callLog, from, to);
 
     // Get conference name from call log or construct it
