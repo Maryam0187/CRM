@@ -24,7 +24,23 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
   
   // Handle 'answered' status - always means customer answered
   if (callStatus === 'answered') {
+    console.log('✅ Customer answered - status is "answered"');
     return 'in-progress';
+  }
+  
+  // Handle 'completed' status - check if call was actually in progress
+  // If duration > 0, the call was connected (even if it was a machine)
+  if (callStatus === 'completed') {
+    const duration = parseInt(callDuration) || 0;
+    // If call has duration and previous status was ringing/null, it was in-progress
+    if (duration > 0 && (previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated' || previousStatus === null)) {
+      // This means the call was connected but we missed the 'in-progress' callback
+      // We should still treat it as having been in-progress
+      console.log('⚠️ Call completed but had duration - was in-progress:', { duration, previousStatus });
+      // Return 'completed' but note that it was in-progress
+      return 'completed';
+    }
+    return 'completed';
   }
   
   // Handle 'in-progress' status - need to validate customer actually answered
@@ -509,17 +525,42 @@ export async function POST(request) {
       }
     };
 
-    // Broadcast status immediately (before database operations)
-    // Only broadcasts phone-number callbacks (customer calls), not TwiML App callbacks
-    console.log(`📡 About to broadcast status:`, {
-      callSid,
-      derivedStatus,
-      originalStatus: callStatus,
-      agentId,
-      webhookSource,
-      willBroadcast: webhookSource === 'phone-number'
-    });
-    broadcastCallStatus(callSid, statusData, agentId, webhookSource);
+    // Special handling: If call went directly to 'completed' with duration > 0,
+    // we missed the 'in-progress' callback. Send 'in-progress' first, then 'completed'
+    if (derivedStatus === 'completed' && 
+        callStatus === 'completed' && 
+        duration && parseInt(duration) > 0 && 
+        (previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated' || previousStatus === null)) {
+      console.log('⚠️ Call went directly to completed with duration - sending in-progress first to start timer');
+      
+      // Create in-progress status data
+      const inProgressData = {
+        ...statusData,
+        status: 'in-progress',
+        duration: parseInt(duration)
+      };
+      
+      // Broadcast in-progress first (to start timer)
+      broadcastCallStatus(callSid, inProgressData, agentId, webhookSource);
+      
+      // Wait a moment, then send completed
+      setTimeout(() => {
+        console.log('📡 Now sending completed status after in-progress');
+        broadcastCallStatus(callSid, statusData, agentId, webhookSource);
+      }, 100);
+    } else {
+      // Normal flow - broadcast status immediately (before database operations)
+      // Only broadcasts phone-number callbacks (customer calls), not TwiML App callbacks
+      console.log(`📡 About to broadcast status:`, {
+        callSid,
+        derivedStatus,
+        originalStatus: callStatus,
+        agentId,
+        webhookSource,
+        willBroadcast: webhookSource === 'phone-number'
+      });
+      broadcastCallStatus(callSid, statusData, agentId, webhookSource);
+    }
 
     // Send dedicated participant update if participants are available
     // Note: Participant status is separate from call status - it shows conference participant state
