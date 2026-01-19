@@ -149,7 +149,20 @@ async function resolveAgentId(agentIdFromUrl, callLog, from, to) {
 }
 
 // Helper: Broadcast call status to all relevant parties
-function broadcastCallStatus(callSid, statusData, agentId) {
+// Broadcast call status to frontend - ONLY for phone call callbacks (not TwiML App)
+function broadcastCallStatus(callSid, statusData, agentId, webhookSource) {
+  // Only broadcast phone number callbacks (customer calls), not TwiML App callbacks (agent browser)
+  if (webhookSource !== 'phone-number') {
+    console.log(`⏭️ Skipping broadcast for ${webhookSource} callback - only broadcasting phone call status`);
+    return;
+  }
+  
+  console.log(`📡 Broadcasting phone call status to frontend:`, {
+    callSid,
+    status: statusData.status,
+    webhookSource
+  });
+  
   if (agentId) {
     socketManager.sendCallStatusToAgent(agentId, callSid, statusData);
   }
@@ -371,15 +384,29 @@ export async function POST(request) {
     // Log that we're processing a customer leg callback
     console.log(`✅ Processing ${webhookSource} callback (customer phone call):`, {
       callSid,
-      callStatus,
+      callStatus, // Original Twilio status
       from,
-      to
+      to,
+      answerTime: answerTime || null,
+      answeredBy: answeredBy || null,
+      duration: duration || 0
     });
 
     // Get existing call log and derive status
     const callLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
     const previousStatus = callLog?.status || null;
     const derivedStatus = deriveCallStatus(callStatus, duration, answerTime, answeredBy, previousStatus);
+    
+    // Log status derivation result
+    if (derivedStatus !== callStatus) {
+      console.log(`📊 Status derived: "${callStatus}" → "${derivedStatus}"`, {
+        reason: derivedStatus === 'ringing' ? 'Customer has not answered yet' : 'Customer answered',
+        answerTime: answerTime || null,
+        answeredBy: answeredBy || null,
+        duration: duration || 0,
+        previousStatus: previousStatus || null
+      });
+    }
     const agentId = await resolveAgentId(agentIdFromUrl, callLog, from, to);
 
     // Get conference name from call log or construct it
@@ -409,10 +436,11 @@ export async function POST(request) {
       }
     }
 
-    // Prepare status data for broadcasting
+    // Prepare status data for broadcasting (ONLY for phone call callbacks)
+    // Note: This is already filtered to only phone-number callbacks (customer calls)
     const statusData = {
       callSid,
-      status: derivedStatus,
+      status: derivedStatus, // Use derived status (validated)
       duration: duration ? parseInt(duration) : null,
       direction,
       from,
@@ -426,9 +454,11 @@ export async function POST(request) {
       saleId: callLog?.saleId || saleIdFromUrl || null,
       callPurpose: callLog?.callPurpose || callPurposeFromUrl || null,
       conferenceName,
-      participants: participantStatuses, // Include participant statuses
+      participants: participantStatuses, // Include participant statuses (for reference only)
+      webhookSource, // Include source for debugging
       twilioData: {
-        callStatus,
+        callStatus, // Original Twilio status (may be 'in-progress' even if customer hasn't answered)
+        derivedStatus, // Our validated status
         direction: twilioDirection, // Keep original Twilio direction in twilioData
         normalizedDirection: direction, // Store normalized direction
         from,
@@ -444,10 +474,21 @@ export async function POST(request) {
     };
 
     // Broadcast status immediately (before database operations)
-    broadcastCallStatus(callSid, statusData, agentId);
+    // Only broadcasts phone-number callbacks (customer calls), not TwiML App callbacks
+    broadcastCallStatus(callSid, statusData, agentId, webhookSource);
 
     // Send dedicated participant update if participants are available
+    // Note: Participant status is separate from call status - it shows conference participant state
+    // Call status (derivedStatus) is the source of truth for overall call state
     if (participantStatuses && participantStatuses.length > 0) {
+      console.log('📊 Sending participant update (conference state, not call status):', {
+        callSid,
+        callStatus: derivedStatus, // Main call status (source of truth)
+        participants: participantStatuses.map(p => ({
+          callSid: p.callSid?.substring(0, 10) + '...',
+          status: p.status // Conference participant status (may differ from call status)
+        }))
+      });
       socketManager.sendParticipantUpdate(callSid, conferenceName, participantStatuses, agentId);
     }
 
