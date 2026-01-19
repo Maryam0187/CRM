@@ -1386,39 +1386,12 @@ export default function GlobalWebCallInterface() {
               </div>
             )}
 
-            {/* Connected State Info */}
-            {(isWebCallConnected || isConnected) && (
-              <div className={`flex items-center gap-3 py-2 px-3 rounded-lg border mb-3 ${
-                callStatus === 'in-progress' 
-                  ? 'bg-green-50 border-green-200' 
-                  : callStatus === 'ringing'
-                  ? 'bg-yellow-50 border-yellow-200'
-                  : callStatus === 'queued'
-                  ? 'bg-gray-50 border-gray-200'
-                  : 'bg-green-50 border-green-200'
-              }`}>
-                <div className={`w-3 h-3 rounded-full animate-pulse ${
-                  callStatus === 'in-progress' 
-                    ? 'bg-green-500' 
-                    : callStatus === 'ringing'
-                    ? 'bg-yellow-500'
-                    : callStatus === 'queued'
-                    ? 'bg-gray-500'
-                    : 'bg-green-500'
-                }`}></div>
-                <div className={`text-sm font-semibold ${
-                  callStatus === 'in-progress' 
-                    ? 'text-green-700' 
-                    : callStatus === 'ringing'
-                    ? 'text-yellow-700'
-                    : callStatus === 'queued'
-                    ? 'text-gray-700'
-                    : 'text-green-700'
-                }`}>
-                  {callStatus === 'in-progress' ? 'Call Connected' :
-                   callStatus === 'ringing' ? 'Customer Phone Ringing' :
-                   callStatus === 'queued' ? 'Call Queued' :
-                   'Call Connected'}
+            {/* Connected State Info - Only show when call is in-progress */}
+            {(isWebCallConnected || isConnected) && callStatus === 'in-progress' && (
+              <div className="flex items-center gap-3 py-2 px-3 rounded-lg border mb-3 bg-green-50 border-green-200">
+                <div className="w-3 h-3 rounded-full animate-pulse bg-green-500"></div>
+                <div className="text-sm font-semibold text-green-700">
+                  Call Connected
                 </div>
               </div>
             )}
@@ -1450,20 +1423,12 @@ export default function GlobalWebCallInterface() {
                     const isCustomer = participant.callSid === currentCallSid;
                     const isAgent = !isCustomer && participant.callSid?.startsWith('CA');
                     
-                    // Debug logging (only log once per render)
-                    if (index === 0 && participants.length > 0) {
-                      console.log('📊 Participant identification:', {
-                        currentCallSid: currentCallSid?.substring(0, 15) + '...',
-                        totalParticipants: participants.length,
-                        activeParticipants: participants.filter(p => p.status !== 'complete' && p.status !== 'failed').length,
-                        participants: participants.map(p => ({
-                          callSid: p.callSid?.substring(0, 15) + '...',
-                          status: p.status,
-                          isCustomer: p.callSid === currentCallSid,
-                          isAgent: p.callSid !== currentCallSid && p.callSid?.startsWith('CA')
-                        }))
-                      });
-                    }
+                    // For customer: Use call status as source of truth, not participant status
+                    // Participant status can show "connected" to conference even when call is still ringing
+                    const displayStatus = isCustomer && callStatus === 'ringing' 
+                      ? 'ringing' // Override participant status with call status
+                      : participant.status;
+                    
                     const statusColors = {
                       'connected': 'bg-green-100 border-green-300 text-green-800',
                       'ringing': 'bg-yellow-100 border-yellow-300 text-yellow-800',
@@ -1472,7 +1437,7 @@ export default function GlobalWebCallInterface() {
                       'complete': 'bg-gray-100 border-gray-300 text-gray-600',
                       'failed': 'bg-red-100 border-red-300 text-red-800'
                     };
-                    const statusColor = statusColors[participant.status] || 'bg-gray-100 border-gray-300 text-gray-800';
+                    const statusColor = statusColors[displayStatus] || 'bg-gray-100 border-gray-300 text-gray-800';
                     
                     return (
                       <div 
@@ -1482,10 +1447,10 @@ export default function GlobalWebCallInterface() {
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           {/* Status Indicator */}
                           <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                            participant.status === 'connected' ? 'bg-green-500 animate-pulse' :
-                            participant.status === 'ringing' ? 'bg-yellow-500 animate-pulse' :
-                            participant.status === 'connecting' ? 'bg-blue-500 animate-pulse' :
-                            participant.status === 'failed' ? 'bg-red-500' :
+                            displayStatus === 'connected' ? 'bg-green-500 animate-pulse' :
+                            displayStatus === 'ringing' ? 'bg-yellow-500 animate-pulse' :
+                            displayStatus === 'connecting' ? 'bg-blue-500 animate-pulse' :
+                            displayStatus === 'failed' ? 'bg-red-500' :
                             'bg-gray-400'
                           }`}></div>
                           
@@ -1495,13 +1460,13 @@ export default function GlobalWebCallInterface() {
                               {isCustomer ? '👤 Customer' : '👨‍💼 Agent'}
                             </div>
                             <div className="text-xs opacity-75 truncate">
-                              {participant.status === 'connected' ? 'Connected' :
-                               participant.status === 'ringing' ? 'Ringing' :
-                               participant.status === 'connecting' ? 'Connecting...' :
-                               participant.status === 'queued' ? 'Queued' :
-                               participant.status === 'complete' ? 'Left' :
-                               participant.status === 'failed' ? 'Failed' :
-                               participant.status || 'Unknown'}
+                              {displayStatus === 'connected' ? 'Connected' :
+                               displayStatus === 'ringing' ? 'Ringing' :
+                               displayStatus === 'connecting' ? 'Connecting...' :
+                               displayStatus === 'queued' ? 'Queued' :
+                               displayStatus === 'complete' ? 'Left' :
+                               displayStatus === 'failed' ? 'Failed' :
+                               displayStatus || 'Unknown'}
                             </div>
                           </div>
                         </div>
