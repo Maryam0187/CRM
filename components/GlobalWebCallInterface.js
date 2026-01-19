@@ -1428,9 +1428,10 @@ export default function GlobalWebCallInterface() {
               <div className="mb-3">
                 <div className="flex items-center justify-between mb-2 px-1">
                   <div className="text-xs font-semibold text-gray-600">
-                    Participants ({participants.length})
+                    Participants ({participants.filter(p => p.status !== 'complete' && p.status !== 'failed').length})
                   </div>
-                  {participants.every(p => p.status === 'connected') && participants.length >= 2 && (
+                  {participants.filter(p => p.status !== 'complete' && p.status !== 'failed').every(p => p.status === 'connected') && 
+                   participants.filter(p => p.status !== 'complete' && p.status !== 'failed').length >= 2 && (
                     <div className="flex items-center gap-1 text-xs text-green-600 font-medium">
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -1440,11 +1441,29 @@ export default function GlobalWebCallInterface() {
                   )}
                 </div>
                 <div className="space-y-2">
-                  {participants.map((participant, index) => {
-                    const isAgent = participant.callSid?.startsWith('CA') && 
-                                   (participant.callSid === currentCallSid || 
-                                    participant.callSid !== currentCallSid);
-                    const isCustomer = !isAgent;
+                  {participants
+                    .filter(p => p.status !== 'complete' && p.status !== 'failed') // Filter out ended participants
+                    .map((participant, index) => {
+                    // Identify customer vs agent:
+                    // - Customer: callSid matches currentCallSid (the original customer call leg)
+                    // - Agent: callSid does NOT match currentCallSid (agent's Voice SDK connection)
+                    const isCustomer = participant.callSid === currentCallSid;
+                    const isAgent = !isCustomer && participant.callSid?.startsWith('CA');
+                    
+                    // Debug logging (only log once per render)
+                    if (index === 0 && participants.length > 0) {
+                      console.log('📊 Participant identification:', {
+                        currentCallSid: currentCallSid?.substring(0, 15) + '...',
+                        totalParticipants: participants.length,
+                        activeParticipants: participants.filter(p => p.status !== 'complete' && p.status !== 'failed').length,
+                        participants: participants.map(p => ({
+                          callSid: p.callSid?.substring(0, 15) + '...',
+                          status: p.status,
+                          isCustomer: p.callSid === currentCallSid,
+                          isAgent: p.callSid !== currentCallSid && p.callSid?.startsWith('CA')
+                        }))
+                      });
+                    }
                     const statusColors = {
                       'connected': 'bg-green-100 border-green-300 text-green-800',
                       'ringing': 'bg-yellow-100 border-yellow-300 text-yellow-800',

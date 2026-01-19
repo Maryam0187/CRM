@@ -52,10 +52,26 @@ function isPhoneNumber(num) {
   return num.startsWith('+') || /^\+?[1-9]\d{1,14}$/.test(num.replace(/[^\d+]/g, ''));
 }
 
-// Helper: Check if callback is for customer leg
+// Helper: Check if callback is for customer leg (phone call) vs agent leg (browser)
 function isCustomerLeg(from, to) {
-  const isAgentLeg = from?.startsWith('client:');
-  return !isAgentLeg && (isPhoneNumber(from) || isPhoneNumber(to));
+  // Agent browser connections (TwiML App) have 'client:' prefix
+  const isAgentLeg = from?.startsWith('client:') || to?.startsWith('client:');
+  
+  // Customer leg: phone numbers (not client: connections)
+  const isCustomerLeg = !isAgentLeg && (isPhoneNumber(from) || isPhoneNumber(to));
+  
+  return isCustomerLeg;
+}
+
+// Helper: Identify callback source (TwiML App vs Phone Number)
+function identifyCallbackSource(from, to) {
+  if (from?.startsWith('client:') || to?.startsWith('client:')) {
+    return 'twiml-app'; // Agent browser connection via TwiML App
+  }
+  if (isPhoneNumber(from) || isPhoneNumber(to)) {
+    return 'phone-number'; // Customer phone call via Phone Number config
+  }
+  return 'unknown';
 }
 
 // Helper: Find agentId from related calls
@@ -260,20 +276,24 @@ export async function POST(request) {
     const dialCallStatus = formData.get('DialCallStatus');
     const dialCallSid = formData.get('DialCallSid');
     const callbackSource = dialCallStatus ? 'dial-conference' : 'voice-api';
+    
+    // Identify if this is from TwiML App (agent browser) or Phone Number (customer call)
+    const webhookSource = identifyCallbackSource(from, to);
 
     if (!callSid) {
       return NextResponse.json({ success: false, message: 'Call SID is required' }, { status: 400 });
     }
 
     // Log callback source for debugging
-    console.log(`📞 Call status callback received [${callbackSource}]:`, {
+    console.log(`📞 Call status callback received [${callbackSource}] from [${webhookSource}]:`, {
       callSid,
       dialCallSid: dialCallSid || null,
       callStatus,
       dialCallStatus: dialCallStatus || null,
       from,
       to,
-      direction: twilioDirection
+      direction: twilioDirection,
+      webhookSource
     });
 
     // Handle Dial verb callbacks (from <Dial> wrapping Conference)
@@ -296,13 +316,29 @@ export async function POST(request) {
       // The Dial callback provides additional context but doesn't change the main tracking
     }
 
-    // Skip non-customer leg callbacks (agent browser connections)
+    // Skip non-customer leg callbacks (agent browser connections from TwiML App)
     if (!isCustomerLeg(from, to)) {
-      console.log('⏭️ Skipping non-customer leg callback:', { callSid, from, to, callStatus, callbackSource });
+      console.log(`⏭️ Skipping ${webhookSource} callback (agent browser connection):`, { 
+        callSid, 
+        from, 
+        to, 
+        callStatus, 
+        callbackSource,
+        webhookSource,
+        reason: 'This is an agent browser connection, not a customer phone call'
+      });
       return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
         headers: { 'Content-Type': 'text/xml' }
       });
     }
+    
+    // Log that we're processing a customer leg callback
+    console.log(`✅ Processing ${webhookSource} callback (customer phone call):`, {
+      callSid,
+      callStatus,
+      from,
+      to
+    });
 
     // Get existing call log and derive status
     const callLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
