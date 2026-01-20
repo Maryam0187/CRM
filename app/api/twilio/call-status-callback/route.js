@@ -90,12 +90,11 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
       return 'in-progress';
     }
     
-    // If previous status was 'ringing' or null, check for additional evidence that customer answered
-    // Twilio sends 'in-progress' when customer answers, BUT also when agent joins conference
-    // Accept if: answerTime, answeredBy, duration > 0, OR wasRinging + hasDurationField (duration can be 0)
-    // When customer answers, Twilio sends in-progress with duration=0 initially, so hasDurationField (even if 0) is valid evidence
-    if (wasRinging && (hasAnswerTime || isHumanAnswer || isMachineAnswer || durationValue > 0 || hasDurationField)) {
-      // We have evidence: answerTime, answeredBy, duration > 0, or duration field exists (even if 0)
+    // If previous status was 'ringing' or null, accept transition to in-progress
+    // Since we only process phone-number callbacks (customer calls) at this point,
+    // if we receive "in-progress" and wasRinging is true, it means customer answered
+    // Twilio sends "in-progress" when customer picks up, even if some fields aren't populated yet
+    if (wasRinging) {
       console.log('✅ Customer answered - valid transition from ringing to in-progress', {
         previousStatus,
         hasDurationField,
@@ -104,23 +103,10 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
         answeredBy: answeredBy || null,
         evidence: hasAnswerTime ? 'answerTime' : 
                   (isHumanAnswer || isMachineAnswer ? 'answeredBy' : 
-                  (durationValue > 0 ? 'duration > 0' : 'hasDurationField'))
+                  (durationValue > 0 ? 'duration > 0' : 
+                  (hasDurationField ? 'hasDurationField' : 'wasRinging (phone-number callback)')))
       });
       return 'in-progress';
-    }
-    
-    // If wasRinging but no evidence at all (no duration field, no answerTime, no answeredBy, no duration > 0)
-    // This is likely agent joining conference before customer answers
-    if (wasRinging) {
-      console.log('⚠️ Received "in-progress" while ringing - likely agent joined before customer answered', {
-        previousStatus,
-        hasDurationField,
-        durationValue,
-        hasAnswerTime,
-        answeredBy: answeredBy || null,
-        decision: 'keeping as ringing - no evidence customer answered'
-      });
-      return 'ringing';
     }
     
     if (durationValue > 0) {
@@ -497,29 +483,18 @@ export async function POST(request) {
       });
     }
 
-    // Get existing call log and derive status
+    // Get existing call log (for reference, but won't save until call ends)
     const callLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
-    const previousStatus = callLog?.status || null;
-    const derivedStatus = deriveCallStatus(callStatus, duration, answerTime, answeredBy, previousStatus);
     
-    // Log status derivation result (always log for debugging)
+    // Log original callback status (for debugging)
     // NOTE: This is a separate webhook callback from Twilio for each status change
-    console.log(`📊 [WEBHOOK CALLBACK] Status derivation: "${callStatus}" → "${derivedStatus}"`, {
+    console.log(`📊 [WEBHOOK CALLBACK] Received status: "${callStatus}"`, {
       callSid: callSid.substring(0, 15) + '...',
       webhookSource,
       callbackSource,
-      reason: derivedStatus === 'ringing' ? 'Customer has not answered yet' : 'Customer answered',
       answerTime: answerTime || null,
       answeredBy: answeredBy || null,
-      duration: duration || 0,
-      previousStatus: previousStatus || null,
-      statusTransition: previousStatus ? `${previousStatus} → ${derivedStatus}` : `null → ${derivedStatus}`,
-      validation: {
-        hasAnswerTime: answerTime && answerTime.trim() !== '',
-        isHumanAnswer: answeredBy === 'human',
-        hasDuration: duration && parseInt(duration) >= 0,
-        wasRinging: previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated'
-      }
+      duration: duration || 0
     });
     const agentId = await resolveAgentId(agentIdFromUrl, callLog, from, to);
 
@@ -529,7 +504,7 @@ export async function POST(request) {
 
     // Fetch participant statuses if conference exists and call is active
     let participantStatuses = null;
-    if (conferenceName && !CALL_END_STATUSES.includes(derivedStatus)) {
+    if (conferenceName && !CALL_END_STATUSES.includes(callStatus)) {
       try {
         const participants = await getConferenceParticipants(conferenceName);
         participantStatuses = participants.map(p => ({
@@ -551,10 +526,10 @@ export async function POST(request) {
     }
 
     // Prepare status data for broadcasting (ONLY for phone call callbacks)
-    // Note: This is already filtered to only phone-number callbacks (customer calls)
+    // Note: Send original Twilio status to frontend - frontend will handle status derivation
     const statusData = {
       callSid,
-      status: derivedStatus, // Use derived status (validated)
+      status: callStatus, // Send original Twilio status - frontend handles derivation
       duration: duration ? parseInt(duration) : null,
       direction,
       from,
@@ -571,8 +546,7 @@ export async function POST(request) {
       participants: participantStatuses, // Include participant statuses (for reference only)
       webhookSource, // Include source for debugging
       twilioData: {
-        callStatus, // Original Twilio status (may be 'in-progress' even if customer hasn't answered)
-        derivedStatus, // Our validated status
+        callStatus, // Original Twilio status
         direction: twilioDirection, // Keep original Twilio direction in twilioData
         normalizedDirection: direction, // Store normalized direction
         from,
@@ -587,50 +561,24 @@ export async function POST(request) {
       }
     };
 
-    // Special handling: If call went directly to 'completed' with duration > 0,
-    // we missed the 'in-progress' callback. Send 'in-progress' first, then 'completed'
-    if (derivedStatus === 'completed' && 
-        callStatus === 'completed' && 
-        duration && parseInt(duration) > 0 && 
-        (previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated' || previousStatus === null)) {
-      console.log('⚠️ Call went directly to completed with duration - sending in-progress first to start timer');
-      
-      // Create in-progress status data
-      const inProgressData = {
-        ...statusData,
-        status: 'in-progress',
-        duration: parseInt(duration)
-      };
-      
-      // Broadcast in-progress first (to start timer)
-      broadcastCallStatus(callSid, inProgressData, agentId, webhookSource);
-      
-      // Wait a moment, then send completed
-      setTimeout(() => {
-        console.log('📡 Now sending completed status after in-progress');
-        broadcastCallStatus(callSid, statusData, agentId, webhookSource);
-      }, 100);
-    } else {
-      // Normal flow - broadcast status immediately (before database operations)
-      // Only broadcasts phone-number callbacks (customer calls), not TwiML App callbacks
-      console.log(`📡 About to broadcast status:`, {
-        callSid,
-        derivedStatus,
-        originalStatus: callStatus,
-        agentId,
-        webhookSource,
-        willBroadcast: webhookSource === 'phone-number'
-      });
-      broadcastCallStatus(callSid, statusData, agentId, webhookSource);
-    }
+    // Broadcast status immediately (frontend will handle status derivation)
+    // Only broadcasts phone-number callbacks (customer calls), not TwiML App callbacks
+    console.log(`📡 About to broadcast status:`, {
+      callSid,
+      status: callStatus,
+      agentId,
+      webhookSource,
+      willBroadcast: webhookSource === 'phone-number'
+    });
+    broadcastCallStatus(callSid, statusData, agentId, webhookSource);
 
     // Send dedicated participant update if participants are available
     // Note: Participant status is separate from call status - it shows conference participant state
-    // Call status (derivedStatus) is the source of truth for overall call state
+    // Frontend handles call status derivation from original Twilio status
     if (participantStatuses && participantStatuses.length > 0) {
       console.log('📊 Sending participant update (conference state, not call status):', {
         callSid,
-        callStatus: derivedStatus, // Main call status (source of truth)
+        callStatus, // Original Twilio call status
         participants: participantStatuses.map(p => ({
           callSid: p.callSid?.substring(0, 10) + '...',
           status: p.status // Conference participant status (may differ from call status)
@@ -641,7 +589,7 @@ export async function POST(request) {
 
     // Register/Unregister call for automatic participant monitoring
     if (conferenceName && agentId) {
-      if (!CALL_END_STATUSES.includes(derivedStatus)) {
+      if (!CALL_END_STATUSES.includes(callStatus)) {
         // Register for monitoring (active call)
         socketManager.registerActiveCall(callSid, conferenceName, agentId);
       } else {
@@ -650,51 +598,15 @@ export async function POST(request) {
       }
     }
 
-    // Save to database when call ends OR when status becomes 'in-progress' (to track state)
-    const isCallEnded = CALL_END_STATUSES.includes(derivedStatus) || CALL_END_STATUSES.includes(callStatus);
-    const shouldSaveInProgress = derivedStatus === 'in-progress' && (!callLog || callLog.status !== 'in-progress');
+    // Save to database ONLY when call ends (successfully or failed)
+    const isCallEnded = CALL_END_STATUSES.includes(callStatus);
     let finalCallLog = callLog;
 
-    // Save 'in-progress' status to database so subsequent callbacks have correct previousStatus
-    if (shouldSaveInProgress) {
-      console.log('💾 Saving in-progress status to database');
-      const inProgressTwilioData = {
-        ...(callLog?.twilioData || {}),
-        callStatus,
-        derivedStatus: 'in-progress',
-        direction: twilioDirection,
-        normalizedDirection: direction,
-        from,
-        to,
-        duration,
-        startTime,
-        endTime,
-        answerTime,
-        hangupCause,
-        answeredBy,
-        parentCallSid,
-        conferenceName,
-        lastUpdated: new Date().toISOString()
-      };
-      
-      finalCallLog = await saveCallLog(callSid, {
-        status: 'in-progress',
-        duration: duration ? parseInt(duration) : null,
-        direction,
-        fromNumber: from,
-        toNumber: to,
-        agentId,
-        customerId: callLog?.customerId || customerIdFromUrl || null,
-        saleId: callLog?.saleId || saleIdFromUrl || null,
-        callPurpose: callLog?.callPurpose || callPurposeFromUrl || null,
-        twilioData: inProgressTwilioData
-      }, callLog);
-    }
-
     if (isCallEnded) {
+      console.log('💾 Saving call log to database (call ended)');
       const twilioData = {
         callSid,
-        callStatus,
+        callStatus, // Original Twilio status
         direction: twilioDirection, // Keep original Twilio direction
         normalizedDirection: direction, // Store normalized direction
         from,
@@ -706,12 +618,13 @@ export async function POST(request) {
         hangupCause,
         answeredBy,
         parentCallSid,
+        conferenceName,
         createdAt: new Date().toISOString(),
         lastUpdated: new Date().toISOString()
       };
 
       // Handle voicemail status
-      let finalStatus = derivedStatus;
+      let finalStatus = callStatus;
       if (answeredBy === 'machine') {
         finalStatus = 'voicemail';
         twilioData.isVoicemail = true;
@@ -735,9 +648,9 @@ export async function POST(request) {
       await handleSpecialEndings(callSid, answeredBy, callStatus);
     }
 
-    // Update agent status
+    // Update agent status (during call and on call end)
     if (agentId) {
-      await updateAgentStatus(agentId, derivedStatus, duration, callSid);
+      await updateAgentStatus(agentId, callStatus, duration, callSid);
     }
 
     // Update related records for completed calls
@@ -746,7 +659,7 @@ export async function POST(request) {
     }
 
     // Cleanup call room after call ends (with 2 minute delay)
-    if (CALL_END_STATUSES.includes(derivedStatus)) {
+    if (isCallEnded) {
       setTimeout(() => {
         socketManager.cleanupCallRoom(callSid);
       }, 2 * 60 * 1000); // 2 minutes
