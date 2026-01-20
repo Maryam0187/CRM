@@ -526,10 +526,29 @@ export async function POST(request) {
     }
 
     // Prepare status data for broadcasting (ONLY for phone call callbacks)
-    // Note: Send original Twilio status to frontend - frontend will handle status derivation
+    // Note: Filter out premature "in-progress" - if no evidence customer answered, treat as "ringing"
+    let statusToSend = callStatus;
+    if (callStatus === 'in-progress') {
+      // Check if customer actually answered
+      const hasAnswerTime = answerTime && answerTime.trim() !== '';
+      const hasAnsweredBy = answeredBy && answeredBy.trim() !== '';
+      const hasDuration = duration && parseInt(duration) > 0;
+      
+      // If no evidence customer answered, treat as "ringing" (agent likely joined conference early)
+      if (!hasAnswerTime && !hasAnsweredBy && !hasDuration) {
+        console.log('⚠️ Filtering premature "in-progress" - no evidence customer answered, treating as "ringing"', {
+          callSid: callSid.substring(0, 15) + '...',
+          answerTime,
+          answeredBy,
+          duration
+        });
+        statusToSend = 'ringing';
+      }
+    }
+    
     const statusData = {
       callSid,
-      status: callStatus, // Send original Twilio status - frontend handles derivation
+      status: statusToSend, // Send validated status (may filter premature in-progress)
       duration: duration ? parseInt(duration) : null,
       direction,
       from,
@@ -561,25 +580,16 @@ export async function POST(request) {
       }
     };
 
-    // Verify status before broadcasting
+    // Log status before broadcasting
     console.log(`📡 About to broadcast status:`, {
       callSid,
       originalCallStatus: callStatus, // Original from Twilio
-      statusDataStatus: statusData.status, // What we're sending
+      statusToSend: statusData.status, // What we're sending (may be filtered)
       agentId,
       webhookSource,
-      willBroadcast: webhookSource === 'phone-number'
+      willBroadcast: webhookSource === 'phone-number',
+      filtered: statusData.status !== callStatus ? 'yes (premature in-progress filtered)' : 'no'
     });
-    
-    // Ensure we're sending the original status
-    if (statusData.status !== callStatus) {
-      console.error('❌ ERROR: statusData.status does not match callStatus!', {
-        callStatus,
-        statusDataStatus: statusData.status
-      });
-      // Force it to be the original status
-      statusData.status = callStatus;
-    }
     
     broadcastCallStatus(callSid, statusData, agentId, webhookSource);
 
