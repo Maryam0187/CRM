@@ -1423,11 +1423,23 @@ export default function GlobalWebCallInterface() {
                     const isCustomer = participant.callSid === currentCallSid;
                     const isAgent = !isCustomer && participant.callSid?.startsWith('CA');
                     
-                    // For customer: Use call status as source of truth, not participant status
-                    // Participant status can show "connected" to conference even when call is still ringing
-                    const displayStatus = isCustomer && callStatus === 'ringing' 
-                      ? 'ringing' // Override participant status with call status
-                      : participant.status;
+                    // For customer: Always use call status as source of truth, not participant status
+                    // Participant status from Conference API can show "connected" even when call is still ringing
+                    // Call status is the authoritative source for customer's actual call state
+                    let displayStatus = participant.status;
+                    if (isCustomer && callStatus) {
+                      // Map call status to participant display status
+                      if (callStatus === 'ringing' || callStatus === 'queued' || callStatus === 'initiated') {
+                        displayStatus = 'ringing';
+                      } else if (callStatus === 'in-progress') {
+                        displayStatus = 'connected';
+                      } else if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') {
+                        displayStatus = 'complete';
+                      } else if (callStatus === 'no-answer' || callStatus === 'busy') {
+                        displayStatus = 'failed';
+                      }
+                      // For all other call statuses, use participant status
+                    }
                     
                     const statusColors = {
                       'connected': 'bg-green-100 border-green-300 text-green-800',

@@ -24,6 +24,11 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
     'canceled': 'canceled'
   };
   
+  // Handle 'ringing' status - customer's phone is ringing
+  if (callStatus === 'ringing' || callStatus === 'queued' || callStatus === 'initiated') {
+    return 'ringing';
+  }
+  
   // Handle 'answered' status - always means customer answered
   if (callStatus === 'answered') {
     console.log('✅ Customer answered - status is "answered"');
