@@ -90,16 +90,37 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
       return 'in-progress';
     }
     
-    // If previous status was 'ringing' or null (first callback), this is a valid transition to in-progress
-    // This is the most common case - Twilio sends 'in-progress' when customer answers
-    // We accept this transition as valid even without duration field, because ringing → in-progress = customer answered
-    if (wasRinging) {
+    // If previous status was 'ringing' or null, check for additional evidence that customer answered
+    // Twilio sends 'in-progress' when customer answers, BUT also when agent joins conference
+    // Accept if: answerTime, answeredBy, duration > 0, OR wasRinging + hasDurationField (duration can be 0)
+    // When customer answers, Twilio sends in-progress with duration=0 initially, so hasDurationField (even if 0) is valid evidence
+    if (wasRinging && (hasAnswerTime || isHumanAnswer || isMachineAnswer || durationValue > 0 || hasDurationField)) {
+      // We have evidence: answerTime, answeredBy, duration > 0, or duration field exists (even if 0)
       console.log('✅ Customer answered - valid transition from ringing to in-progress', {
         previousStatus,
         hasDurationField,
-        durationValue
+        durationValue,
+        hasAnswerTime,
+        answeredBy: answeredBy || null,
+        evidence: hasAnswerTime ? 'answerTime' : 
+                  (isHumanAnswer || isMachineAnswer ? 'answeredBy' : 
+                  (durationValue > 0 ? 'duration > 0' : 'hasDurationField'))
       });
       return 'in-progress';
+    }
+    
+    // If wasRinging but no evidence at all (no duration field, no answerTime, no answeredBy, no duration > 0)
+    // This is likely agent joining conference before customer answers
+    if (wasRinging) {
+      console.log('⚠️ Received "in-progress" while ringing - likely agent joined before customer answered', {
+        previousStatus,
+        hasDurationField,
+        durationValue,
+        hasAnswerTime,
+        answeredBy: answeredBy || null,
+        decision: 'keeping as ringing - no evidence customer answered'
+      });
+      return 'ringing';
     }
     
     if (durationValue > 0) {
