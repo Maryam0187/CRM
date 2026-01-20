@@ -63,7 +63,8 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
     const isMachineAnswer = answeredBy && (answeredBy === 'machine' || answeredBy === 'machine_start' || answeredBy === 'fax');
     const durationValue = parseInt(callDuration) || 0;
     const hasDurationField = callDuration !== null && callDuration !== undefined; // Duration field exists (even if 0)
-    const wasRinging = previousStatus === 'ringing'; // Only accept if previous status was explicitly 'ringing'
+    // Accept 'ringing' OR null (first callback might not have saved to DB yet)
+    const wasRinging = previousStatus === 'ringing' || previousStatus === null;
     
     // Customer answered if ANY of these are true:
     // - answerTime is present (strongest indicator - customer definitely answered)
@@ -89,10 +90,15 @@ function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, prev
       return 'in-progress';
     }
     
-    // If previous status was 'ringing' and we have duration field (even if 0), customer likely just answered
-    // This is the most common case - Twilio sends 'in-progress' with duration=0 when customer first picks up
-    if (wasRinging && hasDurationField) {
-      console.log('✅ Customer answered - valid transition from ringing (duration may be 0, just answered)');
+    // If previous status was 'ringing' or null (first callback), this is a valid transition to in-progress
+    // This is the most common case - Twilio sends 'in-progress' when customer answers
+    // We accept this transition as valid even without duration field, because ringing → in-progress = customer answered
+    if (wasRinging) {
+      console.log('✅ Customer answered - valid transition from ringing to in-progress', {
+        previousStatus,
+        hasDurationField,
+        durationValue
+      });
       return 'in-progress';
     }
     
@@ -456,6 +462,19 @@ export async function POST(request) {
       answeredBy: answeredBy || null,
       duration: duration || 0
     });
+    
+    // Explicitly log original callback status for phone-number webhooks
+    if (webhookSource === 'phone-number') {
+      console.log(`📞 [PHONE-NUMBER] Original callback status: "${callStatus}"`, {
+        callSid: callSid.substring(0, 15) + '...',
+        originalTwilioStatus: callStatus,
+        dialCallStatus: dialCallStatus || null,
+        from,
+        to,
+        callbackSource,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     // Get existing call log and derive status
     const callLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
