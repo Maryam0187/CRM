@@ -561,15 +561,26 @@ export async function POST(request) {
       }
     };
 
-    // Broadcast status immediately (frontend will handle status derivation)
-    // Only broadcasts phone-number callbacks (customer calls), not TwiML App callbacks
+    // Verify status before broadcasting
     console.log(`📡 About to broadcast status:`, {
       callSid,
-      status: callStatus,
+      originalCallStatus: callStatus, // Original from Twilio
+      statusDataStatus: statusData.status, // What we're sending
       agentId,
       webhookSource,
       willBroadcast: webhookSource === 'phone-number'
     });
+    
+    // Ensure we're sending the original status
+    if (statusData.status !== callStatus) {
+      console.error('❌ ERROR: statusData.status does not match callStatus!', {
+        callStatus,
+        statusDataStatus: statusData.status
+      });
+      // Force it to be the original status
+      statusData.status = callStatus;
+    }
+    
     broadcastCallStatus(callSid, statusData, agentId, webhookSource);
 
     // Send dedicated participant update if participants are available
