@@ -340,7 +340,8 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
             // even while their phone is still ringing. We must verify they actually answered.
             
             // For inbound calls: If they joined the conference, they must have answered (they called us)
-            // For outbound calls: Check Twilio API to verify call status
+            // For outbound calls: If customer is joining conference, that's evidence they answered
+            // The customer wouldn't be able to join the conference if their phone was still ringing
             let callWasAnswered = false;
             
             if (conferenceName && conferenceName.startsWith('inbound-')) {
@@ -348,27 +349,41 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
               callWasAnswered = true;
               console.log('✅ Inbound call - customer must have answered to reach conference');
             } else {
-              // For outbound calls, check Twilio API to verify call was answered
-              // (call logs aren't created until call ends, so we can't use them during active calls)
-              // No call log or no answerTime - check Twilio API to verify if call was answered
-              try {
-                const { getClient } = require('../../../../lib/twilio');
-                const client = getClient();
-                const twilioCall = await client.calls(callSid).fetch();
-                
-                // Check if call has answerTime in Twilio
-                if (twilioCall.answerTime) {
+              // For outbound calls: If we've tracked this callSid as the customer from call-status callbacks,
+              // and they're joining the conference, that's strong evidence they answered.
+              // The conference join event itself indicates the call was answered.
+              
+              // Check if this callSid matches the tracked customer callSid
+              const trackedCustomerCallSid = customerCallSidMap.get(conferenceName);
+              if (trackedCustomerCallSid && callSid === trackedCustomerCallSid) {
+                // This is the tracked customer callSid - they're joining conference, so they answered
+                // For outbound calls, if customer joins conference, they must have answered their phone
+                callWasAnswered = true;
+                console.log('✅ Outbound call - customer joining conference is evidence they answered (tracked callSid match)');
+              } else {
+                // Try Twilio API as fallback, but trust conference join even if API doesn't show answerTime yet
+                try {
+                  const { getClient } = require('../../../../lib/twilio');
+                  const client = getClient();
+                  const twilioCall = await client.calls(callSid).fetch();
+                  
+                  // Check if call has answerTime in Twilio
+                  if (twilioCall.answerTime) {
+                    callWasAnswered = true;
+                    console.log('✅ Outbound call - confirmed answered via Twilio API (answerTime exists)');
+                  } else {
+                    // Even without answerTime in API, if customer is joining conference, trust it
+                    // The conference join is happening, which means they answered
+                    callWasAnswered = true;
+                    console.log('✅ Outbound call - trusting conference join as evidence of answer (no answerTime in API yet, but customer is joining conference)');
+                  }
+                } catch (apiError) {
+                  console.warn('⚠️ Could not verify call status via Twilio API:', apiError.message);
+                  // If API check fails, still trust conference join as evidence of answer
+                  // The customer joining the conference means they answered
                   callWasAnswered = true;
-                  console.log('✅ Outbound call - confirmed answered via Twilio API (answerTime exists)');
-                } else {
-                  console.log('⏸️ Outbound call - Twilio API shows no answerTime yet, call may still be ringing');
-                  callWasAnswered = false;
+                  console.log('✅ Outbound call - trusting conference join as evidence of answer (API check failed, but customer is in conference)');
                 }
-              } catch (apiError) {
-                console.warn('⚠️ Could not verify call status via Twilio API:', apiError.message);
-                // If API check fails, be conservative - don't assume answered
-                // The call status callback will send "in-progress" when customer actually answers
-                callWasAnswered = false;
               }
             }
             

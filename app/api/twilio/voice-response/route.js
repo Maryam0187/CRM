@@ -115,20 +115,32 @@ async function handleVoiceResponse(request) {
           name: agent ? `${agent.firstName} ${agent.lastName}` : 'N/A'
         });
         
-        // Use conference for Voice SDK (agent joins via browser)
-        const conferenceName = `call-${parsedAgentId}`;
-        console.log(`📞 Routing to conference: ${conferenceName}`);
+        // Check if this is an inbound call by looking at the 'To' parameter
+        // For inbound calls, 'To' will contain the inbound conference name (e.g., "inbound-CA123...")
+        // For outbound calls, 'To' might be empty or contain a phone number
+        const toParam = formData.get('To') || '';
+        let conferenceName = `call-${parsedAgentId}`; // Default for outbound calls
+        
+        // If 'To' parameter starts with "inbound-", this is an inbound call - join existing conference
+        if (toParam && toParam.startsWith('inbound-')) {
+          conferenceName = toParam;
+          console.log(`📞 Inbound call detected - agent joining existing conference: ${conferenceName}`);
+        } else {
+          console.log(`📞 Outbound call - routing to conference: ${conferenceName}`);
+        }
         
         // Get conference callback URL for tracking conference events
         const conferenceCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
         
-        // Place customer in conference room
+        // Place agent in conference room
+        // For inbound calls: agent joins existing conference where customer is already waiting
+        // For outbound calls: agent joins new conference, customer will be added via Dial verb
         // Recording is DISABLED
         // answerOnMedia="false" = connect immediately when answered, don't wait for media
-        // startConferenceOnEnter="false" = conference starts when BOTH participants are present (prevents hold music while waiting for agent)
-        // When agent joins with startConferenceOnEnter="true", the conference will start
+        // startConferenceOnEnter="true" = when agent joins, start the conference (customer is already there for inbound, will trigger for outbound when customer joins)
+        // endConferenceOnExit="false" = don't end conference when agent leaves (customer might still be there)
         twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
-        twiml += `\n    <Conference startConferenceOnEnter="false" endConferenceOnExit="true" beep="false" maxParticipants="2" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${conferenceName}</Conference>`;
+        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" maxParticipants="10" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${conferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
         // If agent has phone, we could call them separately to join the conference
