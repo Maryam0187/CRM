@@ -119,13 +119,16 @@ async function handleVoiceResponse(request) {
         const conferenceName = `call-${parsedAgentId}`;
         console.log(`📞 Routing to conference: ${conferenceName}`);
         
+        // Get conference callback URL for tracking conference events
+        const conferenceCallbackUrl = getWebhookUrl('/api/twilio/conference-callback');
+        
         // Place customer in conference room
         // Recording is DISABLED
         // answerOnMedia="false" = connect immediately when answered, don't wait for media
         // startConferenceOnEnter="false" = conference starts when BOTH participants are present (prevents hold music while waiting for agent)
         // When agent joins with startConferenceOnEnter="true", the conference will start
         twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
-        twiml += `\n    <Conference startConferenceOnEnter="false" endConferenceOnExit="true" beep="false" maxParticipants="2" muted="false">${conferenceName}</Conference>`;
+        twiml += `\n    <Conference startConferenceOnEnter="false" endConferenceOnExit="true" beep="false" maxParticipants="2" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${conferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
         // If agent has phone, we could call them separately to join the conference
@@ -463,6 +466,9 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
     statusCallbackUrl.searchParams.set('callPurpose', 'support');
     statusCallbackUrl.searchParams.set('direction', 'inbound');
     
+    // Get conference callback URL for tracking conference events
+    const conferenceCallbackUrl = getWebhookUrl('/api/twilio/conference-callback');
+    
     // Generate TwiML to place caller in conference
     // Allow up to 5 participants (caller + multiple agents/admins)
     // startConferenceOnEnter="false" means conference starts when BOTH participants are present (prevents hold music while waiting)
@@ -472,7 +478,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
 <Response>
   <Say voice="alice">Thank you for calling. Please hold while we connect you with an agent.</Say>
   <Dial record="false" timeout="60" timeLimit="3600" answerOnMedia="false" hangupOnStar="false" statusCallback="${statusCallbackUrl.toString()}" statusCallbackEvent="initiated ringing answered completed">
-    <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="false" maxParticipants="5" muted="false">${conferenceName}</Conference>
+    <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="false" maxParticipants="5" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${conferenceName}</Conference>
   </Dial>
 </Response>`;
 

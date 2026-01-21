@@ -1055,15 +1055,81 @@ export default function GlobalWebCallInterface() {
     };
 
     window.addEventListener('participantUpdate', handleParticipantUpdate);
+
+    // Listen for conference events (join, leave, mute, hold, etc.)
+    const handleConferenceEvent = (event) => {
+      const { conferenceEventData } = event.detail;
+      if (conferenceEventData?.conferenceName === conferenceName) {
+        console.log('📞 Conference event received:', conferenceEventData.event);
+        
+        // Handle different conference events
+        switch (conferenceEventData.event) {
+          case 'join':
+            console.log('👤 Participant joined conference:', conferenceEventData.callSid);
+            // Refresh participant list
+            if (conferenceEventData.callSid && currentCallSid) {
+              updateStatus();
+            }
+            break;
+          case 'leave':
+            console.log('👋 Participant left conference:', conferenceEventData.callSid);
+            // Refresh participant list
+            if (conferenceEventData.callSid && currentCallSid) {
+              updateStatus();
+            }
+            break;
+          case 'mute':
+            console.log('🔇 Participant mute status changed:', {
+              callSid: conferenceEventData.callSid,
+              muted: conferenceEventData.muted
+            });
+            // Update participant mute status in state
+            if (conferenceEventData.callSid) {
+              setParticipants(prev => prev.map(p => 
+                p.callSid === conferenceEventData.callSid 
+                  ? { ...p, muted: conferenceEventData.muted }
+                  : p
+              ));
+            }
+            break;
+          case 'hold':
+            console.log('⏸️ Participant hold status changed:', {
+              callSid: conferenceEventData.callSid,
+              hold: conferenceEventData.hold
+            });
+            // Update participant hold status in state
+            if (conferenceEventData.callSid) {
+              setParticipants(prev => prev.map(p => 
+                p.callSid === conferenceEventData.callSid 
+                  ? { ...p, hold: conferenceEventData.hold }
+                  : p
+              ));
+            }
+            break;
+          case 'start':
+            console.log('🎉 Conference started');
+            break;
+          case 'end':
+            console.log('🏁 Conference ended');
+            break;
+          case 'speaker':
+            console.log('🎤 Speaker changed:', conferenceEventData.callSid);
+            break;
+        }
+      }
+    };
+
+    window.addEventListener('conferenceEvent', handleConferenceEvent);
     
     const interval = setInterval(updateStatus, 1000);
 
     return () => {
       window.removeEventListener('callStatusUpdate', handleStatusUpdate);
       window.removeEventListener('participantUpdate', handleParticipantUpdate);
+      window.removeEventListener('conferenceEvent', handleConferenceEvent);
       clearInterval(interval);
     };
-  }, [currentCallSid, getCallStatus, updateCallStatus, device, endCall, disconnectCall]);
+  }, [currentCallSid, conferenceName, getCallStatus, updateCallStatus, device, endCall, disconnectCall, setParticipants]);
 
   // Sync mute state
   useEffect(() => {

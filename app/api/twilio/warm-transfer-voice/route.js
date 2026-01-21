@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getWebhookUrl } from '../../../../lib/twilio';
 
 // Handle both GET and POST requests (Twilio can use either)
 export async function GET(request) {
@@ -40,6 +41,9 @@ async function handleWarmTransferVoice(request) {
 
     console.log('📞 Warm transfer: Adding participant to conference:', safeConferenceName);
 
+    // Get conference callback URL for tracking conference events
+    const conferenceCallbackUrl = getWebhookUrl('/api/twilio/conference-callback');
+
     // Create TwiML to join the existing conference
     // Recording is DISABLED
     // startConferenceOnEnter="false" = don't start conference (it already exists)
@@ -48,7 +52,7 @@ async function handleWarmTransferVoice(request) {
 <Response>
   <Say voice="alice">Please hold while we connect you to the call.</Say>
   <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false">
-    <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="true" maxParticipants="10" muted="false">${safeConferenceName}</Conference>
+    <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="true" maxParticipants="10" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${safeConferenceName}</Conference>
   </Dial>
   <Hangup/>
 </Response>`;

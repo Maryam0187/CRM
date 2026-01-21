@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getWebhookUrl } from '../../../../lib/twilio';
 
 /**
  * Handle TwiML App webhook for agents joining conference via web browser
@@ -65,12 +66,22 @@ async function handleJoinConference(request) {
     
     console.log('📞 Joining conference:', safeConferenceName);
     
+    // Get conference callback URL for tracking conference events
+    const conferenceCallbackUrl = getWebhookUrl('/api/twilio/conference-callback');
+    
     // Generate TwiML to join the conference
     // This is used when agent connects via web browser (Twilio Voice SDK)
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">
-    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" maxParticipants="10" muted="false">${safeConferenceName}</Conference>
+    <Conference 
+    startConferenceOnEnter="true" 
+    endConferenceOnExit="false" 
+    beep="false" maxParticipants="10" 
+    muted="false" 
+    statusCallback="${conferenceCallbackUrl}" 
+    statusCallbackMethod="POST" 
+    statusCallbackEvent="start end join leave mute hold speaker">${safeConferenceName}</Conference>
   </Dial>
 </Response>`;
 

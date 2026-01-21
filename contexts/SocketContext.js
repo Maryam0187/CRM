@@ -319,6 +319,18 @@ export const SocketProvider = ({ children }) => {
       window.dispatchEvent(participantEvent);
     });
 
+    // Conference event handlers (start, end, join, leave, mute, hold, speaker)
+    socketInstance.on('conference_event', (data) => {
+      console.log('📞 Conference event received:', data);
+      
+      // Dispatch custom event for components to listen to
+      const conferenceEvent = new CustomEvent('conferenceEvent', {
+        detail: { conferenceEventData: data }
+      });
+      console.log('📞 Dispatching conference event:', conferenceEvent);
+      window.dispatchEvent(conferenceEvent);
+    });
+
     // Force logout handler
     socketInstance.on('force_logout', (data) => {
       console.log('🔐 Force logout received:', data);

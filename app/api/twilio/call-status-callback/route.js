@@ -526,29 +526,10 @@ export async function POST(request) {
     }
 
     // Prepare status data for broadcasting (ONLY for phone call callbacks)
-    // Note: Filter out premature "in-progress" - if no evidence customer answered, treat as "ringing"
-    let statusToSend = callStatus;
-    if (callStatus === 'in-progress') {
-      // Check if customer actually answered
-      const hasAnswerTime = answerTime && answerTime.trim() !== '';
-      const hasAnsweredBy = answeredBy && answeredBy.trim() !== '';
-      const hasDuration = duration && parseInt(duration) > 0;
-      
-      // If no evidence customer answered, treat as "ringing" (agent likely joined conference early)
-      if (!hasAnswerTime && !hasAnsweredBy && !hasDuration) {
-        console.log('⚠️ Filtering premature "in-progress" - no evidence customer answered, treating as "ringing"', {
-          callSid: callSid.substring(0, 15) + '...',
-          answerTime,
-          answeredBy,
-          duration
-        });
-        statusToSend = 'ringing';
-      }
-    }
-    
+    // Note: Send original Twilio status to frontend - frontend will handle status derivation
     const statusData = {
       callSid,
-      status: statusToSend, // Send validated status (may filter premature in-progress)
+      status: callStatus, // Send original Twilio status - frontend handles derivation
       duration: duration ? parseInt(duration) : null,
       direction,
       from,
@@ -583,12 +564,10 @@ export async function POST(request) {
     // Log status before broadcasting
     console.log(`📡 About to broadcast status:`, {
       callSid,
-      originalCallStatus: callStatus, // Original from Twilio
-      statusToSend: statusData.status, // What we're sending (may be filtered)
+      status: callStatus, // Original Twilio status being sent
       agentId,
       webhookSource,
-      willBroadcast: webhookSource === 'phone-number',
-      filtered: statusData.status !== callStatus ? 'yes (premature in-progress filtered)' : 'no'
+      willBroadcast: webhookSource === 'phone-number'
     });
     
     broadcastCallStatus(callSid, statusData, agentId, webhookSource);
