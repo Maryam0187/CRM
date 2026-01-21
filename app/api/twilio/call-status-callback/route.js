@@ -344,27 +344,38 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
             // even while their phone is still ringing. We must verify they actually answered.
             
             // For inbound calls: If they joined the conference, they must have answered (they called us)
-            // For outbound calls: Need to verify answerTime or call status indicates answer
+            // For outbound calls: Check Twilio API to verify call status
             let callWasAnswered = false;
             
             if (conferenceName && conferenceName.startsWith('inbound-')) {
               // Inbound calls: Customer already answered when they called us
               callWasAnswered = true;
               console.log('✅ Inbound call - customer must have answered to reach conference');
-            } else if (callLog) {
-              // Outbound calls with call log: Check if answerTime exists
-              if (callLog.answerTime) {
-                callWasAnswered = true;
-                console.log('✅ Outbound call - confirmed answered via call log answerTime');
-              } else {
-                console.log('⏸️ Outbound call - no answerTime in call log, call may still be ringing');
-              }
+            } else if (callLog && callLog.answerTime) {
+              // Outbound calls with call log that has answerTime: Confirmed answered
+              callWasAnswered = true;
+              console.log('✅ Outbound call - confirmed answered via call log answerTime');
             } else {
-              // No call log yet - for outbound calls, be conservative
-              // Wait for call status callback with answer evidence before marking as in-progress
-              // The call status callback will have answerTime when customer actually answers
-              console.log('⏸️ Outbound call - no call log found yet, waiting for status callback with answer evidence');
-              callWasAnswered = false;
+              // No call log or no answerTime - check Twilio API to verify if call was answered
+              try {
+                const { getClient } = require('../../../../lib/twilio');
+                const client = getClient();
+                const twilioCall = await client.calls(callSid).fetch();
+                
+                // Check if call has answerTime in Twilio
+                if (twilioCall.answerTime) {
+                  callWasAnswered = true;
+                  console.log('✅ Outbound call - confirmed answered via Twilio API (answerTime exists)');
+                } else {
+                  console.log('⏸️ Outbound call - Twilio API shows no answerTime yet, call may still be ringing');
+                  callWasAnswered = false;
+                }
+              } catch (apiError) {
+                console.warn('⚠️ Could not verify call status via Twilio API:', apiError.message);
+                // If API check fails, be conservative - don't assume answered
+                // The call status callback will send "in-progress" when customer actually answers
+                callWasAnswered = false;
+              }
             }
             
             // Only broadcast "in-progress" if call was actually answered
@@ -871,24 +882,50 @@ export async function POST(request) {
     // Keep "in-progress" from call-status-callback as "ringing" until customer actually joins conference
     let statusToSend = callStatus;
     
-    // Filter "in-progress" - we'll get the real "in-progress" from conference callback when customer joins
-    // Twilio sends "in-progress" when agent joins conference, even if customer hasn't answered
-    if (callStatus === 'in-progress') {
-      const hasAnswerTime = answerTime && answerTime.trim() !== '';
-      const hasAnsweredBy = answeredBy && answeredBy.trim() !== '';
-      const hasDuration = duration && parseInt(duration) > 0;
-      
-      // Only accept "in-progress" if we have strong evidence customer answered
-      // Otherwise, keep as "ringing" - conference callback will send "in-progress" when customer joins
-      if (!hasAnswerTime && !hasAnsweredBy && !hasDuration) {
-        console.log('⚠️ Filtering "in-progress" - treating as "ringing" (will get in-progress from conference callback when customer joins)', {
-          callSid: callSid.substring(0, 15) + '...',
-          answerTime,
-          answeredBy,
-          duration,
-          reason: 'Conference callback will signal when customer actually joins conference'
-        });
-        statusToSend = 'ringing';
+    // For inbound calls, handle status mapping
+    if (direction === 'inbound') {
+      // For inbound calls, map Twilio statuses appropriately
+      if (callStatus === 'initiated' || callStatus === 'queued') {
+        statusToSend = 'ringing'; // Inbound call just started, should show as ringing
+        console.log('📞 Inbound call status mapping: ' + callStatus + ' → ringing');
+      } else if (callStatus === 'ringing') {
+        statusToSend = 'ringing'; // Keep as ringing
+      } else if (callStatus === 'in-progress' || callStatus === 'answered') {
+        // For inbound calls, "in-progress" or "answered" means the call was answered
+        // The customer is already connected (they called us), so this is valid
+        statusToSend = 'in-progress';
+        console.log('📞 Inbound call status mapping: ' + callStatus + ' → in-progress');
+      } else if (callStatus === 'busy') {
+        // "busy" for inbound calls can mean:
+        // 1. Caller hung up before answer (missed call)
+        // 2. Line was busy (unlikely for inbound)
+        // Keep the status as "busy" - frontend will handle "missed" mapping based on whether it was ever in-progress
+        statusToSend = 'busy';
+        console.log('📞 Inbound call status: busy - caller may have hung up');
+      } else {
+        // For other statuses (completed, failed, etc.), use as-is
+        statusToSend = callStatus;
+      }
+    } else {
+      // For outbound calls, filter "in-progress" - we'll get the real "in-progress" from conference callback when customer joins
+      // Twilio sends "in-progress" when agent joins conference, even if customer hasn't answered
+      if (callStatus === 'in-progress') {
+        const hasAnswerTime = answerTime && answerTime.trim() !== '';
+        const hasAnsweredBy = answeredBy && answeredBy.trim() !== '';
+        const hasDuration = duration && parseInt(duration) > 0;
+        
+        // Only accept "in-progress" if we have strong evidence customer answered
+        // Otherwise, keep as "ringing" - conference callback will send "in-progress" when customer joins
+        if (!hasAnswerTime && !hasAnsweredBy && !hasDuration) {
+          console.log('⚠️ Filtering "in-progress" - treating as "ringing" (will get in-progress from conference callback when customer joins)', {
+            callSid: callSid.substring(0, 15) + '...',
+            answerTime,
+            answeredBy,
+            duration,
+            reason: 'Conference callback will signal when customer actually joins conference'
+          });
+          statusToSend = 'ringing';
+        }
       }
     }
     
