@@ -21,6 +21,9 @@ export default function InboundCallDialog({ notification, onClose, onMinimize })
   const [isJoining, setIsJoining] = useState(false);
   const statusCheckInterval = useRef(null);
   
+  // Track last processed status to prevent duplicate processing
+  const lastProcessedStatusRef = useRef(null);
+  
   // Helper function to update call status from status data
   const updateCallStatusFromData = useCallback((statusData) => {
     if (!statusData?.status) {
@@ -29,22 +32,48 @@ export default function InboundCallDialog({ notification, onClose, onMinimize })
     }
     
     const newStatus = statusData.status;
+    const callSid = statusData.callSid || notification?.callSid;
+    
+    // Create a unique key for this status update
+    const statusKey = `${callSid}-${newStatus}`;
+    
+    // Skip if we've already processed this exact status update
+    if (lastProcessedStatusRef.current === statusKey) {
+      console.log('⏭️ Skipping duplicate status update:', {
+        callSid,
+        status: newStatus,
+        previousKey: lastProcessedStatusRef.current
+      });
+      return;
+    }
+    
     console.log('📞 Updating call status:', {
       newStatus,
-      callSid: notification?.callSid,
+      callSid,
       previousStatus: callStatus
     });
     
     setCallStatus(prevStatus => {
+      // Skip if status hasn't changed and we've already processed it
+      if (prevStatus === newStatus || prevStatus === 'missed' && ['busy', 'no-answer', 'completed', 'failed', 'canceled'].includes(newStatus)) {
+        console.log('⏭️ Status already set, skipping update:', {
+          currentStatus: prevStatus,
+          incomingStatus: newStatus
+        });
+        return prevStatus;
+      }
+      
       // If call is in-progress, update status
       if (newStatus === 'in-progress') {
         console.log('📞 Call is now in-progress');
+        lastProcessedStatusRef.current = statusKey;
         return 'in-progress';
       }
       
       // If call ended after joining (was in-progress), mark as completed
       if (['completed', 'failed', 'canceled'].includes(newStatus) && prevStatus === 'in-progress') {
         console.log('✅ Call completed after agent joined');
+        lastProcessedStatusRef.current = statusKey;
         return 'completed';
       }
       
@@ -54,6 +83,7 @@ export default function InboundCallDialog({ notification, onClose, onMinimize })
         // If it was never in-progress, it's a missed call
         if (prevStatus !== 'in-progress' && prevStatus !== 'completed' && prevStatus !== 'missed') {
           console.log('❌ Call missed - customer ended before agent joined');
+          lastProcessedStatusRef.current = statusKey;
           return 'missed';
         }
       }
@@ -64,11 +94,18 @@ export default function InboundCallDialog({ notification, onClose, onMinimize })
         // If it was never in-progress, it's missed
         if (prevStatus !== 'in-progress') {
           console.log('❌ Marking as missed (never was in-progress)');
+          lastProcessedStatusRef.current = statusKey;
           return 'missed';
         } else {
           console.log('✅ Marking as completed (was in-progress)');
+          lastProcessedStatusRef.current = statusKey;
           return 'completed';
         }
+      }
+      
+      // If we're already in a final state, don't change
+      if (['missed', 'completed'].includes(prevStatus)) {
+        return prevStatus;
       }
       
       return prevStatus;

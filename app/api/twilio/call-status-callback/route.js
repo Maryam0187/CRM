@@ -339,6 +339,46 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
               order: [['created_at', 'DESC']]
             });
             
+            // Check if the call has actually been answered before broadcasting "in-progress"
+            // IMPORTANT: The customer's call leg joins the conference when Dial verb starts,
+            // even while their phone is still ringing. We must verify they actually answered.
+            
+            // For inbound calls: If they joined the conference, they must have answered (they called us)
+            // For outbound calls: Need to verify answerTime or call status indicates answer
+            let callWasAnswered = false;
+            
+            if (conferenceName && conferenceName.startsWith('inbound-')) {
+              // Inbound calls: Customer already answered when they called us
+              callWasAnswered = true;
+              console.log('✅ Inbound call - customer must have answered to reach conference');
+            } else if (callLog) {
+              // Outbound calls with call log: Check if answerTime exists
+              if (callLog.answerTime) {
+                callWasAnswered = true;
+                console.log('✅ Outbound call - confirmed answered via call log answerTime');
+              } else {
+                console.log('⏸️ Outbound call - no answerTime in call log, call may still be ringing');
+              }
+            } else {
+              // No call log yet - for outbound calls, be conservative
+              // Wait for call status callback with answer evidence before marking as in-progress
+              // The call status callback will have answerTime when customer actually answers
+              console.log('⏸️ Outbound call - no call log found yet, waiting for status callback with answer evidence');
+              callWasAnswered = false;
+            }
+            
+            // Only broadcast "in-progress" if call was actually answered
+            if (!callWasAnswered) {
+              console.log('⏸️ Customer joined conference but call not yet answered (still ringing) - not updating to in-progress:', {
+                callSid: callSid.substring(0, 15) + '...',
+                conferenceName,
+                hasCallLog: !!callLog,
+                conferenceType: conferenceName?.startsWith('inbound-') ? 'inbound' : 'outbound'
+              });
+              // Don't broadcast in-progress - wait for proper call status callback with answer evidence
+              break; // Exit switch case
+            }
+            
             // If no call log, try to get agentId from conference name (e.g., "call-1" -> agentId 1)
             let agentId = null;
             if (!callLog && conferenceName) {
@@ -356,17 +396,18 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
               agentId = parseInt(agentIdFromUrl, 10);
             }
             
-            // Always broadcast if customer identified, even if agentId is missing
+            // Always broadcast if customer identified and call was answered, even if agentId is missing
             // Frontend can still display in-progress status
             if (agentId || callLog) {
-              console.log('✅ Customer joined conference - updating status to in-progress:', {
+              console.log('✅ Customer answered and joined conference - updating status to in-progress:', {
                 callSid: callSid.substring(0, 15) + '...',
                 conferenceName,
                 agentId: agentId || callLog?.agentId || null,
-                hasCallLog: !!callLog
+                hasCallLog: !!callLog,
+                callWasAnswered
               });
               
-              // Broadcast "in-progress" status when customer joins conference
+              // Broadcast "in-progress" status when customer answers and joins conference
               const statusData = {
                 callSid,
                 status: 'in-progress',
@@ -799,8 +840,19 @@ export async function POST(request) {
     // Get conference name from call log or construct it
     // Note: conferenceName was already extracted for conference callbacks above,
     // but we need it from callLog for call status callbacks
-    const callStatusConferenceName = callLog?.twilioData?.conferenceName || 
-                                     (agentId ? `call-${agentId}` : null);
+    // For inbound calls: conference name is `inbound-${callSid.substring(0, 20)}`
+    // For outbound calls: conference name is `call-${agentId}`
+    let callStatusConferenceName = null;
+    if (callLog?.twilioData?.conferenceName) {
+      callStatusConferenceName = callLog.twilioData.conferenceName;
+    } else if (direction === 'inbound') {
+      // For inbound calls, conference name is based on callSid
+      callStatusConferenceName = `inbound-${callSid.substring(0, 20)}`;
+      console.log('📌 Constructed inbound conference name from callSid:', callStatusConferenceName);
+    } else if (agentId) {
+      // For outbound calls, conference name is based on agentId
+      callStatusConferenceName = `call-${agentId}`;
+    }
     
     // Track customer callSid for this conference (from phone-number callbacks)
     // This helps us identify customer when they join conference
@@ -808,7 +860,9 @@ export async function POST(request) {
       customerCallSidMap.set(callStatusConferenceName, callSid);
       console.log('📌 Tracked customer callSid for conference:', {
         conferenceName: callStatusConferenceName,
-        callSid: callSid.substring(0, 15) + '...'
+        callSid: callSid.substring(0, 15) + '...',
+        direction,
+        agentId: agentId || 'N/A'
       });
     }
 

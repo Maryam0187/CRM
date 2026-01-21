@@ -36,6 +36,8 @@ export const SocketProvider = ({ children }) => {
   const maxReconnectAttempts = 5;
   const reconnectDelay = 3000;
   const socketInitializedRef = useRef(false);
+  // Track last dispatched status updates to prevent duplicates
+  const lastDispatchedStatusRef = useRef(new Map());
 
   // Initialize socket connection
   useEffect(() => {
@@ -274,6 +276,23 @@ export const SocketProvider = ({ children }) => {
       console.log('📞 Current user ID:', user?.id);
       console.log('📞 Call agent ID:', data.agentId);
       console.log('📞 Is this call for current user?', user?.id === data.agentId);
+      
+      // Create a unique key for this status update
+      const statusKey = `${data.callSid}-${data.status}`;
+      const lastDispatched = lastDispatchedStatusRef.current.get(data.callSid);
+      
+      // Skip if we've already dispatched this exact status update
+      if (lastDispatched === statusKey) {
+        console.log('⏭️ Skipping duplicate status dispatch:', {
+          callSid: data.callSid,
+          status: data.status,
+          statusKey
+        });
+        return;
+      }
+      
+      // Mark this status as dispatched
+      lastDispatchedStatusRef.current.set(data.callSid, statusKey);
       
       // Update call status in state
       setCallStatusUpdates(prev => {
