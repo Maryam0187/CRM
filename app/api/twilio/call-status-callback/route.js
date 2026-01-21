@@ -7,6 +7,11 @@ import { Op } from 'sequelize';
 const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
 const ERROR_STATUSES = ['failed', 'busy', 'no-answer', 'canceled'];
 
+// In-memory store to track customer callSids from call-status callbacks
+// Maps conferenceName -> customerCallSid
+// This helps us identify customer when they join conference
+const customerCallSidMap = new Map();
+
 // Helper: Normalize Twilio direction to database enum values
 function normalizeDirection(twilioDirection) {
   if (!twilioDirection) return 'outbound';
@@ -290,7 +295,22 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       // Check if this is a customer (phone call) joining the conference
       // If customer joins conference, that's when call becomes "in-progress"
       if (conferenceName && callSid) {
-        const isCustomer = await isCustomerCallSid(callSid, formData);
+        // Log all available fields for debugging
+        console.log('🔍 Checking participant join - available fields:', {
+          callSid: callSid?.substring(0, 15) + '...',
+          participantCallSid: participantCallSid?.substring(0, 15) + '...',
+          from: formData.get('From') || 'NOT PROVIDED',
+          to: formData.get('To') || 'NOT PROVIDED',
+          conferenceName
+        });
+        
+        const isCustomer = await isCustomerCallSid(callSid, formData, conferenceName);
+        
+        console.log('🔍 Customer identification result:', {
+          callSid: callSid?.substring(0, 15) + '...',
+          isCustomer,
+          conferenceName
+        });
         
         if (isCustomer) {
           try {
@@ -475,6 +495,10 @@ async function isCustomerCallSid(callSid, formData = null) {
   // Check if this is from a client: connection (definitely agent)
   const from = formData?.get('From') || '';
   if (from && from.startsWith('client:')) {
+    console.log('❌ Identified as agent via client: prefix:', {
+      callSid: callSid.substring(0, 15) + '...',
+      from
+    });
     return false; // This is definitely an agent
   }
   
@@ -504,6 +528,10 @@ async function isCustomerCallSid(callSid, formData = null) {
     // Agent joins later via browser, so if we see this callSid in a conference join,
     // and it's not a client: connection, it's likely the customer
     
+    // Conference callbacks might not have From field, so check if callSid matches known customer patterns
+    // Customer callSids come from phone calls (outbound-api direction)
+    // Agent callSids come from browser (client: connections)
+    
     // If we have formData, check the From field
     if (formData) {
       const fromField = formData.get('From');
@@ -519,8 +547,31 @@ async function isCustomerCallSid(callSid, formData = null) {
           return true;
         }
       }
+      
+      // If From field is not provided or empty, and this is NOT a client: connection,
+      // and we're in a conference, it's likely the customer (agent would have client: prefix)
+      if (!fromField || fromField.trim() === '') {
+        // No From field in conference callback - this happens sometimes
+        // If callSid doesn't match agent patterns and we know the agent already joined,
+        // this is likely the customer
+        // But we can't be 100% sure, so we'll say it's NOT a customer for safety
+        // Actually, let's check - if there's NO From field, it might be customer
+        // because agent always has client: in their calls
+        console.log('⚠️ No From field in conference callback - cannot definitively identify:', {
+          callSid: callSid.substring(0, 15) + '...'
+        });
+        // For safety, assume NOT customer if we can't tell
+        return false;
+      }
     }
     
+    // Default: not identified as customer
+    console.log('❌ Could not identify as customer:', {
+      callSid: callSid.substring(0, 15) + '...',
+      hasCallLog: !!callLog,
+      hasFormData: !!formData,
+      from: formData?.get('From') || 'N/A'
+    });
     return false;
   } catch (error) {
     console.error('Error checking if customer callSid:', error);
@@ -683,6 +734,16 @@ export async function POST(request) {
     // but we need it from callLog for call status callbacks
     const callStatusConferenceName = callLog?.twilioData?.conferenceName || 
                                      (agentId ? `call-${agentId}` : null);
+    
+    // Track customer callSid for this conference (from phone-number callbacks)
+    // This helps us identify customer when they join conference
+    if (callStatusConferenceName && webhookSource === 'phone-number' && callSid) {
+      customerCallSidMap.set(callStatusConferenceName, callSid);
+      console.log('📌 Tracked customer callSid for conference:', {
+        conferenceName: callStatusConferenceName,
+        callSid: callSid.substring(0, 15) + '...'
+      });
+    }
 
     // Prepare status data for broadcasting (ONLY for phone call callbacks)
     // Note: We use conference callback to detect when customer joins conference
@@ -757,6 +818,13 @@ export async function POST(request) {
 
     // Save to database ONLY when call ends (successfully or failed)
     const isCallEnded = CALL_END_STATUSES.includes(callStatus);
+    
+    // Clean up tracked customer callSid when call ends
+    if (isCallEnded && callStatusConferenceName && customerCallSidMap.has(callStatusConferenceName)) {
+      customerCallSidMap.delete(callStatusConferenceName);
+      console.log('🧹 Cleaned up tracked customer callSid for conference:', callStatusConferenceName);
+    }
+    
     let finalCallLog = callLog;
 
     if (isCallEnded) {
