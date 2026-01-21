@@ -8,137 +8,6 @@ import { getConferenceParticipants, getParticipantStatus } from '../../../../lib
 const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
 const ERROR_STATUSES = ['failed', 'busy', 'no-answer', 'canceled'];
 
-// Helper: Derive call status from Twilio status
-// Helper: Derive call status with validation to ensure customer actually answered
-function deriveCallStatus(callStatus, callDuration, answerTime, answeredBy, previousStatus) {
-  const statusMap = {
-    'ringing': 'ringing',
-    'queued': 'ringing',
-    'initiated': 'ringing',
-    'in-progress': 'in-progress',
-    'answered': 'in-progress', // 'answered' maps to 'in-progress'
-    'completed': 'completed',
-    'no-answer': 'no-answer',
-    'busy': 'busy',
-    'failed': 'failed',
-    'canceled': 'canceled'
-  };
-  
-  // Handle 'ringing' status - customer's phone is ringing
-  if (callStatus === 'ringing' || callStatus === 'queued' || callStatus === 'initiated') {
-    return 'ringing';
-  }
-  
-  // Handle 'answered' status - always means customer answered
-  if (callStatus === 'answered') {
-    console.log('✅ Customer answered - status is "answered"');
-    return 'in-progress';
-  }
-  
-  // Handle 'completed' status - check if call was actually in progress
-  // If duration > 0, the call was connected (even if it was a machine)
-  if (callStatus === 'completed') {
-    const duration = parseInt(callDuration) || 0;
-    // If call has duration and previous status was ringing/null, it was in-progress
-    if (duration > 0 && (previousStatus === 'ringing' || previousStatus === 'queued' || previousStatus === 'initiated' || previousStatus === null)) {
-      // This means the call was connected but we missed the 'in-progress' callback
-      // We should still treat it as having been in-progress
-      console.log('⚠️ Call completed but had duration - was in-progress:', { duration, previousStatus });
-      // Return 'completed' but note that it was in-progress
-      return 'completed';
-    }
-    return 'completed';
-  }
-  
-  // Handle 'in-progress' status - need to validate customer actually answered
-  // Twilio can send 'in-progress' when agent joins conference, even if customer hasn't answered
-  if (callStatus === 'in-progress') {
-    // Validate that customer actually answered by checking:
-    // 1. answerTime is present (customer picked up) - STRONGEST indicator
-    // 2. answeredBy is 'human' or machine (call was answered)
-    // 3. duration exists (even if 0, customer just answered)
-    // 4. Previous status was 'ringing' (valid transition from ringing to in-progress)
-    const hasAnswerTime = answerTime && answerTime.trim() !== '';
-    const isHumanAnswer = answeredBy === 'human';
-    const isMachineAnswer = answeredBy && (answeredBy === 'machine' || answeredBy === 'machine_start' || answeredBy === 'fax');
-    const durationValue = parseInt(callDuration) || 0;
-    const hasDurationField = callDuration !== null && callDuration !== undefined; // Duration field exists (even if 0)
-    // Accept 'ringing' OR null (first callback might not have saved to DB yet)
-    const wasRinging = previousStatus === 'ringing' || previousStatus === null;
-    
-    // Customer answered if ANY of these are true:
-    // - answerTime is present (strongest indicator - customer definitely answered)
-    // - answeredBy is 'human' (customer answered)
-    // - answeredBy indicates machine/fax (call was answered, even if by machine)
-    // - Previous status was 'ringing' AND duration field exists (valid transition - customer just answered, duration may be 0)
-    // - duration > 0 (call has been active - customer must have answered)
-    if (hasAnswerTime) {
-      // answerTime is the strongest indicator - if present, customer definitely answered
-      console.log('✅ Customer answered - answerTime present');
-      return 'in-progress';
-    }
-    
-    if (isHumanAnswer) {
-      // If answeredBy is 'human', customer answered (even if duration is 0)
-      console.log('✅ Customer answered - answeredBy is human');
-      return 'in-progress';
-    }
-    
-    if (isMachineAnswer) {
-      // If answeredBy indicates machine/fax, call was answered (even if by machine)
-      console.log('✅ Call answered (by machine/fax) - treating as in-progress');
-      return 'in-progress';
-    }
-    
-    // If previous status was 'ringing' or null, accept transition to in-progress
-    // Since we only process phone-number callbacks (customer calls) at this point,
-    // if we receive "in-progress" and wasRinging is true, it means customer answered
-    // Twilio sends "in-progress" when customer picks up, even if some fields aren't populated yet
-    if (wasRinging) {
-      console.log('✅ Customer answered - valid transition from ringing to in-progress', {
-        previousStatus,
-        hasDurationField,
-        durationValue,
-        hasAnswerTime,
-        answeredBy: answeredBy || null,
-        evidence: hasAnswerTime ? 'answerTime' : 
-                  (isHumanAnswer || isMachineAnswer ? 'answeredBy' : 
-                  (durationValue > 0 ? 'duration > 0' : 
-                  (hasDurationField ? 'hasDurationField' : 'wasRinging (phone-number callback)')))
-      });
-      return 'in-progress';
-    }
-    
-    if (durationValue > 0) {
-      // Duration > 0 means call has been active - customer must have answered
-      console.log('✅ Customer answered - duration > 0');
-      return 'in-progress';
-    }
-    
-    // If no clear evidence, keep as 'ringing' (customer hasn't answered yet)
-    // This happens when agent joins conference before customer answers, or Twilio sends premature 'in-progress'
-    console.log('⚠️ Received "in-progress" but customer may not have answered:', {
-      callStatus,
-      answerTime: answerTime || null,
-      answeredBy: answeredBy || null,
-      duration: callDuration || 0,
-      previousStatus: previousStatus || null,
-      validation: {
-        hasAnswerTime,
-        isHumanAnswer,
-        isMachineAnswer,
-        hasDurationField,
-        wasRinging
-      },
-      decision: 'keeping as ringing - no clear evidence customer answered'
-    });
-    return 'ringing';
-  }
-  
-  // For all other statuses, use the map
-  return statusMap[callStatus] || 'ringing';
-}
-
 // Helper: Normalize Twilio direction to database enum values
 function normalizeDirection(twilioDirection) {
   if (!twilioDirection) return 'outbound';
@@ -526,10 +395,34 @@ export async function POST(request) {
     }
 
     // Prepare status data for broadcasting (ONLY for phone call callbacks)
-    // Note: Send original Twilio status to frontend - frontend will handle status derivation
+    // Note: We use conference callback to detect when customer joins conference
+    // Keep "in-progress" from call-status-callback as "ringing" until customer actually joins conference
+    let statusToSend = callStatus;
+    
+    // Filter "in-progress" - we'll get the real "in-progress" from conference callback when customer joins
+    // Twilio sends "in-progress" when agent joins conference, even if customer hasn't answered
+    if (callStatus === 'in-progress') {
+      const hasAnswerTime = answerTime && answerTime.trim() !== '';
+      const hasAnsweredBy = answeredBy && answeredBy.trim() !== '';
+      const hasDuration = duration && parseInt(duration) > 0;
+      
+      // Only accept "in-progress" if we have strong evidence customer answered
+      // Otherwise, keep as "ringing" - conference callback will send "in-progress" when customer joins
+      if (!hasAnswerTime && !hasAnsweredBy && !hasDuration) {
+        console.log('⚠️ Filtering "in-progress" - treating as "ringing" (will get in-progress from conference callback when customer joins)', {
+          callSid: callSid.substring(0, 15) + '...',
+          answerTime,
+          answeredBy,
+          duration,
+          reason: 'Conference callback will signal when customer actually joins conference'
+        });
+        statusToSend = 'ringing';
+      }
+    }
+    
     const statusData = {
       callSid,
-      status: callStatus, // Send original Twilio status - frontend handles derivation
+      status: statusToSend, // Send validated status
       duration: duration ? parseInt(duration) : null,
       direction,
       from,
