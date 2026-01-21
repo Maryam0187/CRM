@@ -333,13 +333,9 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
         
         if (isCustomer) {
           try {
-            // Try to find call log - if it doesn't exist yet (active call), get agentId from conference name
-            let callLog = await sequelizeDb.CallLog.findOne({ 
-              where: { callSid },
-              order: [['created_at', 'DESC']]
-            });
-            
             // Check if the call has actually been answered before broadcasting "in-progress"
+            // Note: We don't fetch call log here because call logs are only saved when call ends
+            // For active calls, we'll check Twilio API directly if needed
             // IMPORTANT: The customer's call leg joins the conference when Dial verb starts,
             // even while their phone is still ringing. We must verify they actually answered.
             
@@ -351,11 +347,9 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
               // Inbound calls: Customer already answered when they called us
               callWasAnswered = true;
               console.log('✅ Inbound call - customer must have answered to reach conference');
-            } else if (callLog && callLog.answerTime) {
-              // Outbound calls with call log that has answerTime: Confirmed answered
-              callWasAnswered = true;
-              console.log('✅ Outbound call - confirmed answered via call log answerTime');
             } else {
+              // For outbound calls, check Twilio API to verify call was answered
+              // (call logs aren't created until call ends, so we can't use them during active calls)
               // No call log or no answerTime - check Twilio API to verify if call was answered
               try {
                 const { getClient } = require('../../../../lib/twilio');
@@ -383,97 +377,71 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
               console.log('⏸️ Customer joined conference but call not yet answered (still ringing) - not updating to in-progress:', {
                 callSid: callSid.substring(0, 15) + '...',
                 conferenceName,
-                hasCallLog: !!callLog,
                 conferenceType: conferenceName?.startsWith('inbound-') ? 'inbound' : 'outbound'
               });
               // Don't broadcast in-progress - wait for proper call status callback with answer evidence
               break; // Exit switch case
             }
             
-            // If no call log, try to get agentId from conference name (e.g., "call-1" -> agentId 1)
+            // Get agentId - try multiple sources (call logs aren't created until call ends, so don't rely on them)
             let agentId = null;
-            if (!callLog && conferenceName) {
+            
+            // For outbound calls, try to extract from conference name (e.g., "call-1" -> agentId 1)
+            if (conferenceName && !conferenceName.startsWith('inbound-')) {
               const match = conferenceName.match(/^call-(\d+)$/);
               if (match) {
                 agentId = parseInt(match[1], 10);
-                console.log('📞 No call log found, extracted agentId from conference name:', agentId);
+                console.log('📞 Extracted agentId from conference name:', agentId);
               }
-            } else if (callLog) {
-              agentId = callLog.agentId;
             }
             
-            // Also try agentIdFromUrl if available
+            // Try to get agentId from URL params (passed in statusCallback URL)
+            // This works for both inbound and outbound calls
             if (!agentId && agentIdFromUrl) {
               agentId = parseInt(agentIdFromUrl, 10);
+              console.log('📞 Extracted agentId from URL params:', agentId);
             }
             
             // Always broadcast if customer identified and call was answered, even if agentId is missing
             // Frontend can still display in-progress status
-            if (agentId || callLog) {
-              console.log('✅ Customer answered and joined conference - updating status to in-progress:', {
-                callSid: callSid.substring(0, 15) + '...',
-                conferenceName,
-                agentId: agentId || callLog?.agentId || null,
-                hasCallLog: !!callLog,
-                callWasAnswered
-              });
-              
-              // Broadcast "in-progress" status when customer answers and joins conference
-              const statusData = {
-                callSid,
-                status: 'in-progress',
-                conferenceName,
-                agentId: agentId || callLog?.agentId || null,
-                customerId: callLog?.customerId || null,
-                saleId: callLog?.saleId || null,
-                callPurpose: callLog?.callPurpose || null,
-                duration: null,
-                twilioData: {
-                  callStatus: 'in-progress',
-                  source: 'conference-join',
-                  conferenceEvent: 'participant-join'
-                }
-              };
-              
-              // Try to send to specific agent if we have agentId
-              if (agentId || callLog?.agentId) {
-                socketManager.sendCallStatusToAgent(agentId || callLog.agentId, callSid, statusData);
-              } else {
-                console.warn('⚠️ AgentId missing, broadcasting in-progress anyway for frontend display');
+            // For inbound calls, we might not have agentId immediately, but we should still broadcast
+            console.log('✅ Customer answered and joined conference - updating status to in-progress:', {
+              callSid: callSid.substring(0, 15) + '...',
+              conferenceName,
+              agentId: agentId || null,
+              callWasAnswered
+            });
+            
+            // Broadcast "in-progress" status when customer answers and joins conference
+            // Note: customerId, saleId, callPurpose aren't available in conference callbacks
+            // They'll be included when we get call status callbacks with URL params
+            const statusData = {
+              callSid,
+              status: 'in-progress',
+              conferenceName,
+              agentId: agentId || null,
+              customerId: null, // Not available in conference callbacks
+              saleId: null, // Not available in conference callbacks
+              callPurpose: null, // Not available in conference callbacks
+              duration: null,
+              twilioData: {
+                callStatus: 'in-progress',
+                source: 'conference-join',
+                conferenceEvent: 'participant-join'
               }
-              
-              // Always broadcast to all channels (frontend needs this)
-              socketManager.sendCallStatusUpdate(callSid, statusData);
-              socketManager.sendCallStatusToSupervisors(callSid, statusData);
-              socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, statusData);
+            };
+            
+            // Try to send to specific agent if we have agentId
+            if (agentId) {
+              socketManager.sendCallStatusToAgent(agentId, callSid, statusData);
             } else {
-              console.warn('⚠️ Customer joined but cannot determine agentId - broadcasting anyway:', {
-                callSid: callSid.substring(0, 15) + '...',
-                conferenceName,
-                hasCallLog: !!callLog
-              });
-              
-              // Still broadcast even without agentId - frontend can display in-progress
-              const statusData = {
-                callSid,
-                status: 'in-progress',
-                conferenceName,
-                agentId: null,
-                customerId: null,
-                saleId: null,
-                callPurpose: null,
-                duration: null,
-                twilioData: {
-                  callStatus: 'in-progress',
-                  source: 'conference-join',
-                  conferenceEvent: 'participant-join'
-                }
-              };
-              
-              socketManager.sendCallStatusUpdate(callSid, statusData);
-              socketManager.sendCallStatusToSupervisors(callSid, statusData);
-              socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, statusData);
+              console.warn('⚠️ AgentId missing, broadcasting in-progress anyway for frontend display');
             }
+            
+            // Always broadcast to all channels (frontend needs this)
+            socketManager.sendCallStatusUpdate(callSid, statusData);
+            socketManager.sendCallStatusToSupervisors(callSid, statusData);
+            socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, statusData);
           } catch (error) {
             console.error('Error checking call log for customer join:', error);
           }
@@ -783,14 +751,32 @@ export async function POST(request) {
         callSid, // Parent call (the one executing Dial)
         dialCallSid, // The call that was dialed (customer leg in conference)
         dialCallStatus,
+        callStatus, // Actual call status (might be different from Dial status)
         from,
-        to
+        to,
+        direction
       });
+      
+      // IMPORTANT: For inbound calls with Dial+Conference:
+      // - DialCallStatus indicates the Dial operation result (busy/no-answer if Dial times out)
+      // - CallStatus indicates the actual call status (ringing/in-progress if call is active)
+      // If Dial times out (DialCallStatus = busy/no-answer) but CallStatus is still ringing/in-progress,
+      // it means the customer is still waiting in conference - DON'T mark as busy/missed
       
       // For Dial callbacks, the CallSid is the parent call executing the Dial
       // The DialCallSid is the actual customer call leg we care about
       // But we'll continue with CallSid since that's what we track in CallLog
       // The Dial callback provides additional context but doesn't change the main tracking
+      
+      // For inbound calls: If Dial failed but call is still active, don't treat as missed
+      if (direction === 'inbound' && ['busy', 'no-answer'].includes(dialCallStatus) && 
+          callStatus && !['busy', 'completed', 'failed', 'canceled'].includes(callStatus)) {
+        console.log('⚠️ Dial operation failed/timed out but call is still active - customer is still waiting in conference', {
+          dialCallStatus,
+          callStatus,
+          note: 'This is likely a Dial timeout, not a caller hangup. Will continue processing actual call status.'
+        });
+      }
     }
 
     // Skip non-customer leg callbacks (agent browser connections from TwiML App)
@@ -829,12 +815,26 @@ export async function POST(request) {
         from,
         to,
         callbackSource,
+        direction,
         timestamp: new Date().toISOString()
       });
+      
+      // Log warning if we get "busy" status for inbound calls - this usually means caller hung up
+      if (direction === 'inbound' && callStatus === 'busy') {
+        console.warn('⚠️ Inbound call received "busy" status - caller likely hung up before call could be answered', {
+          callSid: callSid.substring(0, 15) + '...',
+          from,
+          to,
+          duration,
+          answerTime: answerTime || 'NONE',
+          reason: 'Caller hung up immediately or call failed to connect'
+        });
+      }
     }
 
-    // Get existing call log (for reference, but won't save until call ends)
-    const callLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
+    // Note: We don't fetch call log here because call logs are only saved when call ends.
+    // For active calls, callLog would be null anyway. We only fetch it when needed (at call end).
+    // We use URL params (agentIdFromUrl, customerIdFromUrl, etc.) for active call data.
     
     // Log original callback status (for debugging)
     // NOTE: This is a separate webhook callback from Twilio for each status change
@@ -846,17 +846,17 @@ export async function POST(request) {
       answeredBy: answeredBy || null,
       duration: duration || 0
     });
-    const agentId = await resolveAgentId(agentIdFromUrl, callLog, from, to);
+    
+    // Resolve agentId - callLog is null for active calls, so we only use it as a fallback
+    const agentId = await resolveAgentId(agentIdFromUrl, null, from, to);
 
-    // Get conference name from call log or construct it
+    // Get conference name - construct it since call logs aren't created until call ends
     // Note: conferenceName was already extracted for conference callbacks above,
-    // but we need it from callLog for call status callbacks
+    // but we need to construct it for call status callbacks
     // For inbound calls: conference name is `inbound-${callSid.substring(0, 20)}`
     // For outbound calls: conference name is `call-${agentId}`
     let callStatusConferenceName = null;
-    if (callLog?.twilioData?.conferenceName) {
-      callStatusConferenceName = callLog.twilioData.conferenceName;
-    } else if (direction === 'inbound') {
+    if (direction === 'inbound') {
       // For inbound calls, conference name is based on callSid
       callStatusConferenceName = `inbound-${callSid.substring(0, 20)}`;
       console.log('📌 Constructed inbound conference name from callSid:', callStatusConferenceName);
@@ -893,15 +893,63 @@ export async function POST(request) {
       } else if (callStatus === 'in-progress' || callStatus === 'answered') {
         // For inbound calls, "in-progress" or "answered" means the call was answered
         // The customer is already connected (they called us), so this is valid
+        // IMPORTANT: For inbound calls, when we receive "in-progress" or "answered" status,
+        // it means the call has been answered. We should NOT filter this to "ringing".
         statusToSend = 'in-progress';
-        console.log('📞 Inbound call status mapping: ' + callStatus + ' → in-progress');
+        console.log('✅ Inbound call status mapping: ' + callStatus + ' → in-progress (call answered)');
       } else if (callStatus === 'busy') {
-        // "busy" for inbound calls can mean:
-        // 1. Caller hung up before answer (missed call)
-        // 2. Line was busy (unlikely for inbound)
-        // Keep the status as "busy" - frontend will handle "missed" mapping based on whether it was ever in-progress
-        statusToSend = 'busy';
-        console.log('📞 Inbound call status: busy - caller may have hung up');
+        // "busy" for inbound calls with Dial verb can mean:
+        // 1. Dial verb timed out (no agent joined conference within timeout period)
+        // 2. Caller hung up before answer (missed call)
+        // 3. Dial verb failed to connect
+        //
+        // IMPORTANT: For inbound calls using Dial+Conference, if "busy" comes from Dial verb,
+        // it might mean the Dial timed out waiting for someone to join the conference,
+        // NOT that the caller hung up. The caller might still be waiting (hearing ringing).
+        //
+        // Check if this is a Dial callback - if so, it's likely a timeout, not a hangup
+        // We should keep status as "ringing" if it's a Dial timeout, only "busy" if caller hung up
+        if (dialCallStatus === 'busy' && dialCallSid) {
+          // This is a Dial verb callback indicating the Dial operation failed/timed out
+          // The caller might still be waiting - don't mark as busy yet, keep as ringing
+          console.warn('⚠️ Inbound call: Dial verb returned "busy" - may be timeout, not caller hangup', {
+            callSid: callSid.substring(0, 15) + '...',
+            dialCallSid: dialCallSid.substring(0, 15) + '...',
+            dialCallStatus,
+            duration,
+            note: 'This might be a Dial timeout, not a caller hangup. Keeping status as ringing until confirmed.'
+          });
+          // Keep as "ringing" - the caller is likely still waiting
+          // DON'T change to busy - we'll wait for actual call status or conference callback
+          statusToSend = 'ringing';
+        } else if (callStatus === 'busy' && !dialCallStatus) {
+          // This is a direct call status callback (not Dial callback), caller likely hung up
+          // But only mark as busy if we have evidence the call actually ended (duration > 0 or endTime)
+          // If duration is 0, it might be a premature status
+          const hasDuration = duration && parseInt(duration) > 0;
+          const hasEndTime = endTime && endTime.trim() !== '';
+          
+          if (hasDuration || hasEndTime) {
+            statusToSend = 'busy';
+            console.warn('📞 Inbound call status: busy - caller hung up (confirmed)', {
+              callSid: callSid.substring(0, 15) + '...',
+              duration,
+              endTime: endTime || 'NONE',
+              answerTime: answerTime || 'NONE'
+            });
+          } else {
+            // No duration or endTime - might be premature, keep as ringing
+            statusToSend = 'ringing';
+            console.warn('⚠️ Inbound call status: busy but no duration/endTime - keeping as ringing (may be premature)', {
+              callSid: callSid.substring(0, 15) + '...',
+              duration,
+              endTime: endTime || 'NONE'
+            });
+          }
+        } else {
+          // Default case
+          statusToSend = 'busy';
+        }
       } else {
         // For other statuses (completed, failed, etc.), use as-is
         statusToSend = callStatus;
@@ -941,9 +989,9 @@ export async function POST(request) {
       answerTime,
       hangupCause,
       agentId,
-      customerId: callLog?.customerId || customerIdFromUrl || null,
-      saleId: callLog?.saleId || saleIdFromUrl || null,
-      callPurpose: callLog?.callPurpose || callPurposeFromUrl || null,
+      customerId: customerIdFromUrl || null,
+      saleId: saleIdFromUrl || null,
+      callPurpose: callPurposeFromUrl || null,
       conferenceName: callStatusConferenceName,
       webhookSource, // Include source for debugging
       twilioData: {
@@ -983,10 +1031,17 @@ export async function POST(request) {
       console.log('🧹 Cleaned up tracked customer callSid for conference:', callStatusConferenceName);
     }
     
-    let finalCallLog = callLog;
-
+    // Only fetch call log when call ends (to check if it exists for update vs create)
+    let finalCallLog = null;
+    
     if (isCallEnded) {
-      console.log('💾 Saving call log to database (call ended)');
+      // Fetch existing call log if it exists (might exist if call was saved earlier)
+      finalCallLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
+      console.log('💾 Saving call log to database (call ended)', {
+        callSid: callSid.substring(0, 15) + '...',
+        callStatus,
+        hasExistingLog: !!finalCallLog
+      });
       const twilioData = {
         callSid,
         callStatus, // Original Twilio status
@@ -1025,7 +1080,7 @@ export async function POST(request) {
         duration,
         callPurpose: callPurposeFromUrl,
         twilioData
-      }, callLog);
+      }, finalCallLog);
 
       // Handle special endings (voicemail, no-answer)
       await handleSpecialEndings(callSid, answeredBy, callStatus);
