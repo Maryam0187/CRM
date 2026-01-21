@@ -241,15 +241,26 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
   const hold = formData.get('Hold');
   const timestamp = formData.get('Timestamp');
   
+  // Log all available fields for debugging
+  const fromField = formData.get('From') || 'NOT PROVIDED';
+  const toField = formData.get('To') || 'NOT PROVIDED';
+  const trackedCallSid = conferenceName && customerCallSidMap.has(conferenceName) 
+    ? customerCallSidMap.get(conferenceName)?.substring(0, 15) + '...' 
+    : 'NONE';
+  
   console.log('📞 Conference callback received:', {
     conferenceSid: conferenceSid?.substring(0, 15) + '...',
     conferenceName,
     conferenceEvent,
     sequenceNumber,
     callSid: callSid?.substring(0, 15) + '...',
+    participantCallSid: participantCallSid?.substring(0, 15) + '...' || 'NOT PROVIDED',
+    from: fromField,
+    to: toField,
     muted,
     hold,
-    timestamp
+    timestamp,
+    trackedCustomerCallSid: trackedCallSid
   });
   
   // Normalize Twilio event names to our internal event names
@@ -296,12 +307,19 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       // If customer joins conference, that's when call becomes "in-progress"
       if (conferenceName && callSid) {
         // Log all available fields for debugging
+        const fromField = formData.get('From') || 'NOT PROVIDED';
+        const toField = formData.get('To') || 'NOT PROVIDED';
+        const trackedCallSid = customerCallSidMap.has(conferenceName) 
+          ? customerCallSidMap.get(conferenceName)?.substring(0, 15) + '...' 
+          : 'NONE';
+        
         console.log('🔍 Checking participant join - available fields:', {
           callSid: callSid?.substring(0, 15) + '...',
-          participantCallSid: participantCallSid?.substring(0, 15) + '...',
-          from: formData.get('From') || 'NOT PROVIDED',
-          to: formData.get('To') || 'NOT PROVIDED',
-          conferenceName
+          participantCallSid: participantCallSid?.substring(0, 15) + '...' || 'NOT PROVIDED',
+          from: fromField,
+          to: toField,
+          conferenceName,
+          trackedCustomerCallSid: trackedCallSid
         });
         
         const isCustomer = await isCustomerCallSid(callSid, formData, conferenceName);
@@ -309,7 +327,8 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
         console.log('🔍 Customer identification result:', {
           callSid: callSid?.substring(0, 15) + '...',
           isCustomer,
-          conferenceName
+          conferenceName,
+          matchesTracked: customerCallSidMap.has(conferenceName) && callSid === customerCallSidMap.get(conferenceName)
         });
         
         if (isCustomer) {
@@ -337,11 +356,13 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
               agentId = parseInt(agentIdFromUrl, 10);
             }
             
+            // Always broadcast if customer identified, even if agentId is missing
+            // Frontend can still display in-progress status
             if (agentId || callLog) {
               console.log('✅ Customer joined conference - updating status to in-progress:', {
                 callSid: callSid.substring(0, 15) + '...',
                 conferenceName,
-                agentId: agentId || callLog?.agentId,
+                agentId: agentId || callLog?.agentId || null,
                 hasCallLog: !!callLog
               });
               
@@ -362,18 +383,44 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
                 }
               };
               
+              // Try to send to specific agent if we have agentId
               if (agentId || callLog?.agentId) {
                 socketManager.sendCallStatusToAgent(agentId || callLog.agentId, callSid, statusData);
+              } else {
+                console.warn('⚠️ AgentId missing, broadcasting in-progress anyway for frontend display');
               }
+              
+              // Always broadcast to all channels (frontend needs this)
               socketManager.sendCallStatusUpdate(callSid, statusData);
               socketManager.sendCallStatusToSupervisors(callSid, statusData);
               socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, statusData);
             } else {
-              console.warn('⚠️ Customer joined but cannot determine agentId:', {
+              console.warn('⚠️ Customer joined but cannot determine agentId - broadcasting anyway:', {
                 callSid: callSid.substring(0, 15) + '...',
                 conferenceName,
                 hasCallLog: !!callLog
               });
+              
+              // Still broadcast even without agentId - frontend can display in-progress
+              const statusData = {
+                callSid,
+                status: 'in-progress',
+                conferenceName,
+                agentId: null,
+                customerId: null,
+                saleId: null,
+                callPurpose: null,
+                duration: null,
+                twilioData: {
+                  callStatus: 'in-progress',
+                  source: 'conference-join',
+                  conferenceEvent: 'participant-join'
+                }
+              };
+              
+              socketManager.sendCallStatusUpdate(callSid, statusData);
+              socketManager.sendCallStatusToSupervisors(callSid, statusData);
+              socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, statusData);
             }
           } catch (error) {
             console.error('Error checking call log for customer join:', error);
@@ -489,7 +536,7 @@ async function updateRelatedRecords(callLog, duration) {
 // 1. Checking if call log exists and has phone numbers (not client:)
 // 2. Checking active calls - if callSid matches an outbound call from status callbacks, it's customer
 // 3. Agent calls have callSids that start with different patterns or are from client: connections
-async function isCustomerCallSid(callSid, formData = null) {
+async function isCustomerCallSid(callSid, formData = null, conferenceName = null) {
   if (!callSid) return false;
   
   // Check if this is from a client: connection (definitely agent)
@@ -503,7 +550,25 @@ async function isCustomerCallSid(callSid, formData = null) {
   }
   
   try {
-    // First, try to find call log
+    // FIRST CHECK (MOST RELIABLE): See if we've tracked this callSid as the customer from call-status callbacks
+    if (conferenceName && customerCallSidMap.has(conferenceName)) {
+      const trackedCustomerCallSid = customerCallSidMap.get(conferenceName);
+      if (callSid === trackedCustomerCallSid) {
+        console.log('✅ Identified as customer via tracked callSid from call-status callback:', {
+          callSid: callSid.substring(0, 15) + '...',
+          conferenceName
+        });
+        return true;
+      } else {
+        console.log('🔍 CallSid does NOT match tracked customer callSid:', {
+          incomingCallSid: callSid.substring(0, 15) + '...',
+          trackedCustomerCallSid: trackedCustomerCallSid?.substring(0, 15) + '...',
+          conferenceName
+        });
+      }
+    }
+    
+    // SECOND CHECK: Try to find call log
     const callLog = await sequelizeDb.CallLog.findOne({ 
       where: { callSid },
       order: [['created_at', 'DESC']]
@@ -519,20 +584,15 @@ async function isCustomerCallSid(callSid, formData = null) {
           fromNumber: callLog.fromNumber?.substring(0, 10) + '...',
           toNumber: callLog.toNumber?.substring(0, 10) + '...'
         });
+        // Store it for future reference
+        if (conferenceName) {
+          customerCallSidMap.set(conferenceName, callSid);
+        }
         return true;
       }
     }
     
-    // If no call log, check if it's from an outbound call status callback
-    // For outbound calls, the customer's callSid will be the main call leg
-    // Agent joins later via browser, so if we see this callSid in a conference join,
-    // and it's not a client: connection, it's likely the customer
-    
-    // Conference callbacks might not have From field, so check if callSid matches known customer patterns
-    // Customer callSids come from phone calls (outbound-api direction)
-    // Agent callSids come from browser (client: connections)
-    
-    // If we have formData, check the From field
+    // THIRD CHECK: If we have formData, check the From field
     if (formData) {
       const fromField = formData.get('From');
       // Customer calls have phone numbers, agent calls have client: prefix
@@ -544,24 +604,28 @@ async function isCustomerCallSid(callSid, formData = null) {
             callSid: callSid.substring(0, 15) + '...',
             from: fromField
           });
+          // Store it for future reference
+          if (conferenceName) {
+            customerCallSidMap.set(conferenceName, callSid);
+          }
           return true;
         }
       }
-      
-      // If From field is not provided or empty, and this is NOT a client: connection,
-      // and we're in a conference, it's likely the customer (agent would have client: prefix)
-      if (!fromField || fromField.trim() === '') {
-        // No From field in conference callback - this happens sometimes
-        // If callSid doesn't match agent patterns and we know the agent already joined,
-        // this is likely the customer
-        // But we can't be 100% sure, so we'll say it's NOT a customer for safety
-        // Actually, let's check - if there's NO From field, it might be customer
-        // because agent always has client: in their calls
-        console.log('⚠️ No From field in conference callback - cannot definitively identify:', {
-          callSid: callSid.substring(0, 15) + '...'
+    }
+    
+    // FOURTH CHECK (FALLBACK): If From is empty but we have a tracked customer callSid for this conference,
+    // and the callSid matches what we tracked, assume it's the customer
+    // This handles cases where Twilio doesn't send From in conference callbacks
+    if (conferenceName && customerCallSidMap.has(conferenceName)) {
+      const trackedCustomerCallSid = customerCallSidMap.get(conferenceName);
+      // If callSid matches and From is empty or not client:, it's likely the customer
+      if (callSid === trackedCustomerCallSid && (!from || !from.startsWith('client:') || from === 'NOT PROVIDED')) {
+        console.log('✅ Identified as customer via fallback (tracked callSid match, From empty/not client):', {
+          callSid: callSid.substring(0, 15) + '...',
+          conferenceName,
+          from: from || 'EMPTY'
         });
-        // For safety, assume NOT customer if we can't tell
-        return false;
+        return true;
       }
     }
     
@@ -570,7 +634,10 @@ async function isCustomerCallSid(callSid, formData = null) {
       callSid: callSid.substring(0, 15) + '...',
       hasCallLog: !!callLog,
       hasFormData: !!formData,
-      from: formData?.get('From') || 'N/A'
+      from: formData?.get('From') || 'EMPTY',
+      conferenceName: conferenceName || 'N/A',
+      trackedCallSid: conferenceName ? (customerCallSidMap.get(conferenceName)?.substring(0, 15) + '...' || 'NONE') : 'N/A',
+      participantCallSid: formData?.get('ParticipantCallSid')?.substring(0, 15) + '...' || 'N/A'
     });
     return false;
   } catch (error) {
