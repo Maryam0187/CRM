@@ -290,19 +290,39 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       // Check if this is a customer (phone call) joining the conference
       // If customer joins conference, that's when call becomes "in-progress"
       if (conferenceName && callSid) {
-        const isCustomer = await isCustomerCallSid(callSid);
+        const isCustomer = await isCustomerCallSid(callSid, formData);
         
         if (isCustomer) {
           try {
-            const callLog = await sequelizeDb.CallLog.findOne({ 
+            // Try to find call log - if it doesn't exist yet (active call), get agentId from conference name
+            let callLog = await sequelizeDb.CallLog.findOne({ 
               where: { callSid },
               order: [['created_at', 'DESC']]
             });
             
-            if (callLog) {
+            // If no call log, try to get agentId from conference name (e.g., "call-1" -> agentId 1)
+            let agentId = null;
+            if (!callLog && conferenceName) {
+              const match = conferenceName.match(/^call-(\d+)$/);
+              if (match) {
+                agentId = parseInt(match[1], 10);
+                console.log('📞 No call log found, extracted agentId from conference name:', agentId);
+              }
+            } else if (callLog) {
+              agentId = callLog.agentId;
+            }
+            
+            // Also try agentIdFromUrl if available
+            if (!agentId && agentIdFromUrl) {
+              agentId = parseInt(agentIdFromUrl, 10);
+            }
+            
+            if (agentId || callLog) {
               console.log('✅ Customer joined conference - updating status to in-progress:', {
                 callSid: callSid.substring(0, 15) + '...',
-                conferenceName
+                conferenceName,
+                agentId: agentId || callLog?.agentId,
+                hasCallLog: !!callLog
               });
               
               // Broadcast "in-progress" status when customer joins conference
@@ -310,10 +330,10 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
                 callSid,
                 status: 'in-progress',
                 conferenceName,
-                agentId: callLog.agentId,
-                customerId: callLog.customerId,
-                saleId: callLog.saleId,
-                callPurpose: callLog.callPurpose,
+                agentId: agentId || callLog?.agentId || null,
+                customerId: callLog?.customerId || null,
+                saleId: callLog?.saleId || null,
+                callPurpose: callLog?.callPurpose || null,
                 duration: null,
                 twilioData: {
                   callStatus: 'in-progress',
@@ -322,12 +342,18 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
                 }
               };
               
-              if (callLog.agentId) {
-                socketManager.sendCallStatusToAgent(callLog.agentId, callSid, statusData);
+              if (agentId || callLog?.agentId) {
+                socketManager.sendCallStatusToAgent(agentId || callLog.agentId, callSid, statusData);
               }
               socketManager.sendCallStatusUpdate(callSid, statusData);
               socketManager.sendCallStatusToSupervisors(callSid, statusData);
               socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, statusData);
+            } else {
+              console.warn('⚠️ Customer joined but cannot determine agentId:', {
+                callSid: callSid.substring(0, 15) + '...',
+                conferenceName,
+                hasCallLog: !!callLog
+              });
             }
           } catch (error) {
             console.error('Error checking call log for customer join:', error);
@@ -439,10 +465,21 @@ async function updateRelatedRecords(callLog, duration) {
 }
 
 // Helper: Check if callSid belongs to customer (phone call) vs agent (browser)
-async function isCustomerCallSid(callSid) {
+// We identify customer calls by:
+// 1. Checking if call log exists and has phone numbers (not client:)
+// 2. Checking active calls - if callSid matches an outbound call from status callbacks, it's customer
+// 3. Agent calls have callSids that start with different patterns or are from client: connections
+async function isCustomerCallSid(callSid, formData = null) {
   if (!callSid) return false;
   
+  // Check if this is from a client: connection (definitely agent)
+  const from = formData?.get('From') || '';
+  if (from && from.startsWith('client:')) {
+    return false; // This is definitely an agent
+  }
+  
   try {
+    // First, try to find call log
     const callLog = await sequelizeDb.CallLog.findOne({ 
       where: { callSid },
       order: [['created_at', 'DESC']]
@@ -451,7 +488,37 @@ async function isCustomerCallSid(callSid) {
     // If call log exists and has phone numbers (not client:), it's the customer leg
     if (callLog && callLog.fromNumber && callLog.toNumber) {
       const isPhoneNumber = (num) => num && (num.startsWith('+') || /^\+?[1-9]\d{1,14}$/.test(num.replace(/[^\d+]/g, '')));
-      return isPhoneNumber(callLog.fromNumber) || isPhoneNumber(callLog.toNumber);
+      const hasPhoneNumbers = isPhoneNumber(callLog.fromNumber) || isPhoneNumber(callLog.toNumber);
+      if (hasPhoneNumbers) {
+        console.log('✅ Identified as customer via call log:', {
+          callSid: callSid.substring(0, 15) + '...',
+          fromNumber: callLog.fromNumber?.substring(0, 10) + '...',
+          toNumber: callLog.toNumber?.substring(0, 10) + '...'
+        });
+        return true;
+      }
+    }
+    
+    // If no call log, check if it's from an outbound call status callback
+    // For outbound calls, the customer's callSid will be the main call leg
+    // Agent joins later via browser, so if we see this callSid in a conference join,
+    // and it's not a client: connection, it's likely the customer
+    
+    // If we have formData, check the From field
+    if (formData) {
+      const fromField = formData.get('From');
+      // Customer calls have phone numbers, agent calls have client: prefix
+      if (fromField && !fromField.startsWith('client:')) {
+        // Check if it looks like a phone number
+        const looksLikePhone = fromField && (fromField.startsWith('+') || /^\+?[1-9]\d{1,14}$/.test(fromField.replace(/[^\d+]/g, '')));
+        if (looksLikePhone) {
+          console.log('✅ Identified as customer via From field (phone number):', {
+            callSid: callSid.substring(0, 15) + '...',
+            from: fromField
+          });
+          return true;
+        }
+      }
     }
     
     return false;
