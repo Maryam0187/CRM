@@ -120,7 +120,7 @@ async function handleVoiceResponse(request) {
         console.log(`📞 Routing to conference: ${conferenceName}`);
         
         // Get conference callback URL for tracking conference events
-        const conferenceCallbackUrl = getWebhookUrl('/api/twilio/conference-callback');
+        const conferenceCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
         
         // Place customer in conference room
         // Recording is DISABLED
@@ -467,7 +467,7 @@ async function handleInboundCall(formData, callerNumber, calledNumber) {
     statusCallbackUrl.searchParams.set('direction', 'inbound');
     
     // Get conference callback URL for tracking conference events
-    const conferenceCallbackUrl = getWebhookUrl('/api/twilio/conference-callback');
+    const conferenceCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
     
     // Generate TwiML to place caller in conference
     // Allow up to 5 participants (caller + multiple agents/admins)

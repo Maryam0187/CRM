@@ -67,7 +67,7 @@ async function handleJoinConference(request) {
     console.log('📞 Joining conference:', safeConferenceName);
     
     // Get conference callback URL for tracking conference events
-    const conferenceCallbackUrl = getWebhookUrl('/api/twilio/conference-callback');
+    const conferenceCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
     
     // Generate TwiML to join the conference
     // This is used when agent connects via web browser (Twilio Voice SDK)

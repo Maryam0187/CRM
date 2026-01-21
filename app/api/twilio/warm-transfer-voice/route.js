@@ -42,7 +42,7 @@ async function handleWarmTransferVoice(request) {
     console.log('📞 Warm transfer: Adding participant to conference:', safeConferenceName);
 
     // Get conference callback URL for tracking conference events
-    const conferenceCallbackUrl = getWebhookUrl('/api/twilio/conference-callback');
+    const conferenceCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
 
     // Create TwiML to join the existing conference
     // Recording is DISABLED

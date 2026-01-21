@@ -87,7 +87,6 @@ export default function GlobalWebCallInterface() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [localIsMuted, setLocalIsMuted] = useState(false);
-  const [participants, setParticipants] = useState([]); // Track conference participants
   const activeConnection = useRef(null);
   const localMediaStream = useRef(null);
   const isCleaningUp = useRef(false);
@@ -978,10 +977,6 @@ export default function GlobalWebCallInterface() {
         // We can trust the status from backend - it's already been validated
         updateCallStatus(statusData.status);
         
-        // Update participants if available
-        if (statusData.participants && Array.isArray(statusData.participants)) {
-          setParticipants(statusData.participants);
-        }
         
         // If call is completed/failed/canceled, disconnect the call
         // But only if we're actually connected (not just connecting)
@@ -994,8 +989,6 @@ export default function GlobalWebCallInterface() {
               endCall();
             }, 500);
           }
-          // Clear participants when call ends
-          setParticipants([]);
         }
       }
     };
@@ -1015,11 +1008,6 @@ export default function GlobalWebCallInterface() {
         // We can trust the status from backend - it's already been validated
         updateCallStatus(callStatusData.status);
         
-        // Update participants if available
-        if (callStatusData.participants && Array.isArray(callStatusData.participants)) {
-          setParticipants(callStatusData.participants);
-          console.log('📊 Participants updated:', callStatusData.participants);
-        }
         
         // If call is completed/failed/canceled, disconnect the call IMMEDIATELY
         // This handles the case when customer hangs up - agent browser should disconnect too
@@ -1035,26 +1023,12 @@ export default function GlobalWebCallInterface() {
               endCall();
             }, 200);
           }
-          // Clear participants when call ends
-          setParticipants([]);
         }
       }
     };
 
     window.addEventListener('callStatusUpdate', handleStatusUpdate);
 
-    // Listen for dedicated participant updates
-    const handleParticipantUpdate = (event) => {
-      const { participantData } = event.detail;
-      if (participantData?.callSid === currentCallSid) {
-        if (participantData.participants && Array.isArray(participantData.participants)) {
-          setParticipants(participantData.participants);
-          console.log('📊 Participants updated via socket:', participantData.participants);
-        }
-      }
-    };
-
-    window.addEventListener('participantUpdate', handleParticipantUpdate);
 
     // Listen for conference events (join, leave, mute, hold, etc.)
     const handleConferenceEvent = (event) => {
@@ -1066,45 +1040,21 @@ export default function GlobalWebCallInterface() {
         switch (conferenceEventData.event) {
           case 'join':
             console.log('👤 Participant joined conference:', conferenceEventData.callSid);
-            // Refresh participant list
-            if (conferenceEventData.callSid && currentCallSid) {
-              updateStatus();
-            }
             break;
           case 'leave':
             console.log('👋 Participant left conference:', conferenceEventData.callSid);
-            // Refresh participant list
-            if (conferenceEventData.callSid && currentCallSid) {
-              updateStatus();
-            }
             break;
           case 'mute':
             console.log('🔇 Participant mute status changed:', {
               callSid: conferenceEventData.callSid,
               muted: conferenceEventData.muted
             });
-            // Update participant mute status in state
-            if (conferenceEventData.callSid) {
-              setParticipants(prev => prev.map(p => 
-                p.callSid === conferenceEventData.callSid 
-                  ? { ...p, muted: conferenceEventData.muted }
-                  : p
-              ));
-            }
             break;
           case 'hold':
             console.log('⏸️ Participant hold status changed:', {
               callSid: conferenceEventData.callSid,
               hold: conferenceEventData.hold
             });
-            // Update participant hold status in state
-            if (conferenceEventData.callSid) {
-              setParticipants(prev => prev.map(p => 
-                p.callSid === conferenceEventData.callSid 
-                  ? { ...p, hold: conferenceEventData.hold }
-                  : p
-              ));
-            }
             break;
           case 'start':
             console.log('🎉 Conference started');
@@ -1125,11 +1075,10 @@ export default function GlobalWebCallInterface() {
 
     return () => {
       window.removeEventListener('callStatusUpdate', handleStatusUpdate);
-      window.removeEventListener('participantUpdate', handleParticipantUpdate);
       window.removeEventListener('conferenceEvent', handleConferenceEvent);
       clearInterval(interval);
     };
-  }, [currentCallSid, conferenceName, getCallStatus, updateCallStatus, device, endCall, disconnectCall, setParticipants]);
+  }, [currentCallSid, conferenceName, getCallStatus, updateCallStatus, device, endCall, disconnectCall]);
 
   // Sync mute state
   useEffect(() => {
@@ -1462,119 +1411,6 @@ export default function GlobalWebCallInterface() {
               </div>
             )}
 
-            {/* Participants Status Display */}
-            {participants.length > 0 && (callStatus === 'in-progress' || callStatus === 'ringing') && (
-              <div className="mb-3">
-                <div className="flex items-center justify-between mb-2 px-1">
-                  <div className="text-xs font-semibold text-gray-600">
-                    Participants ({participants.filter(p => p.status !== 'complete' && p.status !== 'failed').length})
-                  </div>
-                  {participants.filter(p => p.status !== 'complete' && p.status !== 'failed').every(p => p.status === 'connected') && 
-                   participants.filter(p => p.status !== 'complete' && p.status !== 'failed').length >= 2 && (
-                    <div className="flex items-center gap-1 text-xs text-green-600 font-medium">
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      All Connected
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  {participants
-                    .filter(p => p.status !== 'complete' && p.status !== 'failed') // Filter out ended participants
-                    .map((participant, index) => {
-                    // Identify customer vs agent:
-                    // - Customer: callSid matches currentCallSid (the original customer call leg)
-                    // - Agent: callSid does NOT match currentCallSid (agent's Voice SDK connection)
-                    const isCustomer = participant.callSid === currentCallSid;
-                    const isAgent = !isCustomer && participant.callSid?.startsWith('CA');
-                    
-                    // For customer: Always use call status as source of truth, not participant status
-                    // Participant status from Conference API can show "connected" even when call is still ringing
-                    // Call status is the authoritative source for customer's actual call state
-                    let displayStatus = participant.status;
-                    if (isCustomer && callStatus) {
-                      // Map call status to participant display status
-                      if (callStatus === 'ringing' || callStatus === 'queued' || callStatus === 'initiated') {
-                        displayStatus = 'ringing';
-                      } else if (callStatus === 'in-progress') {
-                        displayStatus = 'connected';
-                      } else if (callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') {
-                        displayStatus = 'complete';
-                      } else if (callStatus === 'no-answer' || callStatus === 'busy') {
-                        displayStatus = 'failed';
-                      }
-                      // For all other call statuses, use participant status
-                    }
-                    
-                    const statusColors = {
-                      'connected': 'bg-green-100 border-green-300 text-green-800',
-                      'ringing': 'bg-yellow-100 border-yellow-300 text-yellow-800',
-                      'connecting': 'bg-blue-100 border-blue-300 text-blue-800',
-                      'queued': 'bg-gray-100 border-gray-300 text-gray-800',
-                      'complete': 'bg-gray-100 border-gray-300 text-gray-600',
-                      'failed': 'bg-red-100 border-red-300 text-red-800'
-                    };
-                    const statusColor = statusColors[displayStatus] || 'bg-gray-100 border-gray-300 text-gray-800';
-                    
-                    return (
-                      <div 
-                        key={participant.callSid || index}
-                        className={`flex items-center justify-between p-2.5 rounded-lg border ${statusColor} transition-all`}
-                      >
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          {/* Status Indicator */}
-                          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                            displayStatus === 'connected' ? 'bg-green-500 animate-pulse' :
-                            displayStatus === 'ringing' ? 'bg-yellow-500 animate-pulse' :
-                            displayStatus === 'connecting' ? 'bg-blue-500 animate-pulse' :
-                            displayStatus === 'failed' ? 'bg-red-500' :
-                            'bg-gray-400'
-                          }`}></div>
-                          
-                          {/* Participant Label */}
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-medium truncate">
-                              {isCustomer ? '👤 Customer' : '👨‍💼 Agent'}
-                            </div>
-                            <div className="text-xs opacity-75 truncate">
-                              {displayStatus === 'connected' ? 'Connected' :
-                               displayStatus === 'ringing' ? 'Ringing' :
-                               displayStatus === 'connecting' ? 'Connecting...' :
-                               displayStatus === 'queued' ? 'Queued' :
-                               displayStatus === 'complete' ? 'Left' :
-                               displayStatus === 'failed' ? 'Failed' :
-                               displayStatus || 'Unknown'}
-                            </div>
-                          </div>
-                        </div>
-                        
-                        {/* Muted/Hold Indicators */}
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          {participant.muted && (
-                            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-orange-200 rounded text-orange-800">
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-                              </svg>
-                              <span className="text-[10px] font-semibold">Muted</span>
-                            </div>
-                          )}
-                          {participant.hold && (
-                            <div className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-200 rounded text-blue-800">
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              <span className="text-[10px] font-semibold">Hold</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             {/* Mute/Unmute Button */}
             {(isWebCallConnected || isConnected) && (callStatus === 'in-progress' || callStatus === 'ringing' || !callStatus) && (
