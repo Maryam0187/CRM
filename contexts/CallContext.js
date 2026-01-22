@@ -137,9 +137,11 @@ export function CallProvider({ children }) {
       return;
     }
     
-    // Prevent backwards transitions
+    // Prevent backwards transitions only if we've actually started timing the call.
+    // If we got a premature "in-progress" (agent joined conference) we allow reverting to "ringing".
     if (currentStatus === 'in-progress' && status === 'ringing') {
-      return;
+      const timerIsRunning = !!timerIntervalRef.current;
+      if (timerIsRunning) return;
     }
     
     // Prevent duplicate in-progress updates

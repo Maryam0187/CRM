@@ -97,6 +97,9 @@ export async function POST(request) {
       url: voiceUrl,
       to: formattedNumber,  // Customer phone number
       from: twilioPhoneNumber,
+      // How long to let the customer's phone ring before Twilio ends the call attempt (seconds)
+      // Default Twilio behavior can feel like "call ended itself". Increase to reduce missed calls.
+      timeout: parseInt(process.env.TWILIO_OUTBOUND_RING_TIMEOUT || '90', 10),
       statusCallback: statusCallbackUrl.toString(),
       statusCallbackEvent: ['initiated', 'queued', 'ringing', 'answered', 'in-progress', 'completed'],
       // Enable Answering Machine Detection (AMD) to detect voicemail

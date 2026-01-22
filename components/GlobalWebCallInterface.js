@@ -552,9 +552,10 @@ export default function GlobalWebCallInterface() {
               if (!isInboundCall && currentCallSid) {
                 const actualStatusData = getCallStatus(currentCallSid);
                 const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
-                if (actualStatusData?.status && endedStatuses.includes(actualStatusData.status)) {
+                const actualStatusForUi = actualStatusData?.uiStatus || actualStatusData?.status;
+                if (actualStatusForUi && endedStatuses.includes(actualStatusForUi)) {
                   console.warn('⚠️ Call has ended on server, disconnecting immediately');
-                  updateCallStatus(actualStatusData.status);
+                  updateCallStatus(actualStatusForUi);
                   disconnectCall('call_ended_on_server');
                   setTimeout(() => {
                     endCall();
