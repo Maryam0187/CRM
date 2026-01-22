@@ -280,6 +280,13 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           conferenceName,
           timestamp
         });
+        // Also send conference status
+        socketManager.sendConferenceStatus(conferenceName, {
+          status: 'in-progress', // Conference is active
+          conferenceSid,
+          participantsCount: 0, // Will be updated as participants join
+          callSid: callSid || null
+        });
       }
       break;
       
@@ -291,6 +298,13 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           conferenceSid,
           conferenceName,
           timestamp
+        });
+        // Also send conference status
+        socketManager.sendConferenceStatus(conferenceName, {
+          status: 'completed', // Conference has ended
+          conferenceSid,
+          participantsCount: 0, // All participants have left
+          callSid: callSid || null
         });
       }
       break;
@@ -356,6 +370,16 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           hold: hold === 'true',
           timestamp
         });
+        // Also send updated conference status (participant count increased)
+        // Note: We don't have exact count here, but we can indicate a participant joined
+        socketManager.sendConferenceStatus(conferenceName, {
+          status: 'in-progress',
+          conferenceSid,
+          participantJoined: true,
+          participantCallSid: callSid,
+          callSid: callSid,
+          timestamp
+        });
       }
       break;
       
@@ -367,6 +391,15 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           conferenceSid,
           conferenceName,
           callSid,
+          timestamp
+        });
+        // Also send updated conference status (participant count decreased)
+        socketManager.sendConferenceStatus(conferenceName, {
+          status: 'in-progress',
+          conferenceSid,
+          participantLeft: true,
+          participantCallSid: callSid,
+          callSid: callSid,
           timestamp
         });
       }

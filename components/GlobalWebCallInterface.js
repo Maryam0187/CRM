@@ -1113,12 +1113,58 @@ export default function GlobalWebCallInterface() {
     };
 
     window.addEventListener('conferenceEvent', handleConferenceEvent);
+
+    // Listen for conference status updates
+    const handleConferenceStatus = (event) => {
+      const { conferenceStatusData } = event.detail;
+      
+      if (conferenceStatusData?.conferenceName === conferenceName) {
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📞 [GlobalWebCallInterface] Conference status update received');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📋 Status Details:', {
+          status: conferenceStatusData.status,
+          conferenceName: conferenceStatusData.conferenceName,
+          conferenceSid: conferenceStatusData.conferenceSid,
+          participantsCount: conferenceStatusData.participantsCount,
+          participantJoined: conferenceStatusData.participantJoined,
+          participantLeft: conferenceStatusData.participantLeft,
+          participantCallSid: conferenceStatusData.participantCallSid,
+          callSid: conferenceStatusData.callSid,
+          timestamp: conferenceStatusData.timestamp
+        });
+        console.log('📋 Full Conference Status Data:', conferenceStatusData);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        
+        // Handle conference status updates
+        // You can use this to update UI, show participant count, etc.
+        if (conferenceStatusData.status === 'completed') {
+          console.log('🏁 [GlobalWebCallInterface] Conference ended');
+        } else if (conferenceStatusData.status === 'in-progress') {
+          console.log('✅ [GlobalWebCallInterface] Conference is active');
+          if (conferenceStatusData.participantJoined) {
+            console.log('👤 [GlobalWebCallInterface] Participant joined:', conferenceStatusData.participantCallSid);
+          }
+          if (conferenceStatusData.participantLeft) {
+            console.log('👋 [GlobalWebCallInterface] Participant left:', conferenceStatusData.participantCallSid);
+          }
+        }
+      } else {
+        console.log('⏭️ [GlobalWebCallInterface] Ignoring conference status - different conference:', {
+          receivedConference: conferenceStatusData?.conferenceName,
+          currentConference: conferenceName
+        });
+      }
+    };
+
+    window.addEventListener('conferenceStatus', handleConferenceStatus);
     
     const interval = setInterval(updateStatus, 1000);
 
     return () => {
       window.removeEventListener('callStatusUpdate', handleStatusUpdate);
       window.removeEventListener('conferenceEvent', handleConferenceEvent);
+      window.removeEventListener('conferenceStatus', handleConferenceStatus);
       clearInterval(interval);
     };
   }, [currentCallSid, conferenceName, getCallStatus, updateCallStatus, device, endCall, disconnectCall]);

@@ -372,6 +372,33 @@ export const SocketProvider = ({ children }) => {
       window.dispatchEvent(conferenceEvent);
     });
 
+    // Conference status handlers (status updates with participant count, etc.)
+    socketInstance.on('conference_status', (data) => {
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📞 [FRONTEND] Conference Status Received');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📋 Status Details:', {
+        status: data.status,
+        conferenceName: data.conferenceName,
+        conferenceSid: data.conferenceSid,
+        participantsCount: data.participantsCount,
+        participantJoined: data.participantJoined,
+        participantLeft: data.participantLeft,
+        participantCallSid: data.participantCallSid,
+        callSid: data.callSid,
+        timestamp: data.timestamp
+      });
+      console.log('📋 Full Conference Status Data:', JSON.stringify(data, null, 2));
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // Dispatch custom event for components to listen to
+      const conferenceStatusEvent = new CustomEvent('conferenceStatus', {
+        detail: { conferenceStatusData: data }
+      });
+      console.log('📤 [FRONTEND] Dispatching conference status to components');
+      window.dispatchEvent(conferenceStatusEvent);
+    });
+
     // Force logout handler
     socketInstance.on('force_logout', (data) => {
       console.log('🔐 Force logout received:', data);
