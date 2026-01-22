@@ -623,14 +623,15 @@ export async function POST(request) {
     // Determine callback type
     const isConferenceCallback = !!conferenceEvent && !!conferenceSid;
     const isDialCallback = !!dialCallStatus && !!dialCallSid;
-    const isCallStatusCallback = !!callStatus && !!callSid;
+    // Some Dial status callbacks do NOT include CallStatus, so accept Dial callbacks too.
+    const isCallStatusCallback = !!callSid && (!!callStatus || isDialCallback);
     
     // ===== HANDLE CONFERENCE CALLBACKS =====
     if (isConferenceCallback) {
       return handleConferenceCallback(formData, conferenceSid, conferenceName, conferenceEvent, agentIdFromUrl);
     }
     
-    // ===== HANDLE CALL STATUS CALLBACKS =====
+    // ===== HANDLE CALL STATUS + DIAL CALLBACKS =====
     if (!isCallStatusCallback) {
       return NextResponse.json({ success: false, message: 'Invalid callback - missing required fields' }, { status: 400 });
     }
@@ -689,19 +690,11 @@ export async function POST(request) {
     // Resolve agentId - callLog is null for active calls, so we only use it as a fallback
     const agentId = await resolveAgentId(agentIdFromUrl, null, from, to);
 
-    // Get conference name - construct it since call logs aren't created until call ends
-    // Note: conferenceName was already extracted for conference callbacks above,
-    // but we need to construct it for call status callbacks
-    // For inbound calls: conference name is `inbound-${callSid.substring(0, 20)}`
-    // For outbound calls: conference name is `call-${agentId}`
+    // OUTBOUND ONLY:
+    // Inbound callbacks are handled by `/api/twilio/inbound/call-status-callback`
+    // so inbound changes do not affect outbound.
     let callStatusConferenceName = null;
-    if (direction === 'inbound') {
-      // For inbound calls, conference name is based on callSid
-      callStatusConferenceName = effectiveCallSid ? `inbound-${effectiveCallSid.substring(0, 20)}` : null;
-    } else if (agentId) {
-      // For outbound calls, conference name is based on agentId
-      callStatusConferenceName = `call-${agentId}`;
-    }
+    if (agentId) callStatusConferenceName = `call-${agentId}`;
     
     // Track customer callSid for this conference (from phone-number callbacks)
     // This helps us identify customer when they join conference
@@ -732,18 +725,14 @@ export async function POST(request) {
         }
       }
 
-      // Inbound: once Twilio says in-progress/answered, treat as in-progress.
-      if (direction === 'inbound' && (callStatus === 'in-progress' || callStatus === 'answered')) {
-        uiStatus = 'in-progress';
-      }
-      if (direction === 'inbound' && (callStatus === 'initiated' || callStatus === 'queued')) {
-        uiStatus = 'ringing';
-      }
+      // (Inbound UI status logic is handled by the inbound callback route)
     }
+
+    const rawStatusToSend = callStatus || (isDialCallback ? dialCallStatus : null);
 
     const statusData = {
       callSid: effectiveCallSid,
-      status: callStatus, // Send original Twilio status as-is
+      status: rawStatusToSend, // CallStatus if present, otherwise DialCallStatus
       uiStatus,
       duration: duration ? parseInt(duration) : null,
       direction,
@@ -763,7 +752,7 @@ export async function POST(request) {
       dialCallSid: dialCallSid || null,
       dialCallStatus: dialCallStatus || null,
       twilioData: {
-        callStatus, // Original Twilio status
+        callStatus: callStatus || null,
         dialCallSid: dialCallSid || null,
         dialCallStatus: dialCallStatus || null,
         direction: twilioDirection, // Keep original Twilio direction in twilioData
@@ -785,7 +774,7 @@ export async function POST(request) {
       callbackType: isDialCallback ? 'dial' : 'call-status',
       webhookSource,
       callSid: effectiveCallSid,
-      status: callStatus,
+      status: rawStatusToSend,
       dialCallStatus: dialCallStatus || null,
       uiStatus,
       direction
@@ -795,7 +784,9 @@ export async function POST(request) {
 
 
     // Save to database ONLY when call ends (successfully or failed)
-    const isCallEnded = CALL_END_STATUSES.includes(callStatus);
+    // For Dial callbacks, we don't persist (we persist on the real call-status stream).
+    const endStatusForLifecycle = callStatus || (isDialCallback ? dialCallStatus : null);
+    const isCallEnded = !!endStatusForLifecycle && CALL_END_STATUSES.includes(endStatusForLifecycle);
     
     // Clean up tracked customer callSid when call ends
     if (isCallEnded && callStatusConferenceName && customerCallSidMap.has(callStatusConferenceName)) {

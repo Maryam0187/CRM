@@ -967,7 +967,7 @@ export default function GlobalWebCallInterface() {
 
     const updateStatus = () => {
       const statusData = getCallStatus(currentCallSid);
-      if (statusData?.status) {
+      if (statusData?.uiStatus || statusData?.status) {
         // Ignore client call status updates
         const isClientCall = statusData.twilioData?.isClientCall;
         if (isClientCall) {

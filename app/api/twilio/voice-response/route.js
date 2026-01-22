@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getWebhookUrl, validatePhoneNumber, getClient, normalizePhoneForMatching } from '../../../../lib/twilio';
+import { getWebhookUrl, validatePhoneNumber } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
-import { Op } from 'sequelize';
-import NotificationManager from '../../../../lib/notificationService';
-import socketManager from '../../../../lib/socket';
+import { handleInboundCall } from '../../../../lib/twilio/inbound/handleInboundCall';
 
 // Handle both GET and POST requests (Twilio can use either)
 export async function GET(request) {
@@ -129,8 +127,14 @@ async function handleVoiceResponse(request) {
           console.log(`📞 Outbound call - routing to conference: ${conferenceName}`);
         }
         
-        // Get conference callback URL for tracking conference events
+        // Callback URLs
         const conferenceCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
+
+        // Dial status callback is the most reliable way to detect when the customer actually answers
+        // (DialCallStatus=answered). This prevents showing "in-progress" while the phone is still ringing.
+        const dialStatusCallbackUrl = new URL(getWebhookUrl('/api/twilio/call-status-callback'));
+        dialStatusCallbackUrl.searchParams.set('agentId', parsedAgentId.toString());
+        dialStatusCallbackUrl.searchParams.set('direction', 'outbound');
         
         // Place agent in conference room
         // For inbound calls: agent joins existing conference where customer is already waiting
@@ -139,7 +143,7 @@ async function handleVoiceResponse(request) {
         // answerOnMedia="false" = connect immediately when answered, don't wait for media
         // startConferenceOnEnter="true" = when agent joins, start the conference (customer is already there for inbound, will trigger for outbound when customer joins)
         // endConferenceOnExit="false" = don't end conference when agent leaves (customer might still be there)
-        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
+        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false" statusCallback="${dialStatusCallbackUrl.toString()}" statusCallbackMethod="POST" statusCallbackEvent="initiated ringing answered completed">`;
         twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" maxParticipants="10" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${conferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
@@ -192,327 +196,6 @@ async function handleVoiceResponse(request) {
     console.error('🎙️ Error in voice response:', error);
     
     // Fallback TwiML
-    const fallbackTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">We're sorry, we're unable to connect you at this time. Please try again later.</Say>
-  <Hangup/>
-</Response>`;
-
-    return new NextResponse(fallbackTwiml, {
-      headers: { 'Content-Type': 'text/xml' }
-    });
-  }
-}
-
-async function handleInboundCall(formData, callerNumber, calledNumber) {
-  try {
-    const callSid = formData.get('CallSid');
-    console.log('📞 Inbound call received:', {
-      callSid,
-      callerNumber,
-      calledNumber,
-      timestamp: new Date().toISOString()
-    });
-
-    // Create unique conference name for this inbound call
-    // Use callSid to ensure uniqueness
-    const conferenceName = `inbound-${callSid.substring(0, 20)}`;
-    console.log(`📞 Created conference for inbound call: ${conferenceName}`);
-
-    // Try to find customer by phone number
-    let customerId = null;
-    let customer = null;
-    let lastSaleAgentId = null;
-    let lastSaleAgent = null;
-    let lastSaleId = null;
-    let lastSale = null;
-    
-    try {
-      // Normalize phone number for search (remove +1 prefix for US numbers)
-      const normalizedCallerNumber = normalizePhoneForMatching(callerNumber);
-      console.log(`🔍 Searching for customer with normalized number: ${normalizedCallerNumber} (original: ${callerNumber})`);
-      
-      if (normalizedCallerNumber) {
-        // Search using normalized number - need to normalize database values too
-        // Get all customers and filter in memory to handle normalization
-        const allCustomers = await sequelizeDb.Customer.findAll({
-          attributes: ['id', 'firstName', 'lastName', 'phone', 'landline']
-        });
-        
-        // Find customer by matching normalized phone numbers
-        customer = allCustomers.find(c => {
-          const normalizedPhone = normalizePhoneForMatching(c.phone);
-          const normalizedLandline = normalizePhoneForMatching(c.landline);
-          const phoneMatch = normalizedPhone && normalizedPhone === normalizedCallerNumber;
-          const landlineMatch = normalizedLandline && normalizedLandline === normalizedCallerNumber;
-          
-          if (phoneMatch || landlineMatch) {
-            console.log(`✅ Found customer match: ID ${c.id}, Phone: ${c.phone}, Landline: ${c.landline}`);
-          }
-          
-          return phoneMatch || landlineMatch;
-        });
-      } else {
-        console.log(`⚠️ Could not normalize caller number: ${callerNumber}`);
-      }
-      
-      if (customer) {
-        customerId = customer.id;
-        console.log(`✅ Matched inbound call to customer ID: ${customerId} (${customer.firstName} ${customer.lastName})`);
-        
-        // Find the last sale for this customer to get the agent and sale ID
-        lastSale = await sequelizeDb.Sale.findOne({
-          where: {
-            customerId: customerId
-          },
-          order: [['created_at', 'DESC']],
-          include: [
-            {
-              model: sequelizeDb.User,
-              as: 'agent',
-              attributes: ['id', 'firstName', 'lastName', 'email', 'callStatus', 'isActive']
-            }
-          ]
-        });
-        
-        if (lastSale) {
-          lastSaleId = lastSale.id;
-          if (lastSale.agent) {
-            lastSaleAgentId = lastSale.agent.id;
-            lastSaleAgent = lastSale.agent;
-            console.log(`✅ Found last sale: ID ${lastSaleId}, Agent: ${lastSaleAgent.firstName} ${lastSaleAgent.lastName} (ID: ${lastSaleAgentId}, Status: ${lastSaleAgent.callStatus})`);
-          }
-        }
-      } else {
-        console.log(`ℹ️ No customer found for caller number: ${callerNumber}`);
-      }
-    } catch (err) {
-      console.warn('⚠️ Error matching caller to customer:', err.message);
-    }
-
-    // Get all admin users
-    const admins = await NotificationManager.getAdmins();
-    console.log(`📧 Found ${admins.length} admin(s) to notify`);
-
-    // Prepare notification data - only use first name, not last name
-    const customerName = customer 
-      ? customer.firstName 
-      : `Unknown (${callerNumber})`;
-    
-    const notificationTitle = '📞 Inbound Call Received';
-    
-    // Build notification message - show customer name if found, otherwise phone number
-    let notificationMessage;
-    if (customerId && customer) {
-      notificationMessage = `Inbound call from ${customerName}`;
-    } else {
-      notificationMessage = `Inbound call from ${callerNumber}`;
-    }
-
-    // Always notify all admins with conference name and last sale link
-    const adminNotifications = [];
-    for (const admin of admins) {
-      try {
-        const notification = await NotificationManager.notifyUser(admin.id, {
-          type: 'inbound_call',
-          title: notificationTitle,
-          message: notificationMessage,
-          isRead: false,
-          relatedId: lastSaleId || customerId || null,
-          relatedType: lastSaleId ? 'sale' : (customerId ? 'customer' : 'call'),
-          route: customerId ? `/customers/${customerId}` : '/customers'
-        });
-        
-        adminNotifications.push(notification);
-        
-        // Send real-time notification via socket with conference info
-        try {
-          const socketNotification = {
-            id: notification.notification?.id || notification.id,
-            userId: admin.id,
-            type: 'inbound_call',
-            title: notificationTitle,
-            message: notificationMessage,
-            isRead: false,
-            relatedId: lastSaleId || customerId || null,
-            relatedType: lastSaleId ? 'sale' : (customerId ? 'customer' : 'call'),
-            route: customerId ? `/customers/${customerId}` : '/customers',
-            conferenceName: conferenceName, // Include conference name for joining
-            callSid: callSid,
-            callerNumber: callerNumber,
-            customerId: customerId,
-            customerName: customer ? customer.firstName : customerName, // Only first name
-            saleId: lastSaleId || null, // Set saleId to customer's latest sale ID
-            createdAt: new Date(),
-            time: new Date()
-          };
-          socketManager.sendNotificationToUser(admin.id, socketNotification);
-        } catch (socketError) {
-          console.warn('⚠️ Could not send socket notification to admin:', socketError.message);
-        }
-      } catch (notifyError) {
-        console.error(`❌ Failed to notify admin ${admin.id}:`, notifyError);
-      }
-    }
-
-    // Check if last sale agent is available
-    // Also check if agent is already an admin to avoid duplicate notifications
-    let agentAvailable = false;
-    if (lastSaleAgentId && lastSaleAgent) {
-      // Check if agent is available (not busy and active)
-      agentAvailable = lastSaleAgent.callStatus === 'available' && lastSaleAgent.isActive;
-      
-      // Check if agent is already in admins list to avoid duplicate notification
-      const isAgentAlsoAdmin = admins.some(admin => admin.id === lastSaleAgentId);
-      
-      if (agentAvailable && !isAgentAlsoAdmin) {
-        console.log(`✅ Last sale agent is available, notifying agent ${lastSaleAgentId}`);
-        
-        // Notify the last sale agent with conference name and last sale link
-        try {
-          // Build agent notification message (only first name, no last name)
-          const agentCustomerName = customer ? customer.firstName : `Unknown (${callerNumber})`;
-          const agentMessage = customerId && customer 
-            ? `Inbound call from ${agentCustomerName}`
-            : `Inbound call from ${callerNumber}`;
-          
-          const agentNotification = await NotificationManager.notifyUser(lastSaleAgentId, {
-            type: 'inbound_call',
-            title: notificationTitle,
-            message: agentMessage,
-            isRead: false,
-            relatedId: lastSaleId || customerId || null,
-            relatedType: lastSaleId ? 'sale' : 'customer',
-            route: `/customers/${customerId}`
-          });
-          
-          // Send real-time notification via socket with conference info
-          try {
-            const socketNotification = {
-              id: agentNotification.notification?.id || agentNotification.id,
-              userId: lastSaleAgentId,
-              type: 'inbound_call',
-              title: notificationTitle,
-              message: agentMessage,
-              isRead: false,
-              relatedId: lastSaleId || customerId || null,
-              relatedType: lastSaleId ? 'sale' : 'customer',
-              route: `/customers/${customerId}`,
-              conferenceName: conferenceName, // Include conference name for joining
-              callSid: callSid,
-              callerNumber: callerNumber,
-              customerId: customerId,
-              customerName: agentCustomerName,
-              saleId: lastSaleId || null, // Set saleId to customer's latest sale ID
-              createdAt: new Date(),
-              time: new Date()
-            };
-            socketManager.sendNotificationToUser(lastSaleAgentId, socketNotification);
-          } catch (socketError) {
-            console.warn('⚠️ Could not send socket notification to agent:', socketError.message);
-          }
-        } catch (notifyError) {
-          console.error(`❌ Failed to notify agent ${lastSaleAgentId}:`, notifyError);
-        }
-      } else if (isAgentAlsoAdmin) {
-        console.log(`ℹ️ Last sale agent ${lastSaleAgentId} is also an admin, already notified`);
-      } else {
-        console.log(`⚠️ Last sale agent ${lastSaleAgentId} is not available (Status: ${lastSaleAgent.callStatus}, Active: ${lastSaleAgent.isActive})`);
-      }
-    }
-
-    // Determine agentId for call log
-    // Use last sale agent if available, otherwise find first available admin/agent
-    let assignedAgentId = lastSaleAgentId;
-    
-    if (!assignedAgentId) {
-      // Find first available admin or agent to assign
-      // Prefer admins, then agents
-      const availableAdmin = admins.find(admin => admin.isActive && (admin.callStatus === 'available' || !admin.callStatus));
-      if (availableAdmin) {
-        assignedAgentId = availableAdmin.id;
-        console.log(`📞 No last sale agent, assigning to admin ${assignedAgentId}`);
-      } else {
-        // Fallback: find any active agent
-        const fallbackAgent = await sequelizeDb.User.findOne({
-          where: {
-            isActive: true,
-            role: { [Op.in]: ['agent', 'supervisor', 'admin'] }
-          },
-          order: [['id', 'ASC']] // Get first available agent
-        });
-        if (fallbackAgent) {
-          assignedAgentId = fallbackAgent.id;
-          console.log(`📞 No available admin, assigning to agent ${assignedAgentId}`);
-        } else {
-          // Last resort: use first admin from the list (even if busy)
-          if (admins.length > 0) {
-            assignedAgentId = admins[0].id;
-            console.log(`⚠️ No available agents, assigning to admin ${assignedAgentId} (may be busy)`);
-          }
-        }
-      }
-    }
-
-    // Create call log entry for inbound call
-    let callLog = null;
-    try {
-      if (!assignedAgentId) {
-        throw new Error('No agent available to assign to inbound call');
-      }
-      
-      // Don't create call log here - it will be created when call ends in status callback
-      // Store metadata in status callback URL so we can save it later
-      console.log(`📞 Inbound call received: ${callSid} (assigned to agent ${assignedAgentId}) - log will be saved when call ends`);
-    } catch (logError) {
-      console.error('❌ Failed to process inbound call:', logError);
-      // Log the error but don't fail the call - the call can still proceed
-    }
-
-    // Get status callback URL for Dial verb - include metadata so we can save log when call ends
-    const statusCallbackBaseUrl = getWebhookUrl('/api/twilio/call-status-callback');
-    const statusCallbackUrl = new URL(statusCallbackBaseUrl);
-    statusCallbackUrl.searchParams.set('agentId', assignedAgentId.toString());
-    if (customerId) statusCallbackUrl.searchParams.set('customerId', customerId.toString());
-    if (lastSaleId) statusCallbackUrl.searchParams.set('saleId', lastSaleId.toString());
-    statusCallbackUrl.searchParams.set('callPurpose', 'support');
-    statusCallbackUrl.searchParams.set('direction', 'inbound');
-    
-    // Get conference callback URL for tracking conference events
-    const conferenceCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
-    
-    // Generate TwiML to place caller in conference
-    // Allow up to 5 participants (caller + multiple agents/admins)
-    // startConferenceOnEnter="false" means conference starts when BOTH participants are present (prevents hold music while waiting)
-    // statusCallback: URL to receive status updates when call status changes
-    // statusCallbackEvent: Events to receive callbacks for
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">Thank you for calling. Please hold while we connect you with an agent.</Say>
-  <Dial record="false" timeout="60" timeLimit="3600" answerOnMedia="false" hangupOnStar="false" statusCallback="${statusCallbackUrl.toString()}" statusCallbackEvent="initiated ringing answered completed">
-    <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="false" maxParticipants="5" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${conferenceName}</Conference>
-  </Dial>
-</Response>`;
-
-    console.log('📞 Inbound call handled:', {
-      callSid,
-      conferenceName,
-      customerId,
-      customerName,
-      lastSaleId,
-      lastSaleAgentId,
-      agentAvailable,
-      adminsNotified: admins.length,
-      agentNotified: agentAvailable ? 1 : 0
-    });
-
-    return new NextResponse(twiml, {
-      headers: { 'Content-Type': 'text/xml' }
-    });
-
-  } catch (error) {
-    console.error('❌ Error handling inbound call:', error);
-    
     const fallbackTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice">We're sorry, we're unable to connect you at this time. Please try again later.</Say>
