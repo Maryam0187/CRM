@@ -705,10 +705,16 @@ export async function POST(request) {
       }
     }
 
+    // IMPORTANT:
+    // For Dial callbacks, Twilio sends CallSid (parent leg executing <Dial>) and DialCallSid (dialed leg).
+    // For UI we usually track the dialed leg (customer) so we must broadcast using DialCallSid, otherwise
+    // the frontend may ignore updates because it is tracking the customer's CallSid.
+    const effectiveCallSid = isDialCallback ? dialCallSid : callSid;
+
     // Skip non-customer leg callbacks (agent browser connections from TwiML App)
     if (!isCustomerLeg(from, to)) {
       console.log(`⏭️ Skipping ${webhookSource} callback (agent browser connection):`, { 
-        callSid, 
+        callSid: effectiveCallSid, 
         from, 
         to, 
         callStatus, 
@@ -723,7 +729,7 @@ export async function POST(request) {
     
     // Log that we're processing a customer leg callback
     console.log(`✅ Processing ${webhookSource} callback (customer phone call):`, {
-      callSid,
+      callSid: effectiveCallSid,
       callStatus, // Original Twilio status
       from,
       to,
@@ -735,7 +741,7 @@ export async function POST(request) {
     // Explicitly log original callback status for phone-number webhooks
     if (webhookSource === 'phone-number') {
       console.log(`📞 [PHONE-NUMBER] Original callback status: "${callStatus}"`, {
-        callSid: callSid.substring(0, 15) + '...',
+        callSid: effectiveCallSid.substring(0, 15) + '...',
         originalTwilioStatus: callStatus,
         dialCallStatus: dialCallStatus || null,
         from,
@@ -765,7 +771,7 @@ export async function POST(request) {
     // Log original callback status (for debugging)
     // NOTE: This is a separate webhook callback from Twilio for each status change
     console.log(`📊 [WEBHOOK CALLBACK] Received status: "${callStatus}"`, {
-      callSid: callSid.substring(0, 15) + '...',
+      callSid: effectiveCallSid.substring(0, 15) + '...',
       webhookSource,
       callbackSource,
       answerTime: answerTime || null,
@@ -784,7 +790,7 @@ export async function POST(request) {
     let callStatusConferenceName = null;
     if (direction === 'inbound') {
       // For inbound calls, conference name is based on callSid
-      callStatusConferenceName = `inbound-${callSid.substring(0, 20)}`;
+      callStatusConferenceName = effectiveCallSid ? `inbound-${effectiveCallSid.substring(0, 20)}` : null;
       console.log('📌 Constructed inbound conference name from callSid:', callStatusConferenceName);
     } else if (agentId) {
       // For outbound calls, conference name is based on agentId
@@ -793,21 +799,52 @@ export async function POST(request) {
     
     // Track customer callSid for this conference (from phone-number callbacks)
     // This helps us identify customer when they join conference
-    if (callStatusConferenceName && webhookSource === 'phone-number' && callSid) {
-      customerCallSidMap.set(callStatusConferenceName, callSid);
+    if (callStatusConferenceName && webhookSource === 'phone-number' && effectiveCallSid) {
+      customerCallSidMap.set(callStatusConferenceName, effectiveCallSid);
       console.log('📌 Tracked customer callSid for conference:', {
         conferenceName: callStatusConferenceName,
-        callSid: callSid.substring(0, 15) + '...',
+        callSid: effectiveCallSid.substring(0, 15) + '...',
         direction,
         agentId: agentId || 'N/A'
       });
     }
 
-    // Send status exactly as received from Twilio - no derivation or filtering
-    // Frontend will handle all status logic
+    // UI STATUS (minimal derivation for UX):
+    // Goal: show "ringing" until the customer answers, then "in-progress".
+    // We keep `status` as the raw Twilio CallStatus, and provide `uiStatus` for frontend display/timer logic.
+    let uiStatus = callStatus;
+
+    if (isDialCallback && dialCallStatus) {
+      // DialCallStatus is the most reliable "answered" signal when using <Dial>.
+      if (dialCallStatus === 'answered') uiStatus = 'in-progress';
+      else if (['initiated', 'ringing', 'queued'].includes(dialCallStatus)) uiStatus = 'ringing';
+      else uiStatus = dialCallStatus; // busy/no-answer/failed/canceled/completed
+    } else {
+      if (callStatus === 'answered') uiStatus = 'in-progress';
+
+      // Outbound: Twilio can send callStatus=in-progress early; keep ringing until answer evidence exists.
+      if (direction !== 'inbound' && callStatus === 'in-progress') {
+        const hasAnswerTime = !!(answerTime && String(answerTime).trim() !== '');
+        const hasAnsweredBy = !!(answeredBy && String(answeredBy).trim() !== '');
+        const hasDuration = !!(duration && parseInt(duration, 10) > 0);
+        if (!hasAnswerTime && !hasAnsweredBy && !hasDuration) {
+          uiStatus = 'ringing';
+        }
+      }
+
+      // Inbound: once Twilio says in-progress/answered, treat as in-progress.
+      if (direction === 'inbound' && (callStatus === 'in-progress' || callStatus === 'answered')) {
+        uiStatus = 'in-progress';
+      }
+      if (direction === 'inbound' && (callStatus === 'initiated' || callStatus === 'queued')) {
+        uiStatus = 'ringing';
+      }
+    }
+
     const statusData = {
-      callSid,
+      callSid: effectiveCallSid,
       status: callStatus, // Send original Twilio status as-is
+      uiStatus,
       duration: duration ? parseInt(duration) : null,
       direction,
       from,
@@ -822,8 +859,13 @@ export async function POST(request) {
       callPurpose: callPurposeFromUrl || null,
       conferenceName: callStatusConferenceName,
       webhookSource, // Include source for debugging
+      callbackType: isDialCallback ? 'dial' : 'call-status',
+      dialCallSid: dialCallSid || null,
+      dialCallStatus: dialCallStatus || null,
       twilioData: {
         callStatus, // Original Twilio status
+        dialCallSid: dialCallSid || null,
+        dialCallStatus: dialCallStatus || null,
         direction: twilioDirection, // Keep original Twilio direction in twilioData
         normalizedDirection: direction, // Store normalized direction
         from,
@@ -834,20 +876,21 @@ export async function POST(request) {
         answerTime,
         hangupCause,
         answeredBy,
-        parentCallSid
+        parentCallSid: parentCallSid || (isDialCallback ? callSid : null)
       }
     };
 
     // Log status before broadcasting
-    console.log(`📡 About to broadcast status (as-is from Twilio):`, {
-      callSid,
-      status: callStatus, // Original Twilio status - sent as-is to frontend
+    console.log(`📡 About to broadcast status:`, {
+      callSid: effectiveCallSid,
+      status: callStatus, // raw Twilio status
+      uiStatus, // derived UI status
       agentId,
       webhookSource,
       willBroadcast: webhookSource === 'phone-number'
     });
     
-    broadcastCallStatus(callSid, statusData, agentId, webhookSource);
+    broadcastCallStatus(effectiveCallSid, statusData, agentId, webhookSource);
 
 
     // Save to database ONLY when call ends (successfully or failed)
@@ -862,16 +905,17 @@ export async function POST(request) {
     // Only fetch call log when call ends (to check if it exists for update vs create)
     let finalCallLog = null;
     
-    if (isCallEnded) {
+    // Only persist on real call-status callbacks (not Dial callbacks) to avoid saving parent-leg noise.
+    if (isCallEnded && !isDialCallback) {
       // Fetch existing call log if it exists (might exist if call was saved earlier)
-      finalCallLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
+      finalCallLog = await sequelizeDb.CallLog.findOne({ where: { callSid: effectiveCallSid } });
       console.log('💾 Saving call log to database (call ended)', {
-        callSid: callSid.substring(0, 15) + '...',
+        callSid: effectiveCallSid.substring(0, 15) + '...',
         callStatus,
         hasExistingLog: !!finalCallLog
       });
       const twilioData = {
-        callSid,
+        callSid: effectiveCallSid,
         callStatus, // Original Twilio status
         direction: twilioDirection, // Keep original Twilio direction
         normalizedDirection: direction, // Store normalized direction
@@ -883,7 +927,7 @@ export async function POST(request) {
         answerTime,
         hangupCause,
         answeredBy,
-        parentCallSid,
+        parentCallSid: parentCallSid || (isDialCallback ? callSid : null),
         conferenceName: callStatusConferenceName,
         createdAt: new Date().toISOString(),
         lastUpdated: new Date().toISOString()
@@ -897,7 +941,7 @@ export async function POST(request) {
         twilioData.voicemailDetectedAt = new Date().toISOString();
       }
 
-      finalCallLog = await saveCallLog(callSid, {
+      finalCallLog = await saveCallLog(effectiveCallSid, {
         agentId,
         customerId: customerIdFromUrl,
         saleId: saleIdFromUrl,
@@ -911,12 +955,12 @@ export async function POST(request) {
       }, finalCallLog);
 
       // Handle special endings (voicemail, no-answer)
-      await handleSpecialEndings(callSid, answeredBy, callStatus);
+      await handleSpecialEndings(effectiveCallSid, answeredBy, callStatus);
     }
 
     // Update agent status (during call and on call end)
     if (agentId) {
-      await updateAgentStatus(agentId, callStatus, duration, callSid);
+      await updateAgentStatus(agentId, callStatus, duration, effectiveCallSid);
     }
 
     // Update related records for completed calls
@@ -927,7 +971,7 @@ export async function POST(request) {
     // Cleanup call room after call ends (with 2 minute delay)
     if (isCallEnded) {
       setTimeout(() => {
-        socketManager.cleanupCallRoom(callSid);
+        socketManager.cleanupCallRoom(effectiveCallSid);
       }, 2 * 60 * 1000); // 2 minutes
     }
 

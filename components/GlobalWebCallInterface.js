@@ -1003,7 +1003,8 @@ export default function GlobalWebCallInterface() {
         console.log('📞 [GlobalWebCallInterface] Call status update received');
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         console.log('📋 Status Details:', {
-          status: callStatusData.status, // Status being processed
+          status: callStatusData.status, // Raw Twilio status
+          uiStatus: callStatusData.uiStatus, // UI status (ringing until answered, then in-progress)
           originalTwilioStatus: callStatusData.twilioData?.callStatus, // Original Twilio status
           source: callStatusData.twilioData?.source,
           direction: callStatusData.direction,
@@ -1022,17 +1023,21 @@ export default function GlobalWebCallInterface() {
         }
         
         // Backend sends status as-is from Twilio - frontend processes it
-        console.log(`✅ [GlobalWebCallInterface] Processing status: ${callStatusData.status}`);
-        updateCallStatus(callStatusData.status);
+        const statusForUi = callStatusData.uiStatus || callStatusData.status;
+        console.log(`✅ [GlobalWebCallInterface] Processing status for UI: ${statusForUi}`, {
+          rawStatus: callStatusData.status,
+          uiStatus: callStatusData.uiStatus
+        });
+        updateCallStatus(statusForUi);
         
         
         // If call is completed/failed/canceled, disconnect the call IMMEDIATELY
         // This handles the case when customer hangs up - agent browser should disconnect too
         const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
-        if (endedStatuses.includes(callStatusData.status)) {
+        if (endedStatuses.includes(statusForUi)) {
           // Disconnect immediately if we have any connection (even if just connecting)
           if (isConnected || isWebCallConnected || activeConnection.current) {
-            console.log(`📞 [GlobalWebCallInterface] Call ended remotely (status: ${callStatusData.status}) - disconnecting agent browser immediately...`);
+            console.log(`📞 [GlobalWebCallInterface] Call ended remotely (status: ${statusForUi}) - disconnecting agent browser immediately...`);
             // Disconnect immediately - no delay
             disconnectCall('customer_ended_call');
             // End the call in context
