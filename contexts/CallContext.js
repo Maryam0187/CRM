@@ -132,33 +132,36 @@ export function CallProvider({ children }) {
   const updateCallStatus = useCallback((status) => {
     const currentStatus = callStatusRef.current;
     
-    console.log('📞 updateCallStatus called:', {
-      newStatus: status,
-      currentStatus,
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📞 [CallContext] updateCallStatus called');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📋 Status Transition:', {
+      from: currentStatus || '(none)',
+      to: status,
       hasTimerInterval: !!timerIntervalRef.current,
       timerValue: callTimer
     });
     
     // Prevent duplicate status updates
     if (currentStatus === status) {
-      console.log('⏭️ Skipping duplicate status update:', status);
+      console.log('⏭️ [CallContext] Skipping duplicate status update:', status);
       return;
     }
     
     // Prevent backwards transitions
     if (currentStatus === 'in-progress' && status === 'ringing') {
-      console.log('⏭️ Preventing backwards transition: in-progress → ringing');
+      console.log('⏭️ [CallContext] Preventing backwards transition: in-progress → ringing');
       return;
     }
     
     // Prevent duplicate in-progress updates
     if (currentStatus === 'in-progress' && status === 'in-progress') {
-      console.log('⏭️ Skipping duplicate in-progress update');
+      console.log('⏭️ [CallContext] Skipping duplicate in-progress update');
       return;
     }
     
     // Update status
-    console.log(`✅ Updating call status: ${currentStatus} → ${status}`);
+    console.log(`✅ [CallContext] Updating call status: ${currentStatus || '(none)'} → ${status}`);
     setCallStatus(status);
     
     // Start timer ONLY when customer picks up (status = 'in-progress')

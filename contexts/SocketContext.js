@@ -271,11 +271,45 @@ export const SocketProvider = ({ children }) => {
 
     // Call status update handlers
     socketInstance.on('call_status_update', (data) => {
-      console.log('📞 Call status update received:', data);
-      console.log('📞 Socket.IO event data:', JSON.stringify(data, null, 2));
-      console.log('📞 Current user ID:', user?.id);
-      console.log('📞 Call agent ID:', data.agentId);
-      console.log('📞 Is this call for current user?', user?.id === data.agentId);
+      // Comprehensive logging of call status update
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📞 [FRONTEND] Call Status Update Received');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📋 Status Details:', {
+        callSid: data.callSid,
+        status: data.status, // Status being sent to frontend (as-is from Twilio)
+        direction: data.direction,
+        from: data.from,
+        to: data.to,
+        duration: data.duration,
+        startTime: data.startTime,
+        endTime: data.endTime,
+        answerTime: data.answerTime,
+        hangupCause: data.hangupCause,
+        answeredBy: data.answeredBy
+      });
+      console.log('👤 Agent/Customer Info:', {
+        agentId: data.agentId,
+        customerId: data.customerId,
+        saleId: data.saleId,
+        callPurpose: data.callPurpose,
+        currentUserId: user?.id,
+        isForCurrentUser: user?.id === data.agentId
+      });
+      console.log('🔗 Conference Info:', {
+        conferenceName: data.conferenceName,
+        webhookSource: data.webhookSource
+      });
+      console.log('📡 Twilio Data:', {
+        callStatus: data.twilioData?.callStatus, // Original Twilio callStatus
+        source: data.twilioData?.source,
+        direction: data.twilioData?.direction,
+        normalizedDirection: data.twilioData?.normalizedDirection,
+        conferenceEvent: data.twilioData?.conferenceEvent,
+        timestamp: data.timestamp
+      });
+      console.log('📊 Full Data Object:', JSON.stringify(data, null, 2));
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // Create a unique key for this status update
       const statusKey = `${data.callSid}-${data.status}`;
@@ -283,22 +317,24 @@ export const SocketProvider = ({ children }) => {
       
       // Skip if we've already dispatched this exact status update
       if (lastDispatched === statusKey) {
-        console.log('⏭️ Skipping duplicate status dispatch:', {
+        console.log('⏭️ [FRONTEND] Skipping duplicate status dispatch:', {
           callSid: data.callSid,
           status: data.status,
-          statusKey
+          statusKey,
+          lastDispatched
         });
         return;
       }
       
       // Mark this status as dispatched
       lastDispatchedStatusRef.current.set(data.callSid, statusKey);
+      console.log('✅ [FRONTEND] Status update accepted (not duplicate)');
       
       // Update call status in state
       setCallStatusUpdates(prev => {
         const newMap = new Map(prev);
         newMap.set(data.callSid, data);
-        console.log('📞 Updated call status map:', Array.from(newMap.entries()));
+        console.log('📞 [FRONTEND] Updated call status map:', Array.from(newMap.entries()));
         return newMap;
       });
 
@@ -306,20 +342,33 @@ export const SocketProvider = ({ children }) => {
       const callStatusEvent = new CustomEvent('callStatusUpdate', {
         detail: { callStatusData: data }
       });
-      console.log('📞 Dispatching custom event:', callStatusEvent);
+      console.log('📤 [FRONTEND] Dispatching custom event to components');
       window.dispatchEvent(callStatusEvent);
     });
 
 
     // Conference event handlers (start, end, join, leave, mute, hold, speaker)
     socketInstance.on('conference_event', (data) => {
-      console.log('📞 Conference event received:', data);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📞 [FRONTEND] Conference Event Received');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📋 Event Details:', {
+        event: data.event,
+        conferenceName: data.conferenceName,
+        conferenceSid: data.conferenceSid,
+        callSid: data.callSid,
+        muted: data.muted,
+        hold: data.hold,
+        timestamp: data.timestamp
+      });
+      console.log('📋 Full Conference Event Data:', JSON.stringify(data, null, 2));
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // Dispatch custom event for components to listen to
       const conferenceEvent = new CustomEvent('conferenceEvent', {
         detail: { conferenceEventData: data }
       });
-      console.log('📞 Dispatching conference event:', conferenceEvent);
+      console.log('📤 [FRONTEND] Dispatching conference event to components');
       window.dispatchEvent(conferenceEvent);
     });
 

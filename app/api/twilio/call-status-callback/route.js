@@ -331,135 +331,13 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           matchesTracked: customerCallSidMap.has(conferenceName) && callSid === customerCallSidMap.get(conferenceName)
         });
         
+        // Just log participant join - don't derive or modify call status
+        // Conference callbacks are sent as conference events only, not as call status updates
         if (isCustomer) {
-          try {
-            // Check if the call has actually been answered before broadcasting "in-progress"
-            // Note: We don't fetch call log here because call logs are only saved when call ends
-            // For active calls, we'll check Twilio API directly if needed
-            // IMPORTANT: The customer's call leg joins the conference when Dial verb starts,
-            // even while their phone is still ringing. We must verify they actually answered.
-            
-            // For inbound calls: If they joined the conference, they must have answered (they called us)
-            // For outbound calls: If customer is joining conference, that's evidence they answered
-            // The customer wouldn't be able to join the conference if their phone was still ringing
-            let callWasAnswered = false;
-            
-            if (conferenceName && conferenceName.startsWith('inbound-')) {
-              // Inbound calls: Customer already answered when they called us
-              callWasAnswered = true;
-              console.log('✅ Inbound call - customer must have answered to reach conference');
-            } else {
-              // For outbound calls: If we've tracked this callSid as the customer from call-status callbacks,
-              // and they're joining the conference, that's strong evidence they answered.
-              // The conference join event itself indicates the call was answered.
-              
-              // Check if this callSid matches the tracked customer callSid
-              const trackedCustomerCallSid = customerCallSidMap.get(conferenceName);
-              if (trackedCustomerCallSid && callSid === trackedCustomerCallSid) {
-                // This is the tracked customer callSid - they're joining conference, so they answered
-                // For outbound calls, if customer joins conference, they must have answered their phone
-                callWasAnswered = true;
-                console.log('✅ Outbound call - customer joining conference is evidence they answered (tracked callSid match)');
-              } else {
-                // Try Twilio API as fallback, but trust conference join even if API doesn't show answerTime yet
-                try {
-                  const { getClient } = require('../../../../lib/twilio');
-                  const client = getClient();
-                  const twilioCall = await client.calls(callSid).fetch();
-                  
-                  // Check if call has answerTime in Twilio
-                  if (twilioCall.answerTime) {
-                    callWasAnswered = true;
-                    console.log('✅ Outbound call - confirmed answered via Twilio API (answerTime exists)');
-                  } else {
-                    // Even without answerTime in API, if customer is joining conference, trust it
-                    // The conference join is happening, which means they answered
-                    callWasAnswered = true;
-                    console.log('✅ Outbound call - trusting conference join as evidence of answer (no answerTime in API yet, but customer is joining conference)');
-                  }
-                } catch (apiError) {
-                  console.warn('⚠️ Could not verify call status via Twilio API:', apiError.message);
-                  // If API check fails, still trust conference join as evidence of answer
-                  // The customer joining the conference means they answered
-                  callWasAnswered = true;
-                  console.log('✅ Outbound call - trusting conference join as evidence of answer (API check failed, but customer is in conference)');
-                }
-              }
-            }
-            
-            // Only broadcast "in-progress" if call was actually answered
-            if (!callWasAnswered) {
-              console.log('⏸️ Customer joined conference but call not yet answered (still ringing) - not updating to in-progress:', {
-                callSid: callSid.substring(0, 15) + '...',
-                conferenceName,
-                conferenceType: conferenceName?.startsWith('inbound-') ? 'inbound' : 'outbound'
-              });
-              // Don't broadcast in-progress - wait for proper call status callback with answer evidence
-              break; // Exit switch case
-            }
-            
-            // Get agentId - try multiple sources (call logs aren't created until call ends, so don't rely on them)
-            let agentId = null;
-            
-            // For outbound calls, try to extract from conference name (e.g., "call-1" -> agentId 1)
-            if (conferenceName && !conferenceName.startsWith('inbound-')) {
-              const match = conferenceName.match(/^call-(\d+)$/);
-              if (match) {
-                agentId = parseInt(match[1], 10);
-                console.log('📞 Extracted agentId from conference name:', agentId);
-              }
-            }
-            
-            // Try to get agentId from URL params (passed in statusCallback URL)
-            // This works for both inbound and outbound calls
-            if (!agentId && agentIdFromUrl) {
-              agentId = parseInt(agentIdFromUrl, 10);
-              console.log('📞 Extracted agentId from URL params:', agentId);
-            }
-            
-            // Always broadcast if customer identified and call was answered, even if agentId is missing
-            // Frontend can still display in-progress status
-            // For inbound calls, we might not have agentId immediately, but we should still broadcast
-            console.log('✅ Customer answered and joined conference - updating status to in-progress:', {
-              callSid: callSid.substring(0, 15) + '...',
-              conferenceName,
-              agentId: agentId || null,
-              callWasAnswered
-            });
-            
-            // Broadcast "in-progress" status when customer answers and joins conference
-            // Note: customerId, saleId, callPurpose aren't available in conference callbacks
-            // They'll be included when we get call status callbacks with URL params
-            const statusData = {
-              callSid,
-              status: 'in-progress',
-              conferenceName,
-              agentId: agentId || null,
-              customerId: null, // Not available in conference callbacks
-              saleId: null, // Not available in conference callbacks
-              callPurpose: null, // Not available in conference callbacks
-              duration: null,
-              twilioData: {
-                callStatus: 'in-progress',
-                source: 'conference-join',
-                conferenceEvent: 'participant-join'
-              }
-            };
-            
-            // Try to send to specific agent if we have agentId
-            if (agentId) {
-              socketManager.sendCallStatusToAgent(agentId, callSid, statusData);
-            } else {
-              console.warn('⚠️ AgentId missing, broadcasting in-progress anyway for frontend display');
-            }
-            
-            // Always broadcast to all channels (frontend needs this)
-            socketManager.sendCallStatusUpdate(callSid, statusData);
-            socketManager.sendCallStatusToSupervisors(callSid, statusData);
-            socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, statusData);
-          } catch (error) {
-            console.error('Error checking call log for customer join:', error);
-          }
+          console.log('👤 Customer joined conference:', {
+            callSid: callSid?.substring(0, 15) + '...',
+            conferenceName
+          });
         } else {
           console.log('👤 Agent joined conference (not customer):', {
             callSid: callSid?.substring(0, 15) + '...'
@@ -892,109 +770,11 @@ export async function POST(request) {
       });
     }
 
-    // Prepare status data for broadcasting (ONLY for phone call callbacks)
-    // Note: We use conference callback to detect when customer joins conference
-    // Keep "in-progress" from call-status-callback as "ringing" until customer actually joins conference
-    let statusToSend = callStatus;
-    
-    // For inbound calls, handle status mapping
-    if (direction === 'inbound') {
-      // For inbound calls, map Twilio statuses appropriately
-      if (callStatus === 'initiated' || callStatus === 'queued') {
-        statusToSend = 'ringing'; // Inbound call just started, should show as ringing
-        console.log('📞 Inbound call status mapping: ' + callStatus + ' → ringing');
-      } else if (callStatus === 'ringing') {
-        statusToSend = 'ringing'; // Keep as ringing
-      } else if (callStatus === 'in-progress' || callStatus === 'answered') {
-        // For inbound calls, "in-progress" or "answered" means the call was answered
-        // The customer is already connected (they called us), so this is valid
-        // IMPORTANT: For inbound calls, when we receive "in-progress" or "answered" status,
-        // it means the call has been answered. We should NOT filter this to "ringing".
-        statusToSend = 'in-progress';
-        console.log('✅ Inbound call status mapping: ' + callStatus + ' → in-progress (call answered)');
-      } else if (callStatus === 'busy') {
-        // "busy" for inbound calls with Dial verb can mean:
-        // 1. Dial verb timed out (no agent joined conference within timeout period)
-        // 2. Caller hung up before answer (missed call)
-        // 3. Dial verb failed to connect
-        //
-        // IMPORTANT: For inbound calls using Dial+Conference, if "busy" comes from Dial verb,
-        // it might mean the Dial timed out waiting for someone to join the conference,
-        // NOT that the caller hung up. The caller might still be waiting (hearing ringing).
-        //
-        // Check if this is a Dial callback - if so, it's likely a timeout, not a hangup
-        // We should keep status as "ringing" if it's a Dial timeout, only "busy" if caller hung up
-        if (dialCallStatus === 'busy' && dialCallSid) {
-          // This is a Dial verb callback indicating the Dial operation failed/timed out
-          // The caller might still be waiting - don't mark as busy yet, keep as ringing
-          console.warn('⚠️ Inbound call: Dial verb returned "busy" - may be timeout, not caller hangup', {
-            callSid: callSid.substring(0, 15) + '...',
-            dialCallSid: dialCallSid.substring(0, 15) + '...',
-            dialCallStatus,
-            duration,
-            note: 'This might be a Dial timeout, not a caller hangup. Keeping status as ringing until confirmed.'
-          });
-          // Keep as "ringing" - the caller is likely still waiting
-          // DON'T change to busy - we'll wait for actual call status or conference callback
-          statusToSend = 'ringing';
-        } else if (callStatus === 'busy' && !dialCallStatus) {
-          // This is a direct call status callback (not Dial callback), caller likely hung up
-          // But only mark as busy if we have evidence the call actually ended (duration > 0 or endTime)
-          // If duration is 0, it might be a premature status
-          const hasDuration = duration && parseInt(duration) > 0;
-          const hasEndTime = endTime && endTime.trim() !== '';
-          
-          if (hasDuration || hasEndTime) {
-            statusToSend = 'busy';
-            console.warn('📞 Inbound call status: busy - caller hung up (confirmed)', {
-              callSid: callSid.substring(0, 15) + '...',
-              duration,
-              endTime: endTime || 'NONE',
-              answerTime: answerTime || 'NONE'
-            });
-          } else {
-            // No duration or endTime - might be premature, keep as ringing
-            statusToSend = 'ringing';
-            console.warn('⚠️ Inbound call status: busy but no duration/endTime - keeping as ringing (may be premature)', {
-              callSid: callSid.substring(0, 15) + '...',
-              duration,
-              endTime: endTime || 'NONE'
-            });
-          }
-        } else {
-          // Default case
-          statusToSend = 'busy';
-        }
-      } else {
-        // For other statuses (completed, failed, etc.), use as-is
-        statusToSend = callStatus;
-      }
-    } else {
-      // For outbound calls, filter "in-progress" - we'll get the real "in-progress" from conference callback when customer joins
-      // Twilio sends "in-progress" when agent joins conference, even if customer hasn't answered
-      if (callStatus === 'in-progress') {
-        const hasAnswerTime = answerTime && answerTime.trim() !== '';
-        const hasAnsweredBy = answeredBy && answeredBy.trim() !== '';
-        const hasDuration = duration && parseInt(duration) > 0;
-        
-        // Only accept "in-progress" if we have strong evidence customer answered
-        // Otherwise, keep as "ringing" - conference callback will send "in-progress" when customer joins
-        if (!hasAnswerTime && !hasAnsweredBy && !hasDuration) {
-          console.log('⚠️ Filtering "in-progress" - treating as "ringing" (will get in-progress from conference callback when customer joins)', {
-            callSid: callSid.substring(0, 15) + '...',
-            answerTime,
-            answeredBy,
-            duration,
-            reason: 'Conference callback will signal when customer actually joins conference'
-          });
-          statusToSend = 'ringing';
-        }
-      }
-    }
-    
+    // Send status exactly as received from Twilio - no derivation or filtering
+    // Frontend will handle all status logic
     const statusData = {
       callSid,
-      status: statusToSend, // Send validated status
+      status: callStatus, // Send original Twilio status as-is
       duration: duration ? parseInt(duration) : null,
       direction,
       from,
@@ -1026,9 +806,9 @@ export async function POST(request) {
     };
 
     // Log status before broadcasting
-    console.log(`📡 About to broadcast status:`, {
+    console.log(`📡 About to broadcast status (as-is from Twilio):`, {
       callSid,
-      status: callStatus, // Original Twilio status being sent
+      status: callStatus, // Original Twilio status - sent as-is to frontend
       agentId,
       webhookSource,
       willBroadcast: webhookSource === 'phone-number'

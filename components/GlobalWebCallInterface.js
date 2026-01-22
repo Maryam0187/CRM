@@ -997,15 +997,32 @@ export default function GlobalWebCallInterface() {
 
     const handleStatusUpdate = (event) => {
       const { callStatusData } = event.detail;
+      
       if (callStatusData?.callSid === currentCallSid) {
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📞 [GlobalWebCallInterface] Call status update received');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📋 Status Details:', {
+          status: callStatusData.status, // Status being processed
+          originalTwilioStatus: callStatusData.twilioData?.callStatus, // Original Twilio status
+          source: callStatusData.twilioData?.source,
+          direction: callStatusData.direction,
+          callSid: callStatusData.callSid,
+          conferenceName: callStatusData.conferenceName,
+          webhookSource: callStatusData.webhookSource
+        });
+        console.log('📋 Full Status Data:', callStatusData);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        
         // Ignore client call status updates (they shouldn't trigger disconnects)
         const isClientCall = callStatusData.twilioData?.isClientCall;
         if (isClientCall) {
+          console.log('⏭️ [GlobalWebCallInterface] Ignoring client call status update');
           return; // Don't process client call status updates
         }
         
-        // Backend now derives the correct status based on answeredBy, duration, and answerTime
-        // We can trust the status from backend - it's already been validated
+        // Backend sends status as-is from Twilio - frontend processes it
+        console.log(`✅ [GlobalWebCallInterface] Processing status: ${callStatusData.status}`);
         updateCallStatus(callStatusData.status);
         
         
@@ -1015,7 +1032,7 @@ export default function GlobalWebCallInterface() {
         if (endedStatuses.includes(callStatusData.status)) {
           // Disconnect immediately if we have any connection (even if just connecting)
           if (isConnected || isWebCallConnected || activeConnection.current) {
-            console.log(`📞 Call ended remotely (status: ${callStatusData.status}) - disconnecting agent browser immediately...`);
+            console.log(`📞 [GlobalWebCallInterface] Call ended remotely (status: ${callStatusData.status}) - disconnecting agent browser immediately...`);
             // Disconnect immediately - no delay
             disconnectCall('customer_ended_call');
             // End the call in context
@@ -1024,6 +1041,11 @@ export default function GlobalWebCallInterface() {
             }, 200);
           }
         }
+      } else {
+        console.log('⏭️ [GlobalWebCallInterface] Ignoring status update - different callSid:', {
+          receivedCallSid: callStatusData?.callSid,
+          currentCallSid
+        });
       }
     };
 
@@ -1033,39 +1055,60 @@ export default function GlobalWebCallInterface() {
     // Listen for conference events (join, leave, mute, hold, etc.)
     const handleConferenceEvent = (event) => {
       const { conferenceEventData } = event.detail;
+      
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📞 [GlobalWebCallInterface] Conference event received');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📋 Event Details:', {
+        event: conferenceEventData.event,
+        conferenceName: conferenceEventData.conferenceName,
+        currentConferenceName: conferenceName,
+        matches: conferenceEventData?.conferenceName === conferenceName,
+        callSid: conferenceEventData.callSid,
+        conferenceSid: conferenceEventData.conferenceSid,
+        muted: conferenceEventData.muted,
+        hold: conferenceEventData.hold,
+        timestamp: conferenceEventData.timestamp
+      });
+      console.log('📋 Full Conference Event Data:', conferenceEventData);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
       if (conferenceEventData?.conferenceName === conferenceName) {
-        console.log('📞 Conference event received:', conferenceEventData.event);
-        
         // Handle different conference events
         switch (conferenceEventData.event) {
           case 'join':
-            console.log('👤 Participant joined conference:', conferenceEventData.callSid);
+            console.log('👤 [GlobalWebCallInterface] Participant joined conference:', conferenceEventData.callSid);
             break;
           case 'leave':
-            console.log('👋 Participant left conference:', conferenceEventData.callSid);
+            console.log('👋 [GlobalWebCallInterface] Participant left conference:', conferenceEventData.callSid);
             break;
           case 'mute':
-            console.log('🔇 Participant mute status changed:', {
+            console.log('🔇 [GlobalWebCallInterface] Participant mute status changed:', {
               callSid: conferenceEventData.callSid,
               muted: conferenceEventData.muted
             });
             break;
           case 'hold':
-            console.log('⏸️ Participant hold status changed:', {
+            console.log('⏸️ [GlobalWebCallInterface] Participant hold status changed:', {
               callSid: conferenceEventData.callSid,
               hold: conferenceEventData.hold
             });
             break;
           case 'start':
-            console.log('🎉 Conference started');
+            console.log('🎉 [GlobalWebCallInterface] Conference started');
             break;
           case 'end':
-            console.log('🏁 Conference ended');
+            console.log('🏁 [GlobalWebCallInterface] Conference ended');
             break;
           case 'speaker':
-            console.log('🎤 Speaker changed:', conferenceEventData.callSid);
+            console.log('🎤 [GlobalWebCallInterface] Speaker changed:', conferenceEventData.callSid);
             break;
         }
+      } else {
+        console.log('⏭️ [GlobalWebCallInterface] Ignoring conference event - different conference:', {
+          receivedConference: conferenceEventData?.conferenceName,
+          currentConference: conferenceName
+        });
       }
     };
 
