@@ -443,7 +443,16 @@ export default function GlobalWebCallInterface() {
     setError(null);
 
     try {
-      const params = { To: conferenceName };
+      // Outbound: conferenceName holds the customer phone number (To)
+      // Inbound: conferenceName holds inbound conference name (inbound-xxxx)
+      // Include metadata so voice-response can embed it in Twilio status callbacks.
+      const params = {
+        To: conferenceName,
+        customerId: callMetadata?.customerId ?? '',
+        saleId: callMetadata?.saleId ?? '',
+        callPurpose: 'follow_up',
+        direction: conferenceName?.startsWith('inbound-') ? 'inbound' : 'outbound'
+      };
       console.log('📞 Connecting with params:', params);
 
       // Request audio permissions before connecting with proper echo cancellation
@@ -999,7 +1008,13 @@ export default function GlobalWebCallInterface() {
     const handleStatusUpdate = (event) => {
       const { callStatusData } = event.detail;
       
-      if (callStatusData?.callSid === currentCallSid) {
+      // Adopt real callSid once we start receiving Twilio callbacks.
+      // When call starts, we use a temporary callSid like "pending-...".
+      if (currentCallSid?.startsWith('pending-') && callStatusData?.callSid) {
+        setCurrentCallSid(callStatusData.callSid);
+      }
+
+      if (callStatusData?.callSid === currentCallSid || (currentCallSid?.startsWith('pending-') && callStatusData?.callSid)) {
         // Ignore client call status updates (they shouldn't trigger disconnects)
         const isClientCall = callStatusData.twilioData?.isClientCall;
         if (isClientCall) {

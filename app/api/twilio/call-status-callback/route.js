@@ -102,17 +102,11 @@ async function resolveAgentId(agentIdFromUrl, callLog, from, to) {
 // Helper: Broadcast call status to all relevant parties
 // Broadcast call status to frontend - ONLY for phone call callbacks (not TwiML App)
 function broadcastCallStatus(callSid, statusData, agentId, webhookSource) {
-  // Only broadcast phone number callbacks (customer calls), not TwiML App callbacks (agent browser)
-  if (webhookSource !== 'phone-number') {
-    console.log(`⏭️ Skipping broadcast for ${webhookSource} callback - only broadcasting phone call status`);
-    return;
-  }
-  
-  console.log(`📡 Broadcasting phone call status to frontend:`, {
-    callSid,
-    status: statusData.status,
-    webhookSource
-  });
+  // OUTBOUND REFACTOR:
+  // For browser-first Dial (<Dial><Number>), Dial callbacks may come from the TwiML App context.
+  // We must broadcast Dial callbacks even if webhookSource is not phone-number.
+  const shouldBroadcast = webhookSource === 'phone-number' || statusData?.callbackType === 'dial';
+  if (!shouldBroadcast) return;
   
   if (agentId) {
     socketManager.sendCallStatusToAgent(agentId, callSid, statusData);
@@ -670,7 +664,10 @@ export async function POST(request) {
     const effectiveCallSid = isDialCallback ? dialCallSid : callSid;
 
     // Skip non-customer leg callbacks (agent browser connections from TwiML App)
-    if (!isCustomerLeg(from, to)) {
+    // NOTE: For browser-first Dial, the "real customer status" arrives as Dial callbacks.
+    // Those can come from a TwiML App context, so we always accept Dial callbacks.
+    const isCustomer = isDialCallback || isCustomerLeg(from, to);
+    if (!isCustomer) {
       console.log(`⏭️ Skipping ${webhookSource} callback (agent browser connection):`, { 
         callSid: effectiveCallSid, 
         from, 

@@ -113,39 +113,45 @@ async function handleVoiceResponse(request) {
           name: agent ? `${agent.firstName} ${agent.lastName}` : 'N/A'
         });
         
-        // Check if this is an inbound call by looking at the 'To' parameter
-        // For inbound calls, 'To' will contain the inbound conference name (e.g., "inbound-CA123...")
-        // For outbound calls, 'To' might be empty or contain a phone number
-        const toParam = formData.get('To') || '';
-        let conferenceName = `call-${parsedAgentId}`; // Default for outbound calls
-        
-        // If 'To' parameter starts with "inbound-", this is an inbound call - join existing conference
-        if (toParam && toParam.startsWith('inbound-')) {
-          conferenceName = toParam;
-          console.log(`📞 Inbound call detected - agent joining existing conference: ${conferenceName}`);
-        } else {
-          console.log(`📞 Outbound call - routing to conference: ${conferenceName}`);
-        }
-        
-        // Callback URLs
-        const conferenceCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');
+        // AGENT (Voice SDK) TWIML:
+        // - If To is a phone number -> outbound browser-first dial (<Dial><Number>)
+        // - If To starts with inbound- -> agent is joining an inbound conference
+        const toParamRaw = formData.get('To') || '';
+        const toParam = String(toParamRaw).trim();
 
-        // Dial status callback is the most reliable way to detect when the customer actually answers
-        // (DialCallStatus=answered). This prevents showing "in-progress" while the phone is still ringing.
-        const dialStatusCallbackUrl = new URL(getWebhookUrl('/api/twilio/call-status-callback'));
-        dialStatusCallbackUrl.searchParams.set('agentId', parsedAgentId.toString());
-        dialStatusCallbackUrl.searchParams.set('direction', 'outbound');
-        
-        // Place agent in conference room
-        // For inbound calls: agent joins existing conference where customer is already waiting
-        // For outbound calls: agent joins new conference, customer will be added via Dial verb
-        // Recording is DISABLED
-        // answerOnMedia="false" = connect immediately when answered, don't wait for media
-        // startConferenceOnEnter="true" = when agent joins, start the conference (customer is already there for inbound, will trigger for outbound when customer joins)
-        // endConferenceOnExit="false" = don't end conference when agent leaves (customer might still be there)
-        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false" statusCallback="${dialStatusCallbackUrl.toString()}" statusCallbackMethod="POST" statusCallbackEvent="initiated ringing answered completed">`;
-        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" maxParticipants="10" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${conferenceName}</Conference>`;
-        twiml += `\n  </Dial>`;
+        const customerId = formData.get('customerId') || null;
+        const saleId = formData.get('saleId') || null;
+        const callPurpose = formData.get('callPurpose') || 'follow_up';
+        const direction = formData.get('direction') || 'outbound';
+
+        // INBOUND: join existing inbound conference
+        if (toParam && toParam.startsWith('inbound-')) {
+          const safeConferenceName = toParam.replace(/[<>&"']/g, '');
+          const conferenceCallbackUrl = getWebhookUrl('/api/twilio/inbound/call-status-callback');
+
+          twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
+          twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" maxParticipants="10" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${safeConferenceName}</Conference>`;
+          twiml += `\n  </Dial>`;
+        } else {
+          // OUTBOUND: browser-first dial
+          const dialTo = validatePhoneNumber(toParam);
+          if (!dialTo) {
+            throw new Error(`Invalid outbound To number for browser dial: ${toParamRaw}`);
+          }
+
+          const statusCallbackUrl = new URL(getWebhookUrl('/api/twilio/call-status-callback'));
+          statusCallbackUrl.searchParams.set('agentId', parsedAgentId.toString());
+          statusCallbackUrl.searchParams.set('direction', 'outbound');
+          statusCallbackUrl.searchParams.set('callPurpose', String(callPurpose));
+          if (customerId) statusCallbackUrl.searchParams.set('customerId', String(customerId));
+          if (saleId) statusCallbackUrl.searchParams.set('saleId', String(saleId));
+
+          // answerOnBridge=true => only bridge agent to customer once customer answers
+          // Status callbacks here provide DialCallStatus=answered which we use for real "in-progress"
+          twiml += `\n  <Dial answerOnBridge="true" timeout="30" timeLimit="3600" statusCallback="${statusCallbackUrl.toString()}" statusCallbackMethod="POST" statusCallbackEvent="initiated ringing answered completed">`;
+          twiml += `\n    <Number statusCallback="${statusCallbackUrl.toString()}" statusCallbackMethod="POST" statusCallbackEvent="initiated ringing answered completed">${dialTo}</Number>`;
+          twiml += `\n  </Dial>`;
+        }
         
         // If agent has phone, we could call them separately to join the conference
         // But with Voice SDK, agent joins via browser, so this is optional

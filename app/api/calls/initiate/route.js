@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getClient, validatePhoneNumber, getWebhookUrl } from '../../../../lib/twilio';
+import { validatePhoneNumber } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 
@@ -60,78 +60,12 @@ export async function POST(request) {
       );
     }
 
-    // Get Twilio client
-    const client = getClient();
-    
-    // Get Twilio phone number from environment
-    const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
-    if (!twilioPhoneNumber) {
-      return NextResponse.json(
-        { success: false, message: 'Twilio phone number not configured' },
-        { status: 500 }
-      );
-    }
+    // OUTBOUND REFACTOR:
+    // We no longer create the outbound call server-side (calls.create).
+    // Instead, the agent's browser (Twilio Voice SDK) will connect to the TwiML App and Dial the customer.
+    // This gives reliable Dial callbacks (DialCallStatus=answered) to determine the real "in-progress" moment.
 
-    // Build status callback URL with call metadata - we'll save the log only when call ends
-    const statusCallbackBaseUrl = getWebhookUrl('/api/twilio/call-status-callback');
-    const statusCallbackUrl = new URL(statusCallbackBaseUrl);
-    statusCallbackUrl.searchParams.set('agentId', agentId.toString());
-    if (customerId) statusCallbackUrl.searchParams.set('customerId', customerId.toString());
-    if (saleId) statusCallbackUrl.searchParams.set('saleId', saleId.toString());
-    statusCallbackUrl.searchParams.set('callPurpose', callPurpose);
-    statusCallbackUrl.searchParams.set('direction', 'outbound');
-    
-    const voiceUrl = `${getWebhookUrl('/api/twilio/voice-response')}?agentId=${agentId}`;
-
-    // Conference name for agent to join via Voice SDK
-    const conferenceName = `call-${agentId}`;
-
-    console.log('📞 Call Initiation:', {
-      agentId: agent.id,
-      customerPhone: formattedNumber,
-      conferenceName: conferenceName
-    });
-
-    // Create call: Customer → Twilio → Conference (Agent joins via Voice SDK)
-    const callOptions = {
-      url: voiceUrl,
-      to: formattedNumber,  // Customer phone number
-      from: twilioPhoneNumber,
-      // How long to let the customer's phone ring before Twilio ends the call attempt (seconds)
-      // Default Twilio behavior can feel like "call ended itself". Increase to reduce missed calls.
-      timeout: parseInt(process.env.TWILIO_OUTBOUND_RING_TIMEOUT || '90', 10),
-      statusCallback: statusCallbackUrl.toString(),
-      statusCallbackEvent: ['initiated', 'queued', 'ringing', 'answered', 'in-progress', 'completed'],
-      // Enable Answering Machine Detection (AMD) to detect voicemail
-      machineDetection: 'Enable',
-      machineDetectionTimeout: 30, // Wait up to 30 seconds for AMD result
-      machineDetectionSpeechThreshold: 5000, // 5 seconds of speech to confirm human
-      machineDetectionSpeechEndThreshold: 2400, // 2.4 seconds of silence to confirm machine
-      // Route agent via SIP Domain
-      // We'll dial the customer first, then connect to agent via SIP in the voice response
-      answerOnMedia: false,
-      // Method for TwiML URL - Twilio will use POST by default, but we support both
-      method: 'POST'
-    };
-
-    console.log('📞 Creating Twilio call with options:', {
-      url: voiceUrl,
-      to: formattedNumber,
-      from: twilioPhoneNumber,
-      method: callOptions.method
-    });
-
-    const call = await client.calls.create(callOptions);
-    
-    console.log('✅ Call created successfully:', {
-      callSid: call.sid,
-      status: call.status,
-      to: call.to,
-      from: call.from,
-      conferenceName: conferenceName
-    });
-
-    // Update agent status to busy
+    // Update agent status to busy (agent is starting an outbound attempt)
     await agent.update({ 
       callStatus: 'busy',
       lastCallTime: new Date(),
@@ -142,12 +76,14 @@ export async function POST(request) {
     return NextResponse.json({
       success: true,
       data: {
-        callSid: call.sid,
-        status: call.status,
-        to: call.to,
-        from: call.from,
-        conferenceName: conferenceName,
-        message: 'Call initiated - agent should join via Voice SDK. Call log will be saved when call ends.'
+        // No Twilio CallSid yet; it will be created when the browser dials.
+        to: formattedNumber,
+        agentId: parseInt(agentId, 10),
+        customerId: customerId || null,
+        saleId: saleId || null,
+        callPurpose,
+        direction: 'outbound',
+        message: 'Outbound call prepared. Browser will dial customer via Twilio Voice SDK.'
       },
       message: 'Call initiated successfully'
     });

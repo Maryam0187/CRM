@@ -219,19 +219,19 @@ export function CallProvider({ children }) {
       const result = await response.json();
       
       if (result?.success) {
-        const confName = result.data?.conferenceName || `call-${agentId}`;
-        const callSid = result.data?.callSid;
-        
-        if (!callSid) {
-          throw new Error('Call SID not received from server');
-        }
+        // Outbound refactor: server no longer creates the call and doesn't return a CallSid.
+        // We start the UI in a pending state and let Twilio callbacks provide the real callSid.
+        const dialTo = result.data?.to || phoneNumber;
+        const callSid = `pending-${Date.now()}`;
         
         startCall({
           callSid,
-          conferenceName: confName,
+          // NOTE: we reuse conferenceName as "To" target for Device.connect.
+          // For outbound this is the customer phone number.
+          conferenceName: dialTo,
           customerId,
           saleId,
-          phoneNumber,
+          phoneNumber: dialTo,
           customerName
         });
         
