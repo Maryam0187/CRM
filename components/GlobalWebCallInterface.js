@@ -401,13 +401,14 @@ export default function GlobalWebCallInterface() {
     // Also check actual call status from socket/API if we have a callSid
     if (currentCallSid) {
       const actualStatusData = getCallStatus(currentCallSid);
-      if (actualStatusData?.status && endedStatuses.includes(actualStatusData.status)) {
-        const errorMsg = `Cannot join call - call has already ended (status: ${actualStatusData.status})`;
+      const actualStatusForUi = actualStatusData?.uiStatus || actualStatusData?.status;
+      if (actualStatusForUi && endedStatuses.includes(actualStatusForUi)) {
+        const errorMsg = `Cannot join call - call has already ended (status: ${actualStatusForUi})`;
         console.warn('⚠️', errorMsg);
         setError(errorMsg);
         setIsConnecting(false);
         // Update local status to match actual status
-        updateCallStatus(actualStatusData.status);
+        updateCallStatus(actualStatusForUi);
         // End the call context to clean up
         setTimeout(() => {
           endCall();
@@ -973,16 +974,15 @@ export default function GlobalWebCallInterface() {
           return; // Don't process client call status updates
         }
         
-        // Backend now derives the correct status based on answeredBy, duration, and answerTime
-        // We can trust the status from backend - it's already been validated
-        updateCallStatus(statusData.status);
+        // Use uiStatus for UI/timer (ringing until answered, then in-progress)
+        const statusForUi = statusData.uiStatus || statusData.status;
+        updateCallStatus(statusForUi);
         
         
         // If call is completed/failed/canceled, disconnect the call
         // But only if we're actually connected (not just connecting)
-        if (['completed', 'failed', 'canceled', 'busy', 'no-answer'].includes(statusData.status)) {
+        if (['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'].includes(statusForUi)) {
           if (isConnected || isWebCallConnected) {
-            console.log('📞 Call ended remotely, disconnecting...');
             disconnectCall('remote_status_update');
             // End the call in context
             setTimeout(() => {
@@ -999,35 +999,14 @@ export default function GlobalWebCallInterface() {
       const { callStatusData } = event.detail;
       
       if (callStatusData?.callSid === currentCallSid) {
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('📞 [GlobalWebCallInterface] Call status update received');
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('📋 Status Details:', {
-          status: callStatusData.status, // Raw Twilio status
-          uiStatus: callStatusData.uiStatus, // UI status (ringing until answered, then in-progress)
-          originalTwilioStatus: callStatusData.twilioData?.callStatus, // Original Twilio status
-          source: callStatusData.twilioData?.source,
-          direction: callStatusData.direction,
-          callSid: callStatusData.callSid,
-          conferenceName: callStatusData.conferenceName,
-          webhookSource: callStatusData.webhookSource
-        });
-        console.log('📋 Full Status Data:', callStatusData);
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        
         // Ignore client call status updates (they shouldn't trigger disconnects)
         const isClientCall = callStatusData.twilioData?.isClientCall;
         if (isClientCall) {
-          console.log('⏭️ [GlobalWebCallInterface] Ignoring client call status update');
           return; // Don't process client call status updates
         }
         
         // Backend sends status as-is from Twilio - frontend processes it
         const statusForUi = callStatusData.uiStatus || callStatusData.status;
-        console.log(`✅ [GlobalWebCallInterface] Processing status for UI: ${statusForUi}`, {
-          rawStatus: callStatusData.status,
-          uiStatus: callStatusData.uiStatus
-        });
         updateCallStatus(statusForUi);
         
         
@@ -1037,7 +1016,6 @@ export default function GlobalWebCallInterface() {
         if (endedStatuses.includes(statusForUi)) {
           // Disconnect immediately if we have any connection (even if just connecting)
           if (isConnected || isWebCallConnected || activeConnection.current) {
-            console.log(`📞 [GlobalWebCallInterface] Call ended remotely (status: ${statusForUi}) - disconnecting agent browser immediately...`);
             // Disconnect immediately - no delay
             disconnectCall('customer_ended_call');
             // End the call in context
@@ -1046,11 +1024,6 @@ export default function GlobalWebCallInterface() {
             }, 200);
           }
         }
-      } else {
-        console.log('⏭️ [GlobalWebCallInterface] Ignoring status update - different callSid:', {
-          receivedCallSid: callStatusData?.callSid,
-          currentCallSid
-        });
       }
     };
 
@@ -1061,59 +1034,24 @@ export default function GlobalWebCallInterface() {
     const handleConferenceEvent = (event) => {
       const { conferenceEventData } = event.detail;
       
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📞 [GlobalWebCallInterface] Conference event received');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📋 Event Details:', {
-        event: conferenceEventData.event,
-        conferenceName: conferenceEventData.conferenceName,
-        currentConferenceName: conferenceName,
-        matches: conferenceEventData?.conferenceName === conferenceName,
-        callSid: conferenceEventData.callSid,
-        conferenceSid: conferenceEventData.conferenceSid,
-        muted: conferenceEventData.muted,
-        hold: conferenceEventData.hold,
-        timestamp: conferenceEventData.timestamp
-      });
-      console.log('📋 Full Conference Event Data:', conferenceEventData);
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      
       if (conferenceEventData?.conferenceName === conferenceName) {
         // Handle different conference events
         switch (conferenceEventData.event) {
           case 'join':
-            console.log('👤 [GlobalWebCallInterface] Participant joined conference:', conferenceEventData.callSid);
             break;
           case 'leave':
-            console.log('👋 [GlobalWebCallInterface] Participant left conference:', conferenceEventData.callSid);
             break;
           case 'mute':
-            console.log('🔇 [GlobalWebCallInterface] Participant mute status changed:', {
-              callSid: conferenceEventData.callSid,
-              muted: conferenceEventData.muted
-            });
             break;
           case 'hold':
-            console.log('⏸️ [GlobalWebCallInterface] Participant hold status changed:', {
-              callSid: conferenceEventData.callSid,
-              hold: conferenceEventData.hold
-            });
             break;
           case 'start':
-            console.log('🎉 [GlobalWebCallInterface] Conference started');
             break;
           case 'end':
-            console.log('🏁 [GlobalWebCallInterface] Conference ended');
             break;
           case 'speaker':
-            console.log('🎤 [GlobalWebCallInterface] Speaker changed:', conferenceEventData.callSid);
             break;
         }
-      } else {
-        console.log('⏭️ [GlobalWebCallInterface] Ignoring conference event - different conference:', {
-          receivedConference: conferenceEventData?.conferenceName,
-          currentConference: conferenceName
-        });
       }
     };
 
@@ -1124,41 +1062,8 @@ export default function GlobalWebCallInterface() {
       const { conferenceStatusData } = event.detail;
       
       if (conferenceStatusData?.conferenceName === conferenceName) {
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('📞 [GlobalWebCallInterface] Conference status update received');
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('📋 Status Details:', {
-          status: conferenceStatusData.status,
-          conferenceName: conferenceStatusData.conferenceName,
-          conferenceSid: conferenceStatusData.conferenceSid,
-          participantsCount: conferenceStatusData.participantsCount,
-          participantJoined: conferenceStatusData.participantJoined,
-          participantLeft: conferenceStatusData.participantLeft,
-          participantCallSid: conferenceStatusData.participantCallSid,
-          callSid: conferenceStatusData.callSid,
-          timestamp: conferenceStatusData.timestamp
-        });
-        console.log('📋 Full Conference Status Data:', conferenceStatusData);
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        
         // Handle conference status updates
         // You can use this to update UI, show participant count, etc.
-        if (conferenceStatusData.status === 'completed') {
-          console.log('🏁 [GlobalWebCallInterface] Conference ended');
-        } else if (conferenceStatusData.status === 'in-progress') {
-          console.log('✅ [GlobalWebCallInterface] Conference is active');
-          if (conferenceStatusData.participantJoined) {
-            console.log('👤 [GlobalWebCallInterface] Participant joined:', conferenceStatusData.participantCallSid);
-          }
-          if (conferenceStatusData.participantLeft) {
-            console.log('👋 [GlobalWebCallInterface] Participant left:', conferenceStatusData.participantCallSid);
-          }
-        }
-      } else {
-        console.log('⏭️ [GlobalWebCallInterface] Ignoring conference status - different conference:', {
-          receivedConference: conferenceStatusData?.conferenceName,
-          currentConference: conferenceName
-        });
       }
     };
 

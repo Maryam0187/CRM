@@ -655,55 +655,12 @@ export async function POST(request) {
     // Identify if this is from TwiML App (agent browser) or Phone Number (customer call)
     const webhookSource = identifyCallbackSource(from, to);
 
-    // Log callback source for debugging
-    console.log(`📞 Call status callback received [${callbackSource}] from [${webhookSource}]:`, {
-      callSid,
-      dialCallSid: dialCallSid || null,
-      callStatus,
-      dialCallStatus: dialCallStatus || null,
-      from,
-      to,
-      direction: twilioDirection,
-      webhookSource
-    });
-
     // Handle Dial verb callbacks (from <Dial> wrapping Conference)
     // Note: Both Voice API callbacks and Dial callbacks use the same endpoint
     // - Voice API: Direct call status updates (CallSid = customer leg)
     // - Dial: Dial operation status (CallSid = parent, DialCallSid = dialed call)
     // For conference calls, we care about the customer leg status, so we use CallSid
-    if (dialCallStatus && dialCallSid) {
-      console.log('📞 Dial callback received (Dial operation status):', {
-        callSid, // Parent call (the one executing Dial)
-        dialCallSid, // The call that was dialed (customer leg in conference)
-        dialCallStatus,
-        callStatus, // Actual call status (might be different from Dial status)
-        from,
-        to,
-        direction
-      });
-      
-      // IMPORTANT: For inbound calls with Dial+Conference:
-      // - DialCallStatus indicates the Dial operation result (busy/no-answer if Dial times out)
-      // - CallStatus indicates the actual call status (ringing/in-progress if call is active)
-      // If Dial times out (DialCallStatus = busy/no-answer) but CallStatus is still ringing/in-progress,
-      // it means the customer is still waiting in conference - DON'T mark as busy/missed
-      
-      // For Dial callbacks, the CallSid is the parent call executing the Dial
-      // The DialCallSid is the actual customer call leg we care about
-      // But we'll continue with CallSid since that's what we track in CallLog
-      // The Dial callback provides additional context but doesn't change the main tracking
-      
-      // For inbound calls: If Dial failed but call is still active, don't treat as missed
-      if (direction === 'inbound' && ['busy', 'no-answer'].includes(dialCallStatus) && 
-          callStatus && !['busy', 'completed', 'failed', 'canceled'].includes(callStatus)) {
-        console.log('⚠️ Dial operation failed/timed out but call is still active - customer is still waiting in conference', {
-          dialCallStatus,
-          callStatus,
-          note: 'This is likely a Dial timeout, not a caller hangup. Will continue processing actual call status.'
-        });
-      }
-    }
+    // (Dial callback fields are still included in the broadcast payload; we just don't spam logs here.)
 
     // IMPORTANT:
     // For Dial callbacks, Twilio sends CallSid (parent leg executing <Dial>) and DialCallSid (dialed leg).
@@ -727,57 +684,7 @@ export async function POST(request) {
       });
     }
     
-    // Log that we're processing a customer leg callback
-    console.log(`✅ Processing ${webhookSource} callback (customer phone call):`, {
-      callSid: effectiveCallSid,
-      callStatus, // Original Twilio status
-      from,
-      to,
-      answerTime: answerTime || null,
-      answeredBy: answeredBy || null,
-      duration: duration || 0
-    });
-    
-    // Explicitly log original callback status for phone-number webhooks
-    if (webhookSource === 'phone-number') {
-      console.log(`📞 [PHONE-NUMBER] Original callback status: "${callStatus}"`, {
-        callSid: effectiveCallSid.substring(0, 15) + '...',
-        originalTwilioStatus: callStatus,
-        dialCallStatus: dialCallStatus || null,
-        from,
-        to,
-        callbackSource,
-        direction,
-        timestamp: new Date().toISOString()
-      });
-      
-      // Log warning if we get "busy" status for inbound calls - this usually means caller hung up
-      if (direction === 'inbound' && callStatus === 'busy') {
-        console.warn('⚠️ Inbound call received "busy" status - caller likely hung up before call could be answered', {
-          callSid: callSid.substring(0, 15) + '...',
-          from,
-          to,
-          duration,
-          answerTime: answerTime || 'NONE',
-          reason: 'Caller hung up immediately or call failed to connect'
-        });
-      }
-    }
-
-    // Note: We don't fetch call log here because call logs are only saved when call ends.
-    // For active calls, callLog would be null anyway. We only fetch it when needed (at call end).
-    // We use URL params (agentIdFromUrl, customerIdFromUrl, etc.) for active call data.
-    
-    // Log original callback status (for debugging)
-    // NOTE: This is a separate webhook callback from Twilio for each status change
-    console.log(`📊 [WEBHOOK CALLBACK] Received status: "${callStatus}"`, {
-      callSid: effectiveCallSid.substring(0, 15) + '...',
-      webhookSource,
-      callbackSource,
-      answerTime: answerTime || null,
-      answeredBy: answeredBy || null,
-      duration: duration || 0
-    });
+    // NOTE: We don't fetch call log here because call logs are only saved when call ends.
     
     // Resolve agentId - callLog is null for active calls, so we only use it as a fallback
     const agentId = await resolveAgentId(agentIdFromUrl, null, from, to);
@@ -791,7 +698,6 @@ export async function POST(request) {
     if (direction === 'inbound') {
       // For inbound calls, conference name is based on callSid
       callStatusConferenceName = effectiveCallSid ? `inbound-${effectiveCallSid.substring(0, 20)}` : null;
-      console.log('📌 Constructed inbound conference name from callSid:', callStatusConferenceName);
     } else if (agentId) {
       // For outbound calls, conference name is based on agentId
       callStatusConferenceName = `call-${agentId}`;
@@ -801,12 +707,6 @@ export async function POST(request) {
     // This helps us identify customer when they join conference
     if (callStatusConferenceName && webhookSource === 'phone-number' && effectiveCallSid) {
       customerCallSidMap.set(callStatusConferenceName, effectiveCallSid);
-      console.log('📌 Tracked customer callSid for conference:', {
-        conferenceName: callStatusConferenceName,
-        callSid: effectiveCallSid.substring(0, 15) + '...',
-        direction,
-        agentId: agentId || 'N/A'
-      });
     }
 
     // UI STATUS (minimal derivation for UX):
@@ -880,14 +780,15 @@ export async function POST(request) {
       }
     };
 
-    // Log status before broadcasting
-    console.log(`📡 About to broadcast status:`, {
-      callSid: effectiveCallSid,
-      status: callStatus, // raw Twilio status
-      uiStatus, // derived UI status
-      agentId,
+    // Minimal server log: only callback statuses
+    console.log('📞 [TWILIO CALLBACK]', {
+      callbackType: isDialCallback ? 'dial' : 'call-status',
       webhookSource,
-      willBroadcast: webhookSource === 'phone-number'
+      callSid: effectiveCallSid,
+      status: callStatus,
+      dialCallStatus: dialCallStatus || null,
+      uiStatus,
+      direction
     });
     
     broadcastCallStatus(effectiveCallSid, statusData, agentId, webhookSource);
