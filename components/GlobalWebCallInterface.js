@@ -6,6 +6,7 @@ import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient';
 import { Device } from '@twilio/voice-sdk';
+import { useAppSelector } from '../store/hooks';
 
 // Add global unhandled rejection handler to prevent SDK errors from crashing app
 if (typeof window !== 'undefined' && !window.__twilioRejectionHandlerAdded) {
@@ -77,6 +78,10 @@ export default function GlobalWebCallInterface() {
   
   // Get user and access token from auth context (needed for device setup)
   const { user, accessToken } = useAuth();
+  const participantsBySid = useAppSelector(
+    (state) => (conferenceName && state?.participants?.byConference?.[conferenceName]) || {}
+  );
+  const participants = Object.values(participantsBySid || {});
   
   const { getCallStatus } = useSocket();
   const [isMinimized, setIsMinimized] = useState(false);
@@ -443,9 +448,8 @@ export default function GlobalWebCallInterface() {
     setError(null);
 
     try {
-      // Outbound: conferenceName holds the customer phone number (To)
-      // Inbound: conferenceName holds inbound conference name (inbound-xxxx)
-      // Include metadata so voice-response can embed it in Twilio status callbacks.
+      // Outbound: conferenceName is `call-<agentId>`
+      // Inbound: conferenceName is `inbound-...`
       const params = {
         To: conferenceName,
         agentId: user?.id ?? '',
@@ -1427,6 +1431,32 @@ export default function GlobalWebCallInterface() {
               </div>
             )}
 
+            {/* Participants */}
+            {conferenceName && participants.length > 0 && (
+              <div className="mb-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                <div className="text-xs font-semibold text-gray-700 mb-2">Participants</div>
+                <div className="space-y-1">
+                  {participants.map((p) => {
+                    const roleLabel = p.role === 'agent' ? 'Agent' : p.role === 'customer' ? 'Customer' : 'Participant';
+                    const displayName =
+                      p.role === 'customer'
+                        ? (callMetadata?.customerName || p.name || callMetadata?.phoneNumber || 'Customer')
+                        : (p.name || user?.name || 'Agent');
+                    return (
+                      <div key={p.callSid} className="flex items-center justify-between text-xs text-gray-700">
+                        <div className="truncate">
+                          <span className="font-medium">{roleLabel}:</span> <span>{displayName}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-500">
+                          {p.muted === true && <span>Muted</span>}
+                          {p.hold === true && <span>Hold</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Mute/Unmute Button */}
             {(isWebCallConnected || isConnected) && (callStatus === 'in-progress' || callStatus === 'ringing' || !callStatus) && (

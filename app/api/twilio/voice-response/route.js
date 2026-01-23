@@ -32,14 +32,17 @@ async function handleVoiceResponse(request) {
   try {
     let url;
     let agentId = null;
+    let conferenceNameFromUrl = null;
     
     try {
       url = new URL(request.url);
       agentId = url.searchParams.get('agentId');
+      conferenceNameFromUrl = url.searchParams.get('conferenceName') || url.searchParams.get('conference');
       console.log('📞 Voice response request received:', {
         method: request.method,
         url: request.url,
         agentIdFromUrl: agentId,
+        conferenceNameFromUrl,
         hasUrl: !!url
       });
     } catch (urlError) {
@@ -121,45 +124,29 @@ async function handleVoiceResponse(request) {
           name: agent ? `${agent.firstName} ${agent.lastName}` : 'N/A'
         });
         
-        // AGENT (Voice SDK) TWIML:
-        // - If To is a phone number -> outbound browser-first dial (<Dial><Number>)
-        // - If To starts with inbound- -> agent is joining an inbound conference
-        const toParamRaw = formData.get('To') || '';
+        // SIMPLE FLOW:
+        // Always join a conference.
+        // - Outbound: customer leg (created via REST API) and agent leg (Voice SDK) both join `call-<agentId>`.
+        // - Inbound: agent leg joins `inbound-...` conference.
+        const toParamRaw = formData?.get('To') || '';
         const toParam = String(toParamRaw).trim();
 
-        const customerId = formData.get('customerId') || null;
-        const saleId = formData.get('saleId') || null;
-        const callPurpose = formData.get('callPurpose') || 'follow_up';
-        const direction = formData.get('direction') || 'outbound';
+        const conferenceName =
+          (conferenceNameFromUrl && String(conferenceNameFromUrl).trim()) ||
+          (toParam && (toParam.startsWith('inbound-') || toParam.startsWith('call-')) ? toParam : null) ||
+          `call-${parsedAgentId}`;
 
-        // INBOUND: join existing inbound conference
-        if (toParam && toParam.startsWith('inbound-')) {
-          const safeConferenceName = toParam.replace(/[<>&"']/g, '');
-          const conferenceCallbackUrl = getWebhookUrl('/api/twilio/inbound/call-status-callback');
+        const safeConferenceName = conferenceName.replace(/[<>&"']/g, '');
+        const isInboundConference = safeConferenceName.startsWith('inbound-');
+        const conferenceCallbackUrl = getWebhookUrl(
+          isInboundConference
+            ? '/api/twilio/inbound/call-status-callback'
+            : '/api/twilio/call-status-callback'
+        );
 
-          twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
-          twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" maxParticipants="10" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${safeConferenceName}</Conference>`;
-          twiml += `\n  </Dial>`;
-        } else {
-          // OUTBOUND: browser-first dial
-          const dialTo = validatePhoneNumber(toParam);
-          if (!dialTo) {
-            throw new Error(`Invalid outbound To number for browser dial: ${toParamRaw}`);
-          }
-
-          const statusCallbackUrl = new URL(getWebhookUrl('/api/twilio/call-status-callback'));
-          statusCallbackUrl.searchParams.set('agentId', parsedAgentId.toString());
-          statusCallbackUrl.searchParams.set('direction', 'outbound');
-          statusCallbackUrl.searchParams.set('callPurpose', String(callPurpose));
-          if (customerId) statusCallbackUrl.searchParams.set('customerId', String(customerId));
-          if (saleId) statusCallbackUrl.searchParams.set('saleId', String(saleId));
-
-          // answerOnBridge=true => only bridge agent to customer once customer answers
-          // Status callbacks here provide DialCallStatus=answered which we use for real "in-progress"
-          twiml += `\n  <Dial answerOnBridge="true" timeout="30" timeLimit="3600" statusCallback="${statusCallbackUrl.toString()}" statusCallbackMethod="POST" statusCallbackEvent="initiated ringing answered completed">`;
-          twiml += `\n    <Number statusCallback="${statusCallbackUrl.toString()}" statusCallbackMethod="POST" statusCallbackEvent="initiated ringing answered completed">${dialTo}</Number>`;
-          twiml += `\n  </Dial>`;
-        }
+        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
+        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" maxParticipants="10" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${safeConferenceName}</Conference>`;
+        twiml += `\n  </Dial>`;
         
         // If agent has phone, we could call them separately to join the conference
         // But with Voice SDK, agent joins via browser, so this is optional
@@ -169,7 +156,7 @@ async function handleVoiceResponse(request) {
             console.log(`📞 Agent phone available: ${agentPhone} - can be called separately if needed`);
           }
         } else {
-          console.log(`📞 Agent ${parsedAgentId} will join via Voice SDK to conference: ${conferenceName}`);
+          console.log(`📞 Agent ${parsedAgentId} will join via Voice SDK to conference: ${safeConferenceName}`);
         }
         // No Hangup here - let the call continue in the conference
       } catch (error) {

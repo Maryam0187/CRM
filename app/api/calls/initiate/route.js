@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { validatePhoneNumber } from '../../../../lib/twilio';
+import { getClient, getWebhookUrl, validatePhoneNumber } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 
@@ -60,30 +60,69 @@ export async function POST(request) {
       );
     }
 
-    // OUTBOUND REFACTOR:
-    // We no longer create the outbound call server-side (calls.create).
-    // Instead, the agent's browser (Twilio Voice SDK) will connect to the TwiML App and Dial the customer.
-    // This gives reliable Dial callbacks (DialCallStatus=answered) to determine the real "in-progress" moment.
+    // SIMPLE OUTBOUND FLOW:
+    // - Server creates the customer PSTN call via Twilio REST API.
+    // - Both customer and agent join a conference named `call-<agentId>`.
+    // - Frontend connects the agent to that conference using Twilio Voice SDK.
 
     // Update agent status to busy (agent is starting an outbound attempt)
-    await agent.update({ 
+   agent.update({ 
       callStatus: 'busy',
       lastCallTime: new Date(),
       totalCalls: (agent.totalCalls || 0) + 1
+    });
+
+    const conferenceName = `call-${parseInt(agentId, 10)}`;
+
+    const fromNumber = validatePhoneNumber(process.env.TWILIO_PHONE_NUMBER);
+    if (!fromNumber) {
+      return NextResponse.json(
+        { success: false, message: 'TWILIO_PHONE_NUMBER is not set or invalid' },
+        { status: 500 }
+      );
+    }
+
+    const client = getClient();
+
+    // TwiML URL: customer leg joins the conference
+    const twimlUrl = new URL(getWebhookUrl('/api/twilio/voice-response'));
+    twimlUrl.searchParams.set('agentId', String(parseInt(agentId, 10)));
+    twimlUrl.searchParams.set('conferenceName', conferenceName);
+
+    // Status callback for customer leg
+    const statusCallbackUrl = new URL(getWebhookUrl('/api/twilio/call-status-callback'));
+    statusCallbackUrl.searchParams.set('agentId', String(parseInt(agentId, 10)));
+    statusCallbackUrl.searchParams.set('direction', 'outbound-api');
+    statusCallbackUrl.searchParams.set('callPurpose', String(callPurpose));
+    if (customerId) statusCallbackUrl.searchParams.set('customerId', String(customerId));
+    if (saleId) statusCallbackUrl.searchParams.set('saleId', String(saleId));
+
+    const timeout = parseInt(process.env.TWILIO_OUTBOUND_RING_TIMEOUT || '90', 10);
+
+    const call = await client.calls.create({
+      to: formattedNumber,
+      from: fromNumber,
+      url: twimlUrl.toString(),
+      method: 'POST',
+      timeout,
+      statusCallback: statusCallbackUrl.toString(),
+      statusCallbackMethod: 'POST',
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
     });
 
     // Return call info for agent
     return NextResponse.json({
       success: true,
       data: {
-        // No Twilio CallSid yet; it will be created when the browser dials.
+        callSid: call.sid,
+        conferenceName,
         to: formattedNumber,
         agentId: parseInt(agentId, 10),
         customerId: customerId || null,
         saleId: saleId || null,
         callPurpose,
         direction: 'outbound',
-        message: 'Outbound call prepared. Browser will dial customer via Twilio Voice SDK.'
+        message: 'Outbound call started. Agent should join conference via Twilio Voice SDK.'
       },
       message: 'Call initiated successfully'
     });

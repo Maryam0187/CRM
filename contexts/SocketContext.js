@@ -6,6 +6,11 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from './AuthContext';
 import { useAppDispatch } from '../store/hooks';
 import { addNotification } from '../store/slices/notificationSlice';
+import {
+  upsertParticipant,
+  removeParticipant,
+  clearConferenceParticipants,
+} from '../store/slices/participantsSlice';
 import { useToast } from './ToastContext';
 
 const SocketContext = createContext();
@@ -320,6 +325,36 @@ export const SocketProvider = ({ children }) => {
         callSid: data.callSid,
         timestamp: data.timestamp
       });
+
+      // Update participant store (for UI)
+      try {
+        const conferenceName = data.conferenceName;
+        const callSid = data.callSid;
+        const role = data.participantRole || 'unknown';
+        const name = data.participantName || null;
+
+        if (data.event === 'start' || data.event === 'end') {
+          if (conferenceName) dispatch(clearConferenceParticipants({ conferenceName }));
+        } else if (data.event === 'leave') {
+          if (conferenceName && callSid) dispatch(removeParticipant({ conferenceName, callSid }));
+        } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold') {
+          if (conferenceName && callSid) {
+            dispatch(
+              upsertParticipant({
+                conferenceName,
+                callSid,
+                role,
+                name,
+                muted: typeof data.muted === 'boolean' ? data.muted : null,
+                hold: typeof data.hold === 'boolean' ? data.hold : null,
+                timestamp: data.timestamp,
+              })
+            );
+          }
+        }
+      } catch (e) {
+        // Don't let participant UI updates break socket handling
+      }
       
       // Dispatch custom event for components to listen to
       const conferenceEvent = new CustomEvent('conferenceEvent', {
