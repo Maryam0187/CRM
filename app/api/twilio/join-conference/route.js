@@ -84,7 +84,7 @@ async function handleJoinConference(request) {
     muted="false" 
     statusCallback="${conferenceCallbackUrl}" 
     statusCallbackMethod="POST" 
-    statusCallbackEvent="start end join leave mute hold speaker">${safeConferenceName}</Conference>
+    statusCallbackEvent="start end join leave mute unmute hold unhold speaker participant-speech-start participant-speech-stop">${safeConferenceName}</Conference>
   </Dial>
 </Response>`;
 

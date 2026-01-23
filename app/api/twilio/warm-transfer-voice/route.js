@@ -52,7 +52,7 @@ async function handleWarmTransferVoice(request) {
 <Response>
   <Say voice="alice">Please hold while we connect you to the call.</Say>
   <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false">
-    <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="true" maxParticipants="10" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${safeConferenceName}</Conference>
+    <Conference startConferenceOnEnter="false" endConferenceOnExit="false" beep="true" maxParticipants="10" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute unmute hold unhold speaker participant-speech-start participant-speech-stop">${safeConferenceName}</Conference>
   </Dial>
   <Hangup/>
 </Response>`;

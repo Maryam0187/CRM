@@ -28,6 +28,39 @@ async function resolveAgentDisplayName(agentId) {
   }
 }
 
+function normalizeConferenceEventName(eventName) {
+  if (!eventName) return { event: 'unknown', eventRaw: eventName };
+  const raw = String(eventName);
+  let e = raw.toLowerCase();
+
+  // Common Twilio prefixes
+  if (e.startsWith('conference-')) e = e.replace(/^conference-/, '');
+  if (e.startsWith('participant-')) e = e.replace(/^participant-/, '');
+
+  // Normalize separators
+  e = e.replace(/\s+/g, '-');
+
+  // Keep speech start/stop readable
+  if (e === 'speech-start') return { event: 'speech_start', eventRaw: raw };
+  if (e === 'speech-stop') return { event: 'speech_stop', eventRaw: raw };
+
+  // Common participant events
+  const mapped = {
+    start: 'start',
+    end: 'end',
+    join: 'join',
+    leave: 'leave',
+    mute: 'mute',
+    unmute: 'unmute',
+    hold: 'hold',
+    unhold: 'unhold',
+    speaker: 'speaker',
+  };
+
+  if (mapped[e]) return { event: mapped[e], eventRaw: raw };
+  return { event: e || 'unknown', eventRaw: raw };
+}
+
 // Helper: Normalize Twilio direction to database enum values
 function normalizeDirection(twilioDirection) {
   if (!twilioDirection) return 'outbound';
@@ -273,12 +306,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
     trackedCustomerCallSid: trackedCallSid
   });
   
-  // Normalize Twilio event names to our internal event names
-  let normalizedEvent = conferenceEvent;
-  if (conferenceEvent === 'conference-start') normalizedEvent = 'start';
-  if (conferenceEvent === 'conference-end') normalizedEvent = 'end';
-  if (conferenceEvent === 'participant-join') normalizedEvent = 'join';
-  if (conferenceEvent === 'participant-leave') normalizedEvent = 'leave';
+  const { event: normalizedEvent, eventRaw } = normalizeConferenceEventName(conferenceEvent);
   
   switch (normalizedEvent) {
     case 'start':
@@ -286,6 +314,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       if (conferenceName) {
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'start',
+          eventRaw,
           conferenceSid,
           conferenceName,
           timestamp
@@ -305,6 +334,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       if (conferenceName) {
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'end',
+          eventRaw,
           conferenceSid,
           conferenceName,
           timestamp
@@ -389,6 +419,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       if (conferenceName && callSid) {
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'join',
+          eventRaw,
           conferenceSid,
           conferenceName,
           callSid,
@@ -430,6 +461,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
 
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'leave',
+          eventRaw,
           conferenceSid,
           conferenceName,
           callSid,
@@ -472,6 +504,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
 
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'mute',
+          eventRaw,
           conferenceSid,
           conferenceName,
           callSid,
@@ -479,6 +512,20 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           participantRole,
           participantName,
           timestamp
+        });
+      }
+      break;
+      
+    case 'unmute':
+      if (conferenceName && callSid) {
+        socketManager.sendConferenceEvent(conferenceName, {
+          event: 'unmute',
+          eventRaw,
+          conferenceSid,
+          conferenceName,
+          callSid,
+          muted: false,
+          timestamp,
         });
       }
       break;
@@ -506,6 +553,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
 
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'hold',
+          eventRaw,
           conferenceSid,
           conferenceName,
           callSid,
@@ -517,11 +565,42 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       }
       break;
       
+    case 'unhold':
+      if (conferenceName && callSid) {
+        socketManager.sendConferenceEvent(conferenceName, {
+          event: 'unhold',
+          eventRaw,
+          conferenceSid,
+          conferenceName,
+          callSid,
+          hold: false,
+          timestamp,
+        });
+      }
+      break;
+      
+    case 'speech_start':
+    case 'speech_stop':
+      // Always forward speech events to UI for visibility/debugging
+      if (conferenceName) {
+        socketManager.sendConferenceEvent(conferenceName, {
+          event: normalizedEvent,
+          eventRaw,
+          conferenceSid,
+          conferenceName,
+          callSid: callSid || null,
+          participantCallSid: participantCallSid || null,
+          timestamp,
+        });
+      }
+      break;
+      
     case 'speaker':
       console.log('🎤 Speaker changed:', { conferenceName, callSid: callSid?.substring(0, 15) + '...' });
       if (conferenceName && callSid) {
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'speaker',
+          eventRaw,
           conferenceSid,
           conferenceName,
           callSid,
@@ -531,7 +610,20 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     default:
-      console.log('ℹ️ Unknown conference event (not normalized):', conferenceEvent);
+      // Forward unknown/unhandled events so UI can still display them.
+      if (conferenceName) {
+        socketManager.sendConferenceEvent(conferenceName, {
+          event: normalizedEvent || 'unknown',
+          eventRaw,
+          conferenceSid,
+          conferenceName,
+          callSid: callSid || null,
+          participantCallSid: participantCallSid || null,
+          muted: muted === 'true' ? true : muted === 'false' ? false : null,
+          hold: hold === 'true' ? true : hold === 'false' ? false : null,
+          timestamp,
+        });
+      }
   }
   
   // Return empty TwiML response (conference callbacks don't need TwiML)

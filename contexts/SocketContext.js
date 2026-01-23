@@ -11,6 +11,10 @@ import {
   removeParticipant,
   clearConferenceParticipants,
 } from '../store/slices/participantsSlice';
+import {
+  addConferenceEvent,
+  clearConferenceEvents,
+} from '../store/slices/conferenceEventsSlice';
 import { useToast } from './ToastContext';
 
 const SocketContext = createContext();
@@ -307,6 +311,18 @@ export const SocketProvider = ({ children }) => {
         return newMap;
       });
 
+      // Clear participant mapping when call ends (so UI resets cleanly)
+      try {
+        const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+        const statusForLifecycle = data.uiStatus || data.status;
+        if (data.conferenceName && endedStatuses.includes(statusForLifecycle)) {
+          dispatch(clearConferenceParticipants({ conferenceName: data.conferenceName }));
+          dispatch(clearConferenceEvents({ conferenceName: data.conferenceName }));
+        }
+      } catch (e) {
+        // ignore
+      }
+
       // Dispatch custom event for components to listen to
       const callStatusEvent = new CustomEvent('callStatusUpdate', {
         detail: { callStatusData: data }
@@ -333,8 +349,14 @@ export const SocketProvider = ({ children }) => {
         const role = data.participantRole || 'unknown';
         const name = data.participantName || null;
 
-        if (data.event === 'start' || data.event === 'end') {
+        // Keep a feed of ALL conference events for UI/debugging
+        if (conferenceName) dispatch(addConferenceEvent(data));
+
+        // NOTE: Twilio may emit `conference-start` AFTER the first participant joins.
+        // If we clear on `start`, we can accidentally delete the already-joined agent.
+        if (data.event === 'end') {
           if (conferenceName) dispatch(clearConferenceParticipants({ conferenceName }));
+          if (conferenceName) dispatch(clearConferenceEvents({ conferenceName }));
         } else if (data.event === 'leave') {
           if (conferenceName && callSid) dispatch(removeParticipant({ conferenceName, callSid }));
         } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold') {
