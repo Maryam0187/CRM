@@ -14,6 +14,8 @@ const customerCallSidMap = new Map();
 // Track agent leg CallSid per conference (learned from TwiML-App call-status callbacks)
 // Maps conferenceName -> agentCallSid
 const agentCallSidMap = new Map();
+// Avoid spamming synthetic "in-progress" from conference join
+const customerJoinBroadcastedMap = new Map(); // conferenceName -> Set(participantId)
 const agentNameCache = new Map(); // agentId -> "First Last"
 
 async function resolveAgentDisplayName(agentId) {
@@ -435,6 +437,39 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           participantName,
           timestamp
         });
+
+        // START TIMER ON CUSTOMER JOIN:
+        // Emit a synthetic call_status_update so the frontend starts the timer exactly when the customer joins.
+        if (participantRole === 'customer') {
+          try {
+            if (!customerJoinBroadcastedMap.has(conferenceName)) {
+              customerJoinBroadcastedMap.set(conferenceName, new Set());
+            }
+            const sentSet = customerJoinBroadcastedMap.get(conferenceName);
+            if (!sentSet.has(participantId)) {
+              sentSet.add(participantId);
+
+              const statusData = {
+                callSid: participantId,
+                status: 'in-progress',
+                uiStatus: 'in-progress',
+                callbackType: 'conference',
+                conferenceName,
+                agentId: derivedAgentId || null,
+                // minimal fields for UI/timer logic
+                direction: 'outbound',
+              };
+
+              if (derivedAgentId) socketManager.sendCallStatusToAgent(derivedAgentId, participantId, statusData);
+              socketManager.sendCallStatusUpdate(participantId, statusData);
+              socketManager.sendCallStatusToSupervisors(participantId, statusData);
+              socketManager.sendCallStatusToRoom(`call_${participantId}`, participantId, statusData);
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+
         // Also send updated conference status (participant count increased)
         // Note: We don't have exact count here, but we can indicate a participant joined
         socketManager.sendConferenceStatus(conferenceName, {
@@ -991,6 +1026,9 @@ export async function POST(request) {
     if (isCallEnded && callStatusConferenceName && agentCallSidMap.has(callStatusConferenceName)) {
       agentCallSidMap.delete(callStatusConferenceName);
       console.log('🧹 Cleaned up tracked agent callSid for conference:', callStatusConferenceName);
+    }
+    if (isCallEnded && callStatusConferenceName && customerJoinBroadcastedMap.has(callStatusConferenceName)) {
+      customerJoinBroadcastedMap.delete(callStatusConferenceName);
     }
     
     // Only fetch call log when call ends (to check if it exists for update vs create)

@@ -82,6 +82,15 @@ export default function GlobalWebCallInterface() {
     (state) => (conferenceName && state?.participants?.byConference?.[conferenceName]) || {}
   );
   const participants = Object.values(participantsBySid || {});
+
+  // Debug: log participant redux mapping (helps verify agent/customer classification)
+  useEffect(() => {
+    if (!conferenceName) return;
+    console.log('📌 [PARTICIPANTS REDUX MAP]', {
+      conferenceName,
+      participantsBySid,
+    });
+  }, [conferenceName, participantsBySid]);
   
   const { getCallStatus } = useSocket();
   const [isMinimized, setIsMinimized] = useState(false);
