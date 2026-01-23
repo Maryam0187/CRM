@@ -16,6 +16,9 @@ const customerCallSidMap = new Map();
 const agentCallSidMap = new Map();
 // Avoid spamming synthetic "in-progress" from conference join
 const customerJoinBroadcastedMap = new Map(); // conferenceName -> Set(participantId)
+// Heuristic for outbound conferences when Twilio conference callbacks omit `From`:
+// first join into `call-<agentId>` is the agent, second join is the customer.
+const outboundFirstJoinMap = new Map(); // conferenceName -> participantId
 const agentNameCache = new Map(); // agentId -> "First Last"
 
 async function resolveAgentDisplayName(agentId) {
@@ -76,6 +79,17 @@ function resolveParticipantRole({ conferenceName, participantId, rawFrom }) {
   const trackedCustomerCallSid = conferenceName ? customerCallSidMap.get(conferenceName) : null;
   if (trackedCustomerCallSid && participantId) {
     return participantId === trackedCustomerCallSid ? 'customer' : 'agent';
+  }
+
+  // Outbound conference heuristic: if this is a call-<id> conference and we don't yet know customer CallSid,
+  // treat the first join as agent and any subsequent join as customer.
+  if (conferenceName && participantId && /^call-\d+$/.test(conferenceName)) {
+    const first = outboundFirstJoinMap.get(conferenceName);
+    if (!first) {
+      outboundFirstJoinMap.set(conferenceName, participantId);
+      return 'agent';
+    }
+    return participantId === first ? 'agent' : 'customer';
   }
 
   if (trackedAgent || looksLikeAgent) return 'agent';
@@ -1033,6 +1047,9 @@ export async function POST(request) {
     }
     if (isCallEnded && callStatusConferenceName && customerJoinBroadcastedMap.has(callStatusConferenceName)) {
       customerJoinBroadcastedMap.delete(callStatusConferenceName);
+    }
+    if (isCallEnded && callStatusConferenceName && outboundFirstJoinMap.has(callStatusConferenceName)) {
+      outboundFirstJoinMap.delete(callStatusConferenceName);
     }
     
     // Only fetch call log when call ends (to check if it exists for update vs create)
