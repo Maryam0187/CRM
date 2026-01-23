@@ -11,6 +11,9 @@ const ERROR_STATUSES = ['failed', 'busy', 'no-answer', 'canceled'];
 // Maps conferenceName -> customerCallSid
 // This helps us identify customer when they join conference
 const customerCallSidMap = new Map();
+// Track agent leg CallSid per conference (learned from TwiML-App call-status callbacks)
+// Maps conferenceName -> agentCallSid
+const agentCallSidMap = new Map();
 const agentNameCache = new Map(); // agentId -> "First Last"
 
 async function resolveAgentDisplayName(agentId) {
@@ -307,6 +310,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
   });
   
   const { event: normalizedEvent, eventRaw } = normalizeConferenceEventName(conferenceEvent);
+  const participantId = participantCallSid || callSid; // stable key to avoid duplicates
   
   switch (normalizedEvent) {
     case 'start':
@@ -402,8 +406,9 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       // Determine participant role + display name (best effort)
       const rawFrom = formData.get('From') || formData.get('Caller') || '';
       const looksLikeAgent = rawFrom && String(rawFrom).startsWith('client:');
-      const trackedCustomer = conferenceName && customerCallSidMap.get(conferenceName) === callSid;
-      const participantRole = looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
+      const trackedCustomer = conferenceName && participantId && customerCallSidMap.get(conferenceName) === participantId;
+      const trackedAgent = conferenceName && participantId && agentCallSidMap.get(conferenceName) === participantId;
+      const participantRole = trackedAgent ? 'agent' : looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
 
       let derivedAgentId = null;
       if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
@@ -416,13 +421,14 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           : (rawFrom && isPhoneNumber(String(rawFrom)) ? String(rawFrom) : 'Customer');
 
       // Broadcast participant joined event
-      if (conferenceName && callSid) {
+      if (conferenceName && participantId) {
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'join',
           eventRaw,
           conferenceSid,
           conferenceName,
-          callSid,
+          callSid: participantId,
+          participantCallSid: participantCallSid || null,
           muted: muted === 'true',
           hold: hold === 'true',
           participantRole,
@@ -444,11 +450,12 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       
     case 'leave':
       console.log('👋 Participant left conference:', { conferenceName, callSid: callSid?.substring(0, 15) + '...' });
-      if (conferenceName && callSid) {
+      if (conferenceName && participantId) {
         const rawFrom = formData.get('From') || formData.get('Caller') || '';
         const looksLikeAgent = rawFrom && String(rawFrom).startsWith('client:');
-        const trackedCustomer = conferenceName && customerCallSidMap.get(conferenceName) === callSid;
-        const participantRole = looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
+        const trackedCustomer = conferenceName && participantId && customerCallSidMap.get(conferenceName) === participantId;
+        const trackedAgent = conferenceName && participantId && agentCallSidMap.get(conferenceName) === participantId;
+        const participantRole = trackedAgent ? 'agent' : looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
         let derivedAgentId = null;
         if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
         if (!derivedAgentId && conferenceName && /^call-\d+$/.test(conferenceName)) {
@@ -464,7 +471,8 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           eventRaw,
           conferenceSid,
           conferenceName,
-          callSid,
+          callSid: participantId,
+          participantCallSid: participantCallSid || null,
           participantRole,
           participantName,
           timestamp
@@ -487,11 +495,12 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
         callSid: callSid?.substring(0, 15) + '...',
         muted: muted === 'true'
       });
-      if (conferenceName && callSid) {
+      if (conferenceName && participantId) {
         const rawFrom = formData.get('From') || formData.get('Caller') || '';
         const looksLikeAgent = rawFrom && String(rawFrom).startsWith('client:');
-        const trackedCustomer = conferenceName && customerCallSidMap.get(conferenceName) === callSid;
-        const participantRole = looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
+        const trackedCustomer = conferenceName && participantId && customerCallSidMap.get(conferenceName) === participantId;
+        const trackedAgent = conferenceName && participantId && agentCallSidMap.get(conferenceName) === participantId;
+        const participantRole = trackedAgent ? 'agent' : looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
         let derivedAgentId = null;
         if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
         if (!derivedAgentId && conferenceName && /^call-\d+$/.test(conferenceName)) {
@@ -507,7 +516,8 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           eventRaw,
           conferenceSid,
           conferenceName,
-          callSid,
+          callSid: participantId,
+          participantCallSid: participantCallSid || null,
           muted: muted === 'true',
           participantRole,
           participantName,
@@ -536,11 +546,12 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
         callSid: callSid?.substring(0, 15) + '...',
         hold: hold === 'true'
       });
-      if (conferenceName && callSid) {
+      if (conferenceName && participantId) {
         const rawFrom = formData.get('From') || formData.get('Caller') || '';
         const looksLikeAgent = rawFrom && String(rawFrom).startsWith('client:');
-        const trackedCustomer = conferenceName && customerCallSidMap.get(conferenceName) === callSid;
-        const participantRole = looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
+        const trackedCustomer = conferenceName && participantId && customerCallSidMap.get(conferenceName) === participantId;
+        const trackedAgent = conferenceName && participantId && agentCallSidMap.get(conferenceName) === participantId;
+        const participantRole = trackedAgent ? 'agent' : looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
         let derivedAgentId = null;
         if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
         if (!derivedAgentId && conferenceName && /^call-\d+$/.test(conferenceName)) {
@@ -556,7 +567,8 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           eventRaw,
           conferenceSid,
           conferenceName,
-          callSid,
+          callSid: participantId,
+          participantCallSid: participantCallSid || null,
           hold: hold === 'true',
           participantRole,
           participantName,
@@ -842,6 +854,18 @@ export async function POST(request) {
     // Those can come from a TwiML App context, so we always accept Dial callbacks.
     const isCustomer = isDialCallback || isCustomerLeg(from, to);
     if (!isCustomer) {
+      // IMPORTANT: even though we don't broadcast agent leg call-status callbacks,
+      // we still want to learn the agent CallSid so we can correctly identify the agent
+      // in later conference callbacks (where `From` may be missing).
+      try {
+        const conf = String(to || '').trim();
+        if (webhookSource === 'twiml-app' && conf && (conf.startsWith('call-') || conf.startsWith('inbound-')) && effectiveCallSid) {
+          agentCallSidMap.set(conf, effectiveCallSid);
+        }
+      } catch (e) {
+        // ignore
+      }
+
       console.log(`⏭️ Skipping ${webhookSource} callback (agent browser connection):`, { 
         callSid: effectiveCallSid, 
         from, 
@@ -963,6 +987,10 @@ export async function POST(request) {
     if (isCallEnded && callStatusConferenceName && customerCallSidMap.has(callStatusConferenceName)) {
       customerCallSidMap.delete(callStatusConferenceName);
       console.log('🧹 Cleaned up tracked customer callSid for conference:', callStatusConferenceName);
+    }
+    if (isCallEnded && callStatusConferenceName && agentCallSidMap.has(callStatusConferenceName)) {
+      agentCallSidMap.delete(callStatusConferenceName);
+      console.log('🧹 Cleaned up tracked agent callSid for conference:', callStatusConferenceName);
     }
     
     // Only fetch call log when call ends (to check if it exists for update vs create)

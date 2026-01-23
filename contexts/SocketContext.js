@@ -11,10 +11,6 @@ import {
   removeParticipant,
   clearConferenceParticipants,
 } from '../store/slices/participantsSlice';
-import {
-  addConferenceEvent,
-  clearConferenceEvents,
-} from '../store/slices/conferenceEventsSlice';
 import { useToast } from './ToastContext';
 
 const SocketContext = createContext();
@@ -317,7 +313,6 @@ export const SocketProvider = ({ children }) => {
         const statusForLifecycle = data.uiStatus || data.status;
         if (data.conferenceName && endedStatuses.includes(statusForLifecycle)) {
           dispatch(clearConferenceParticipants({ conferenceName: data.conferenceName }));
-          dispatch(clearConferenceEvents({ conferenceName: data.conferenceName }));
         }
       } catch (e) {
         // ignore
@@ -345,26 +340,22 @@ export const SocketProvider = ({ children }) => {
       // Update participant store (for UI)
       try {
         const conferenceName = data.conferenceName;
-        const callSid = data.callSid;
+        const participantId = data.participantCallSid || data.callSid;
         const role = data.participantRole || 'unknown';
         const name = data.participantName || null;
-
-        // Keep a feed of ALL conference events for UI/debugging
-        if (conferenceName) dispatch(addConferenceEvent(data));
 
         // NOTE: Twilio may emit `conference-start` AFTER the first participant joins.
         // If we clear on `start`, we can accidentally delete the already-joined agent.
         if (data.event === 'end') {
           if (conferenceName) dispatch(clearConferenceParticipants({ conferenceName }));
-          if (conferenceName) dispatch(clearConferenceEvents({ conferenceName }));
         } else if (data.event === 'leave') {
-          if (conferenceName && callSid) dispatch(removeParticipant({ conferenceName, callSid }));
+          if (conferenceName && participantId) dispatch(removeParticipant({ conferenceName, callSid: participantId }));
         } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold') {
-          if (conferenceName && callSid) {
+          if (conferenceName && participantId) {
             dispatch(
               upsertParticipant({
                 conferenceName,
-                callSid,
+                callSid: participantId,
                 role,
                 name,
                 muted: typeof data.muted === 'boolean' ? data.muted : null,

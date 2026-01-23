@@ -82,10 +82,6 @@ export default function GlobalWebCallInterface() {
     (state) => (conferenceName && state?.participants?.byConference?.[conferenceName]) || {}
   );
   const participants = Object.values(participantsBySid || {});
-
-  const conferenceEvents = useAppSelector(
-    (state) => (conferenceName && state?.conferenceEvents?.byConference?.[conferenceName]) || []
-  );
   
   const { getCallStatus } = useSocket();
   const [isMinimized, setIsMinimized] = useState(false);
@@ -1455,25 +1451,6 @@ export default function GlobalWebCallInterface() {
                           {p.muted === true && <span>Muted</span>}
                           {p.hold === true && <span>Hold</span>}
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Conference events feed (all events) */}
-            {conferenceName && conferenceEvents.length > 0 && (
-              <div className="mb-3 p-3 bg-white border border-gray-200 rounded-lg">
-                <div className="text-xs font-semibold text-gray-700 mb-2">Conference Events</div>
-                <div className="max-h-40 overflow-auto space-y-1">
-                  {conferenceEvents.slice(0, 15).map((ev, idx) => {
-                    const label = ev.eventRaw || ev.event || 'unknown';
-                    const who = ev.participantName ? ` — ${ev.participantName}` : '';
-                    return (
-                      <div key={`${ev.timestamp || 't'}-${idx}`} className="text-[11px] text-gray-600">
-                        <span className="font-mono">{label}</span>
-                        {who}
                       </div>
                     );
                   })}
