@@ -66,6 +66,22 @@ function normalizeConferenceEventName(eventName) {
   return { event: e || 'unknown', eventRaw: raw };
 }
 
+function resolveParticipantRole({ conferenceName, participantId, rawFrom }) {
+  const fromStr = rawFrom ? String(rawFrom) : '';
+  const looksLikeAgent = !!(fromStr && fromStr.startsWith('client:'));
+  const trackedAgent = !!(conferenceName && participantId && agentCallSidMap.get(conferenceName) === participantId);
+
+  // Strongest signal: if we already know the customer CallSid for this conference,
+  // then any other participant is the agent.
+  const trackedCustomerCallSid = conferenceName ? customerCallSidMap.get(conferenceName) : null;
+  if (trackedCustomerCallSid && participantId) {
+    return participantId === trackedCustomerCallSid ? 'customer' : 'agent';
+  }
+
+  if (trackedAgent || looksLikeAgent) return 'agent';
+  return 'customer';
+}
+
 // Helper: Normalize Twilio direction to database enum values
 function normalizeDirection(twilioDirection) {
   if (!twilioDirection) return 'outbound';
@@ -407,10 +423,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       
       // Determine participant role + display name (best effort)
       const rawFrom = formData.get('From') || formData.get('Caller') || '';
-      const looksLikeAgent = rawFrom && String(rawFrom).startsWith('client:');
-      const trackedCustomer = conferenceName && participantId && customerCallSidMap.get(conferenceName) === participantId;
-      const trackedAgent = conferenceName && participantId && agentCallSidMap.get(conferenceName) === participantId;
-      const participantRole = trackedAgent ? 'agent' : looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
+      const participantRole = resolveParticipantRole({ conferenceName, participantId, rawFrom });
 
       let derivedAgentId = null;
       if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
@@ -487,10 +500,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       console.log('👋 Participant left conference:', { conferenceName, callSid: callSid?.substring(0, 15) + '...' });
       if (conferenceName && participantId) {
         const rawFrom = formData.get('From') || formData.get('Caller') || '';
-        const looksLikeAgent = rawFrom && String(rawFrom).startsWith('client:');
-        const trackedCustomer = conferenceName && participantId && customerCallSidMap.get(conferenceName) === participantId;
-        const trackedAgent = conferenceName && participantId && agentCallSidMap.get(conferenceName) === participantId;
-        const participantRole = trackedAgent ? 'agent' : looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
+        const participantRole = resolveParticipantRole({ conferenceName, participantId, rawFrom });
         let derivedAgentId = null;
         if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
         if (!derivedAgentId && conferenceName && /^call-\d+$/.test(conferenceName)) {
@@ -532,10 +542,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       });
       if (conferenceName && participantId) {
         const rawFrom = formData.get('From') || formData.get('Caller') || '';
-        const looksLikeAgent = rawFrom && String(rawFrom).startsWith('client:');
-        const trackedCustomer = conferenceName && participantId && customerCallSidMap.get(conferenceName) === participantId;
-        const trackedAgent = conferenceName && participantId && agentCallSidMap.get(conferenceName) === participantId;
-        const participantRole = trackedAgent ? 'agent' : looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
+        const participantRole = resolveParticipantRole({ conferenceName, participantId, rawFrom });
         let derivedAgentId = null;
         if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
         if (!derivedAgentId && conferenceName && /^call-\d+$/.test(conferenceName)) {
@@ -583,10 +590,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       });
       if (conferenceName && participantId) {
         const rawFrom = formData.get('From') || formData.get('Caller') || '';
-        const looksLikeAgent = rawFrom && String(rawFrom).startsWith('client:');
-        const trackedCustomer = conferenceName && participantId && customerCallSidMap.get(conferenceName) === participantId;
-        const trackedAgent = conferenceName && participantId && agentCallSidMap.get(conferenceName) === participantId;
-        const participantRole = trackedAgent ? 'agent' : looksLikeAgent ? 'agent' : trackedCustomer ? 'customer' : 'customer';
+        const participantRole = resolveParticipantRole({ conferenceName, participantId, rawFrom });
         let derivedAgentId = null;
         if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
         if (!derivedAgentId && conferenceName && /^call-\d+$/.test(conferenceName)) {

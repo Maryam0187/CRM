@@ -6,7 +6,8 @@ import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient';
 import { Device } from '@twilio/voice-sdk';
-import { useAppSelector } from '../store/hooks';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { upsertParticipant } from '../store/slices/participantsSlice';
 
 // Add global unhandled rejection handler to prevent SDK errors from crashing app
 if (typeof window !== 'undefined' && !window.__twilioRejectionHandlerAdded) {
@@ -78,6 +79,7 @@ export default function GlobalWebCallInterface() {
   
   // Get user and access token from auth context (needed for device setup)
   const { user, accessToken } = useAuth();
+  const dispatch = useAppDispatch();
   const participantsBySid = useAppSelector(
     (state) => (conferenceName && state?.participants?.byConference?.[conferenceName]) || {}
   );
@@ -91,6 +93,43 @@ export default function GlobalWebCallInterface() {
       participantsBySid,
     });
   }, [conferenceName, participantsBySid]);
+
+  // Capture agent CallSid from Twilio Voice SDK call object and store in Redux
+  const captureAgentCallSid = useCallback(
+    (callObj) => {
+      try {
+        if (!conferenceName || !callObj) return;
+        const raw =
+          callObj?.parameters?.CallSid ||
+          callObj?.parameters?.callSid ||
+          callObj?.parameters?.callsid ||
+          null;
+        const sid = raw ? String(raw) : null;
+        if (!sid || !sid.startsWith('CA')) return; // only store real Twilio CallSids
+        if (participantsBySid?.[sid]) return; // already stored
+
+        dispatch(
+          upsertParticipant({
+            conferenceName,
+            callSid: sid,
+            role: 'agent',
+            name:
+              user?.name ||
+              [user?.firstName, user?.lastName].filter(Boolean).join(' ') ||
+              'Agent',
+            muted: false,
+            hold: false,
+            timestamp: new Date().toISOString(),
+          })
+        );
+
+        console.log('🧩 [AGENT CALLSID]', { conferenceName, callSid: sid });
+      } catch (e) {
+        // ignore
+      }
+    },
+    [conferenceName, dispatch, participantsBySid, user?.firstName, user?.lastName, user?.name]
+  );
   
   const { getCallStatus } = useSocket();
   const [isMinimized, setIsMinimized] = useState(false);
@@ -540,6 +579,9 @@ export default function GlobalWebCallInterface() {
       }
 
       console.log('📞 Call object created:', call);
+      // Agent leg CallSid becomes available on the SDK Call object once Twilio creates the leg.
+      // Capture it as early as possible so agent shows up in participant mapping even if conference callbacks omit `From`.
+      captureAgentCallSid(call);
       activeConnection.current = call;
 
       // Attach event listeners
@@ -547,6 +589,7 @@ export default function GlobalWebCallInterface() {
         const attachEvents = (callObj) => {
           const onAccept = () => {
             console.log('✅ Call accepted - connected to conference');
+            captureAgentCallSid(callObj);
             if (!isConnected) {
               setIsConnected(true);
               setIsConnecting(false);
@@ -1451,14 +1494,31 @@ export default function GlobalWebCallInterface() {
                       p.role === 'customer'
                         ? (callMetadata?.customerName || p.name || callMetadata?.phoneNumber || 'Customer')
                         : (p.name || user?.name || 'Agent');
+
+                    const baseStatus = p.hold === true ? 'Hold' : p.muted === true ? 'Muted' : 'Active';
+                    const customerCallStatus =
+                      p.role === 'customer' ? (callStatus || (isWebCallConnected || isConnected ? 'in-progress' : null)) : null;
+                    const statusText =
+                      p.role === 'customer' && customerCallStatus
+                        ? `${baseStatus} • ${customerCallStatus}`
+                        : baseStatus;
+
+                    const statusColor =
+                      p.hold === true
+                        ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
+                        : p.muted === true
+                          ? 'bg-orange-100 text-orange-800 border-orange-200'
+                          : 'bg-green-100 text-green-800 border-green-200';
+
                     return (
                       <div key={p.callSid} className="flex items-center justify-between text-xs text-gray-700">
                         <div className="truncate">
                           <span className="font-medium">{roleLabel}:</span> <span>{displayName}</span>
                         </div>
-                        <div className="flex items-center gap-2 text-[11px] text-gray-500">
-                          {p.muted === true && <span>Muted</span>}
-                          {p.hold === true && <span>Hold</span>}
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[11px] px-2 py-0.5 rounded border ${statusColor}`}>
+                            {statusText}
+                          </span>
                         </div>
                       </div>
                     );
