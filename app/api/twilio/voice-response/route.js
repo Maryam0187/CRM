@@ -55,6 +55,14 @@ async function handleVoiceResponse(request) {
         formData = await request.formData();
         const agentIdFromForm = formData.get('agentId');
         agentId = agentId || agentIdFromForm;
+
+        // If agentId is not provided, try to extract it from From=client:agent-<id>
+        // This is the normal identity format used by the frontend token.
+        if (!agentId) {
+          const from = formData.get('From') || '';
+          const m = String(from).match(/agent-(\d+)/);
+          if (m) agentId = m[1];
+        }
         
         console.log('📞 Form data parsed:', {
           agentIdFromForm,

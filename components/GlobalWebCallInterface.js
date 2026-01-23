@@ -448,6 +448,7 @@ export default function GlobalWebCallInterface() {
       // Include metadata so voice-response can embed it in Twilio status callbacks.
       const params = {
         To: conferenceName,
+        agentId: user?.id ?? '',
         customerId: callMetadata?.customerId ?? '',
         saleId: callMetadata?.saleId ?? '',
         callPurpose: 'follow_up',
