@@ -358,8 +358,20 @@ export const SocketProvider = ({ children }) => {
                 callSid: participantId,
                 role,
                 name,
+                joined: data.event === 'join' ? true : null,
                 muted: typeof data.muted === 'boolean' ? data.muted : null,
                 hold: typeof data.hold === 'boolean' ? data.hold : null,
+                timestamp: data.timestamp,
+              })
+            );
+          }
+        } else if (data.event === 'speech_start' || data.event === 'speech_stop') {
+          if (conferenceName && participantId) {
+            dispatch(
+              upsertParticipant({
+                conferenceName,
+                callSid: participantId,
+                speaking: data.event === 'speech_start',
                 timestamp: data.timestamp,
               })
             );

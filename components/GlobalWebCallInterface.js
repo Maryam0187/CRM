@@ -84,6 +84,15 @@ export default function GlobalWebCallInterface() {
     (state) => (conferenceName && state?.participants?.byConference?.[conferenceName]) || {}
   );
   const participants = Object.values(participantsBySid || {});
+  const customerParticipant = participants.find((p) => p.role === 'customer') || null;
+  const customerJoined = !!customerParticipant?.joined;
+  const callEndedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+  const displayCallStatus =
+    callStatus && callEndedStatuses.includes(callStatus)
+      ? callStatus
+      : customerJoined
+        ? 'in-progress'
+        : 'ringing';
 
   // Debug: log participant redux mapping (helps verify agent/customer classification)
   useEffect(() => {
@@ -1352,12 +1361,12 @@ export default function GlobalWebCallInterface() {
         <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-3 flex items-center justify-between">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="flex-shrink-0">
-              {callStatus === 'in-progress' ? (
+              {displayCallStatus === 'in-progress' ? (
                 <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
-              ) : callStatus === 'ringing' ? (
+              ) : displayCallStatus === 'ringing' ? (
                 // Customer's phone is ringing
                 <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
-              ) : callStatus === 'queued' ? (
+              ) : displayCallStatus === 'queued' ? (
                 // Call is queued (not ringing yet)
                 <div className="w-3 h-3 bg-gray-400 rounded-full animate-pulse"></div>
               ) : (
@@ -1375,12 +1384,12 @@ export default function GlobalWebCallInterface() {
                   </div>
                 )}
                 {/* Call Status in Header - show for all active call states */}
-                {(callStatus || (isWebCallConnected || isConnected)) && (
+                {(displayCallStatus || (isWebCallConnected || isConnected)) && (
                   <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                    callStatus === 'in-progress' ? 'bg-green-500/30 text-green-100' :
-                    callStatus === 'ringing' ? 'bg-yellow-500/30 text-yellow-100' :
-                    callStatus === 'queued' ? 'bg-gray-500/30 text-gray-100' :
-                    callStatus === 'completed' ? 'bg-gray-500/30 text-gray-100' :
+                    displayCallStatus === 'in-progress' ? 'bg-green-500/30 text-green-100' :
+                    displayCallStatus === 'ringing' ? 'bg-yellow-500/30 text-yellow-100' :
+                    displayCallStatus === 'queued' ? 'bg-gray-500/30 text-gray-100' :
+                    displayCallStatus === 'completed' ? 'bg-gray-500/30 text-gray-100' :
                     'bg-red-500/30 text-red-100'
                   }`}>
                     {/* 
@@ -1390,16 +1399,16 @@ export default function GlobalWebCallInterface() {
                       - "In Progress": Customer answered, call active
                       - "Completed": Call ended (by customer or agent)
                     */}
-                    {callStatus === 'in-progress' ? 'In Progress' :
-                     callStatus === 'ringing' ? 'Ringing' :
-                     callStatus === 'queued' ? 'Queued' :
-                     callStatus === 'completed' ? 'Completed' :
-                     callStatus && !['in-progress', 'ringing', 'queued', 'completed'].includes(callStatus) ? callStatus :
-                     !callStatus && (isWebCallConnected || isConnected) ? 'Connecting' : ''}
+                    {displayCallStatus === 'in-progress' ? 'In Progress' :
+                     displayCallStatus === 'ringing' ? 'Ringing' :
+                     displayCallStatus === 'queued' ? 'Queued' :
+                     displayCallStatus === 'completed' ? 'Completed' :
+                     displayCallStatus && !['in-progress', 'ringing', 'queued', 'completed'].includes(displayCallStatus) ? displayCallStatus :
+                     !displayCallStatus && (isWebCallConnected || isConnected) ? 'Connecting' : ''}
                   </div>
                 )}
                 {/* Timer in Header - only show when in-progress */}
-                {callStatus === 'in-progress' && (
+                {displayCallStatus === 'in-progress' && (
                   <div className="text-xs font-bold text-white">
                     {formatTimer(durationToShow)}
                   </div>
@@ -1473,8 +1482,8 @@ export default function GlobalWebCallInterface() {
               </div>
             )}
 
-            {/* Connected State Info - Only show when call is in-progress */}
-            {(isWebCallConnected || isConnected) && callStatus === 'in-progress' && (
+            {/* Connected State Info - only when customer actually joined (real in-progress moment) */}
+            {(isWebCallConnected || isConnected) && displayCallStatus === 'in-progress' && (
               <div className="flex items-center gap-3 py-2 px-3 rounded-lg border mb-3 bg-green-50 border-green-200">
                 <div className="w-3 h-3 rounded-full animate-pulse bg-green-500"></div>
                 <div className="text-sm font-semibold text-green-700">
@@ -1495,20 +1504,35 @@ export default function GlobalWebCallInterface() {
                         ? (callMetadata?.customerName || p.name || callMetadata?.phoneNumber || 'Customer')
                         : (p.name || user?.name || 'Agent');
 
-                    const baseStatus = p.hold === true ? 'Hold' : p.muted === true ? 'Muted' : 'Active';
-                    const customerCallStatus =
-                      p.role === 'customer' ? (callStatus || (isWebCallConnected || isConnected ? 'in-progress' : null)) : null;
-                    const statusText =
-                      p.role === 'customer' && customerCallStatus
-                        ? `${baseStatus} • ${customerCallStatus}`
-                        : baseStatus;
+                    // Status priority: hold > muted > speaking > joined/ringing/connecting
+                    const stateText =
+                      p.hold === true
+                        ? 'Hold'
+                        : p.muted === true
+                          ? 'Muted'
+                          : p.speaking === true
+                            ? 'Speaking'
+                            : null;
+
+                    const roleStatus =
+                      p.role === 'customer'
+                        ? (p.joined ? 'Joined' : 'Ringing')
+                        : p.role === 'agent'
+                          ? (p.joined ? 'Joined' : (isWebCallConnected || isConnected) ? 'Connecting' : 'Connecting')
+                          : (p.joined ? 'Joined' : 'Connecting');
+
+                    const statusText = stateText || roleStatus;
 
                     const statusColor =
                       p.hold === true
                         ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
                         : p.muted === true
                           ? 'bg-orange-100 text-orange-800 border-orange-200'
-                          : 'bg-green-100 text-green-800 border-green-200';
+                          : p.speaking === true
+                            ? 'bg-green-100 text-green-800 border-green-200'
+                            : p.role === 'customer' && !p.joined
+                              ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
+                              : 'bg-blue-100 text-blue-800 border-blue-200';
 
                     return (
                       <div key={p.callSid} className="flex items-center justify-between text-xs text-gray-700">
@@ -1516,6 +1540,19 @@ export default function GlobalWebCallInterface() {
                           <span className="font-medium">{roleLabel}:</span> <span>{displayName}</span>
                         </div>
                         <div className="flex items-center gap-2">
+                          {p.speaking === true && (
+                            <svg
+                              className="w-4 h-4 text-green-600"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              aria-label="Speaking"
+                            >
+                              <path strokeWidth="2" strokeLinecap="round" d="M12 3v18" />
+                              <path strokeWidth="2" strokeLinecap="round" d="M8 7v10" />
+                              <path strokeWidth="2" strokeLinecap="round" d="M16 7v10" />
+                            </svg>
+                          )}
                           <span className={`text-[11px] px-2 py-0.5 rounded border ${statusColor}`}>
                             {statusText}
                           </span>

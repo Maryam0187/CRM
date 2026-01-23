@@ -23,17 +23,22 @@ const participantsSlice = createSlice({
         name = null,
         muted = null,
         hold = null,
+        joined = null,
+        speaking = null,
         timestamp = null,
       } = action.payload || {};
 
       if (!conferenceName || !callSid) return;
       const conf = ensureConference(state, conferenceName);
+      const existing = conf[callSid] || {};
       conf[callSid] = {
         callSid,
-        role,
-        name,
-        muted,
-        hold,
+        role: role ?? existing.role ?? 'unknown',
+        name: name ?? existing.name ?? null,
+        muted: muted ?? existing.muted ?? null,
+        hold: hold ?? existing.hold ?? null,
+        joined: joined ?? existing.joined ?? false,
+        speaking: speaking ?? existing.speaking ?? false,
         lastUpdatedAt: timestamp || new Date().toISOString(),
       };
     },

@@ -467,7 +467,15 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
 
         // START TIMER ON CUSTOMER JOIN:
         // Emit a synthetic call_status_update so the frontend starts the timer exactly when the customer joins.
-        if (participantRole === 'customer') {
+        // Only trigger "in-progress" from join when we're sure it's the real customer leg:
+        // - inbound conferences: allow (customer is the caller)
+        // - outbound conferences: only when participantId matches the tracked customer CallSid
+        const trackedCustomerSid = conferenceName ? customerCallSidMap.get(conferenceName) : null;
+        const allowSynthetic =
+          (conferenceName && String(conferenceName).startsWith('inbound-')) ||
+          (trackedCustomerSid && participantId === trackedCustomerSid);
+
+        if (participantRole === 'customer' && allowSynthetic) {
           try {
             if (!customerJoinBroadcastedMap.has(conferenceName)) {
               customerJoinBroadcastedMap.set(conferenceName, new Set());
