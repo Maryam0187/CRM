@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../../lib/sequelize-db';
+import { requireJWTAuth } from '../../../../../lib/jwtAuth.js';
 
 
 export async function GET(request, { params }) {
   try {
+    const auth = await requireJWTAuth(request);
+    if (auth.error) {
+      return NextResponse.json({ success: false, message: auth.error }, { status: auth.status });
+    }
+
     const { callSid } = params;
 
     if (!callSid) {

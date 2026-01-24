@@ -5,7 +5,6 @@ import { Op } from 'sequelize';
 import {
   customerCallSidMap,
   agentCallSidMap,
-  customerJoinBroadcastedMap,
 } from '../../../../lib/twilio/conferenceState.js';
 
 // Constants
@@ -67,6 +66,7 @@ function resolveParticipantRole({ conferenceName, participantId, rawFrom }) {
   const looksLikeAgent = !!(fromStr && fromStr.startsWith('client:'));
   const trackedAgentCallSid = conferenceName ? agentCallSidMap.get(conferenceName) : null;
   const isTrackedAgent = !!(trackedAgentCallSid && participantId && trackedAgentCallSid === participantId);
+  const looksLikePhone = !!(fromStr && isPhoneNumber(fromStr));
 
   // Strongest/earliest signals for agent:
   // - Voice SDK identity (`client:`)
@@ -84,7 +84,11 @@ function resolveParticipantRole({ conferenceName, participantId, rawFrom }) {
   // (Other agent legs should still be classified via `client:` when available.)
   if (trackedAgentCallSid && participantId && participantId !== trackedAgentCallSid) return 'customer';
 
-  return 'customer';
+  // If Twilio didn't give us `From` and we don't yet have either CallSid mapped,
+  // don't guess: mark as unknown to avoid "customer joined while ringing".
+  if (!fromStr) return 'unknown';
+  if (looksLikePhone) return 'customer';
+  return 'unknown';
 }
 
 // Helper: Normalize Twilio direction to database enum values
@@ -456,45 +460,9 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           timestamp
         });
 
-        // START TIMER ON CUSTOMER JOIN:
-        // Emit a synthetic call_status_update so the frontend starts the timer exactly when the customer joins.
-        // Only trigger "in-progress" from join when we're sure it's the real customer leg:
-        // - inbound conferences: allow (customer is the caller)
-        // - outbound conferences: only when participantId matches the tracked customer CallSid
-        const trackedCustomerSid = conferenceName ? customerCallSidMap.get(conferenceName) : null;
-        const allowSynthetic =
-          (conferenceName && String(conferenceName).startsWith('inbound-')) ||
-          (trackedCustomerSid && participantId === trackedCustomerSid);
-
-        if (participantRole === 'customer' && allowSynthetic) {
-          try {
-            if (!customerJoinBroadcastedMap.has(conferenceName)) {
-              customerJoinBroadcastedMap.set(conferenceName, new Set());
-            }
-            const sentSet = customerJoinBroadcastedMap.get(conferenceName);
-            if (!sentSet.has(participantId)) {
-              sentSet.add(participantId);
-
-              const statusData = {
-                callSid: participantId,
-                status: 'in-progress',
-                uiStatus: 'in-progress',
-                callbackType: 'conference',
-                conferenceName,
-                agentId: derivedAgentId || null,
-                // minimal fields for UI/timer logic
-                direction: 'outbound',
-              };
-
-              if (derivedAgentId) socketManager.sendCallStatusToAgent(derivedAgentId, participantId, statusData);
-              socketManager.sendCallStatusUpdate(participantId, statusData);
-              socketManager.sendCallStatusToSupervisors(participantId, statusData);
-              socketManager.sendCallStatusToRoom(`call_${participantId}`, participantId, statusData);
-            }
-          } catch (e) {
-            // ignore
-          }
-        }
+    // Do NOT emit synthetic "in-progress" from conference join.
+    // Twilio can place the PSTN leg into the Conference while still ringing,
+    // and the authoritative "answered/completed" state comes from call-status callbacks.
 
         // Also send updated conference status (participant count increased)
         // Note: We don't have exact count here, but we can indicate a participant joined
@@ -824,6 +792,7 @@ async function isCustomerCallSid(callSid, formData = null, conferenceName = null
   }
 }
 
+
 // Main POST handler - Handles both Call Status Callbacks and Conference Callbacks
 export async function POST(request) {
   try {
@@ -950,15 +919,11 @@ export async function POST(request) {
     } else {
       if (callStatus === 'answered') uiStatus = 'in-progress';
 
-      // Outbound: Twilio can send callStatus=in-progress early; keep ringing until answer evidence exists.
-      if (direction !== 'inbound' && callStatus === 'in-progress') {
-        const hasAnswerTime = !!(answerTime && String(answerTime).trim() !== '');
-        const hasAnsweredBy = !!(answeredBy && String(answeredBy).trim() !== '');
-        const hasDuration = !!(duration && parseInt(duration, 10) > 0);
-        if (!hasAnswerTime && !hasAnsweredBy && !hasDuration) {
-          uiStatus = 'ringing';
-        }
-      }
+    // For the customer PSTN leg (phone-number callbacks), treat `in-progress` as answered.
+    // (We already skip twiml-app agent-leg callbacks, so this is safe.)
+    if (webhookSource === 'phone-number' && callStatus === 'in-progress') {
+      uiStatus = 'in-progress';
+    }
 
       // (Inbound UI status logic is handled by the inbound callback route)
     }
@@ -1015,8 +980,15 @@ export async function POST(request) {
       direction
     });
     
+    // Broadcast using the effectiveCallSid we believe the UI is tracking.
     broadcastCallStatus(effectiveCallSid, statusData, agentId, webhookSource);
 
+    // Safety: for Dial callbacks, also broadcast on the parent CallSid so UIs tracking the parent
+    // still receive end statuses and disconnect correctly.
+    if (isDialCallback && callSid && callSid !== effectiveCallSid) {
+      const aliasStatusData = { ...statusData, callSid };
+      broadcastCallStatus(callSid, aliasStatusData, agentId, webhookSource);
+    }
 
     // Save to database ONLY when call ends (successfully or failed)
     // For Dial callbacks, we don't persist (we persist on the real call-status stream).
@@ -1031,9 +1003,6 @@ export async function POST(request) {
     if (isCallEnded && callStatusConferenceName && agentCallSidMap.has(callStatusConferenceName)) {
       agentCallSidMap.delete(callStatusConferenceName);
       console.log('🧹 Cleaned up tracked agent callSid for conference:', callStatusConferenceName);
-    }
-    if (isCallEnded && callStatusConferenceName && customerJoinBroadcastedMap.has(callStatusConferenceName)) {
-      customerJoinBroadcastedMap.delete(callStatusConferenceName);
     }
     
     // Only fetch call log when call ends (to check if it exists for update vs create)

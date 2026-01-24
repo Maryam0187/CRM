@@ -31,9 +31,17 @@ const participantsSlice = createSlice({
       if (!conferenceName || !callSid) return;
       const conf = ensureConference(state, conferenceName);
       const existing = conf[callSid] || {};
+
+      // Never downgrade an existing agent participant to customer due to imperfect backend role heuristics
+      // (e.g., early conference callbacks missing `From`).
+      const safeRole =
+        existing.role === 'agent' && role === 'customer'
+          ? existing.role
+          : role ?? existing.role ?? 'unknown';
+
       conf[callSid] = {
         callSid,
-        role: role ?? existing.role ?? 'unknown',
+        role: safeRole,
         name: name ?? existing.name ?? null,
         muted: muted ?? existing.muted ?? null,
         hold: hold ?? existing.hold ?? null,

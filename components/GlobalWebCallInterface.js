@@ -131,7 +131,10 @@ export default function GlobalWebCallInterface() {
         if (!agentSidReportedRef.current.has(key)) {
           agentSidReportedRef.current.add(key);
           apiClient
-            .post('/api/twilio/agent-call-sid', { conferenceName, agentCallSid: sid })
+            .post('/api/twilio/agent-call-sid', {
+              conferenceName,
+              agentCallSid: sid,
+            })
             .catch(() => {});
         }
       } catch (e) {

@@ -66,7 +66,7 @@ export async function POST(request) {
     // - Frontend connects the agent to that conference using Twilio Voice SDK.
 
     // Update agent status to busy (agent is starting an outbound attempt)
-   agent.update({ 
+    await agent.update({ 
       callStatus: 'busy',
       lastCallTime: new Date(),
       totalCalls: (agent.totalCalls || 0) + 1
@@ -107,7 +107,7 @@ export async function POST(request) {
       timeout,
       statusCallback: statusCallbackUrl.toString(),
       statusCallbackMethod: 'POST',
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
+      statusCallbackEvent: ['initiated', 'queued', 'ringing', 'answered', 'completed']
     });
 
     // Return call info for agent
