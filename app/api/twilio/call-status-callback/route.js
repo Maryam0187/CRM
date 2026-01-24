@@ -417,13 +417,16 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
 
       // Broadcast participant joined event
       if (conferenceName && participantId) {
+        // Only agents are always "joined" on join event.
         // For customer leg: consider "joined" true only when the customer call is truly in-progress.
-        // Twilio can emit participant-join for the customer leg before the call is answered.
+        // Unknown role should NOT be treated as joined; frontend will infer role using call_status_update.
         const uiForParticipant = participantRole === 'customer' ? latestUiStatusByCallSid.get(participantId) : null;
         const joined =
-          participantRole === 'customer'
-            ? uiForParticipant === 'in-progress'
-            : true;
+          participantRole === 'agent'
+            ? true
+            : participantRole === 'customer'
+              ? uiForParticipant === 'in-progress'
+              : false;
 
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'join',
@@ -449,7 +452,12 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
         // Also send updated conference status (participant count increased)
         // Note: We don't have exact count here, but we can indicate a participant joined
         socketManager.sendConferenceStatus(conferenceName, {
-          status: participantRole === 'customer' ? (joined ? 'in-progress' : 'ringing') : 'in-progress',
+          status:
+            participantRole === 'agent'
+              ? 'in-progress'
+              : participantRole === 'customer'
+                ? (joined ? 'in-progress' : 'ringing')
+                : 'ringing',
           conferenceSid,
           participantJoined: true,
           participantCallSid: callSid,

@@ -144,8 +144,17 @@ async function handleVoiceResponse(request) {
             : '/api/twilio/call-status-callback'
         );
 
-        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false" hangupOnStar="false">`;
-        twiml += `\n    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" maxParticipants="10" muted="false" statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${safeConferenceName}</Conference>`;
+        twiml += `\n  <Dial record="false" 
+        timeout="30" timeLimit="3600" 
+        answerOnMedia="false" 
+        hangupOnStar="false">`;
+        twiml += `\n    <Conference 
+        startConferenceOnEnter="true" 
+        endConferenceOnExit="true" 
+         maxParticipants="10"
+          muted="false" 
+          statusCallback="${conferenceCallbackUrl}" statusCallbackMethod="POST" 
+          statusCallbackEvent="start end join leave mute hold speaker">${safeConferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
         // If agent has phone, we could call them separately to join the conference

@@ -185,7 +185,7 @@ export async function POST(request) {
           url: warmTransferUrl,
           method: 'POST',
           statusCallback: `${baseUrl}/api/twilio/call-status-callback`,
-          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+          statusCallbackEvent: ['initiated', 'ringing', 'in-progress', 'answered', 'completed'],
           statusCallbackMethod: 'POST'
         });
 

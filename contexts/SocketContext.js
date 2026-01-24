@@ -49,6 +49,9 @@ export const SocketProvider = ({ children }) => {
   const conferenceUiStatusRef = useRef(new Map());
   // Track customer CallSid per conference from call_status_update (phone-number leg).
   const customerSidByConferenceRef = useRef(new Map());
+  // Track whether the customer is actually joined (answered) per conference.
+  // conferenceName -> boolean
+  const customerJoinedByConferenceRef = useRef(new Map());
 
   // Initialize socket connection
   useEffect(() => {
@@ -335,27 +338,8 @@ export const SocketProvider = ({ children }) => {
         if (data.conferenceName && endedStatuses.includes(statusForLifecycle)) {
           dispatch(clearConferenceParticipants({ conferenceName: data.conferenceName }));
           conferenceUiStatusRef.current.delete(data.conferenceName);
-        }
-      } catch (e) {
-        // ignore
-      }
-
-      // Ensure customer participant is present/marked joined once the call is truly in-progress.
-      // This fixes cases where conference join callbacks arrive without enough info (From/To missing),
-      // so the customer participant never gets classified as "customer" in Redux.
-      try {
-        const statusForUi = data.uiStatus || data.status;
-        if (statusForUi === 'in-progress' && data.conferenceName && data.callSid) {
-          dispatch(
-            upsertParticipant({
-              conferenceName: data.conferenceName,
-              callSid: data.callSid,
-              role: 'customer',
-              name: 'Customer',
-              joined: true,
-              timestamp: data.timestamp,
-            })
-          );
+          customerSidByConferenceRef.current.delete(data.conferenceName);
+          customerJoinedByConferenceRef.current.delete(data.conferenceName);
         }
       } catch (e) {
         // ignore
@@ -397,7 +381,8 @@ export const SocketProvider = ({ children }) => {
         // Twilio can emit speech_start due to background/comfort noise while customer is still ringing.
         if (data.event === 'speech_start' || data.event === 'speech_stop' || data.event === 'speaker') {
           const confStatus = conferenceName ? conferenceUiStatusRef.current.get(conferenceName) : null;
-          if (confStatus !== 'in-progress') {
+          const customerJoined = conferenceName ? customerJoinedByConferenceRef.current.get(conferenceName) : false;
+          if (confStatus !== 'in-progress' || !customerJoined) {
             return;
           }
         }
@@ -407,8 +392,13 @@ export const SocketProvider = ({ children }) => {
         if (data.event === 'end') {
           if (conferenceName) dispatch(clearConferenceParticipants({ conferenceName }));
           if (conferenceName) conferenceUiStatusRef.current.delete(conferenceName);
+          if (conferenceName) customerSidByConferenceRef.current.delete(conferenceName);
+          if (conferenceName) customerJoinedByConferenceRef.current.delete(conferenceName);
         } else if (data.event === 'leave') {
           if (conferenceName && participantId) dispatch(removeParticipant({ conferenceName, callSid: participantId }));
+          if (conferenceName && role === 'customer') {
+            customerJoinedByConferenceRef.current.delete(conferenceName);
+          }
         } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold' || data.event === 'unmute' || data.event === 'unhold') {
           if (conferenceName && participantId) {
             const confStatus = conferenceName ? conferenceUiStatusRef.current.get(conferenceName) : null;
@@ -418,6 +408,10 @@ export const SocketProvider = ({ children }) => {
                 : (data.event === 'join'
                     ? (role === 'customer' ? confStatus === 'in-progress' : true)
                     : null);
+
+            if (data.event === 'join' && role === 'customer' && joinedForEvent === true) {
+              customerJoinedByConferenceRef.current.set(conferenceName, true);
+            }
             dispatch(
               upsertParticipant({
                 conferenceName,

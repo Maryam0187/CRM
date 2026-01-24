@@ -107,7 +107,7 @@ export async function POST(request) {
       timeout,
       statusCallback: statusCallbackUrl.toString(),
       statusCallbackMethod: 'POST',
-      statusCallbackEvent: ['initiated', 'queued', 'ringing', 'answered', 'completed']
+      statusCallbackEvent: ['initiated', 'queued', 'in-progress', 'ringing', 'answered', 'completed']
     });
 
     // Return call info for agent
