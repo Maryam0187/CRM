@@ -10,6 +10,7 @@ import {
   upsertParticipant,
   removeParticipant,
   clearConferenceParticipants,
+  setSpeakingExclusive,
 } from '../store/slices/participantsSlice';
 import { useToast } from './ToastContext';
 
@@ -350,7 +351,7 @@ export const SocketProvider = ({ children }) => {
           if (conferenceName) dispatch(clearConferenceParticipants({ conferenceName }));
         } else if (data.event === 'leave') {
           if (conferenceName && participantId) dispatch(removeParticipant({ conferenceName, callSid: participantId }));
-        } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold') {
+        } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold' || data.event === 'unmute' || data.event === 'unhold') {
           if (conferenceName && participantId) {
             dispatch(
               upsertParticipant({
@@ -359,8 +360,8 @@ export const SocketProvider = ({ children }) => {
                 role,
                 name,
                 joined: data.event === 'join' ? true : null,
-                muted: typeof data.muted === 'boolean' ? data.muted : null,
-                hold: typeof data.hold === 'boolean' ? data.hold : null,
+                muted: data.event === 'unmute' ? false : typeof data.muted === 'boolean' ? data.muted : null,
+                hold: data.event === 'unhold' ? false : typeof data.hold === 'boolean' ? data.hold : null,
                 timestamp: data.timestamp,
               })
             );
@@ -368,7 +369,7 @@ export const SocketProvider = ({ children }) => {
         } else if (data.event === 'speech_start' || data.event === 'speech_stop') {
           if (conferenceName && participantId) {
             dispatch(
-              upsertParticipant({
+              setSpeakingExclusive({
                 conferenceName,
                 callSid: participantId,
                 speaking: data.event === 'speech_start',

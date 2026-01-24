@@ -55,10 +55,37 @@ const participantsSlice = createSlice({
       if (!conferenceName) return;
       delete state.byConference[conferenceName];
     },
+
+    // Ensure only one participant is marked as speaking at a time (per conference)
+    setSpeakingExclusive: (state, action) => {
+      const { conferenceName, callSid, speaking, timestamp } = action.payload || {};
+      if (!conferenceName || !callSid) return;
+      const conf = ensureConference(state, conferenceName);
+      Object.keys(conf).forEach((sid) => {
+        conf[sid] = {
+          ...conf[sid],
+          speaking: sid === callSid ? !!speaking : false,
+          lastUpdatedAt: timestamp || conf[sid]?.lastUpdatedAt || new Date().toISOString(),
+        };
+      });
+      // If the participant isn't yet in map, add it (minimal)
+      if (!conf[callSid]) {
+        conf[callSid] = {
+          callSid,
+          role: 'unknown',
+          name: null,
+          muted: null,
+          hold: null,
+          joined: false,
+          speaking: !!speaking,
+          lastUpdatedAt: timestamp || new Date().toISOString(),
+        };
+      }
+    },
   },
 });
 
-export const { upsertParticipant, removeParticipant, clearConferenceParticipants } =
+export const { upsertParticipant, removeParticipant, clearConferenceParticipants, setSpeakingExclusive } =
   participantsSlice.actions;
 
 export default participantsSlice.reducer;

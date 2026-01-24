@@ -1505,12 +1505,13 @@ export default function GlobalWebCallInterface() {
                         : (p.name || user?.name || 'Agent');
 
                     // Status priority: hold > muted > speaking > joined/ringing/connecting
+                    const canShowSpeaking = displayCallStatus === 'in-progress' && p.joined === true;
                     const stateText =
                       p.hold === true
                         ? 'Hold'
                         : p.muted === true
                           ? 'Muted'
-                          : p.speaking === true
+                          : canShowSpeaking && p.speaking === true
                             ? 'Speaking'
                             : null;
 
@@ -1540,7 +1541,7 @@ export default function GlobalWebCallInterface() {
                           <span className="font-medium">{roleLabel}:</span> <span>{displayName}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          {p.speaking === true && (
+                          {canShowSpeaking && p.speaking === true && (
                             <svg
                               className="w-4 h-4 text-green-600"
                               viewBox="0 0 24 24"
