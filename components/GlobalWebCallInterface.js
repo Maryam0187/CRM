@@ -104,6 +104,19 @@ export default function GlobalWebCallInterface() {
   })();
 
   const customerAnswered = displayCallStatus === 'in-progress';
+  const customerConferenceJoined = !!participants.find((p) => p.role === 'customer' && p.joined === true);
+
+  // Optional debug: enable by running in DevTools:
+  // localStorage.setItem('debugParticipants', '1'); location.reload();
+  useEffect(() => {
+    if (!conferenceName) return;
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('debugParticipants') !== '1') return;
+    console.log('📌 [PARTICIPANTS REDUX MAP]', {
+      conferenceName,
+      participantsBySid,
+    });
+  }, [conferenceName, participantsBySid]);
 
   // Capture agent CallSid from Twilio Voice SDK call object and store in Redux
   const agentSidReportedRef = useRef(new Set());
@@ -1519,7 +1532,9 @@ export default function GlobalWebCallInterface() {
                         : (p.name || user?.name || 'Agent');
 
                     // Status priority: hold > muted > speaking > joined/ringing/connecting
-                    const canShowSpeaking = displayCallStatus === 'in-progress' && p.joined === true;
+                    // Only show "Speaking" after the customer has actually joined (prevents early noise while ringing).
+                    const canShowSpeaking =
+                      displayCallStatus === 'in-progress' && customerConferenceJoined && p.joined === true;
                     const stateText =
                       p.hold === true
                         ? 'Hold'

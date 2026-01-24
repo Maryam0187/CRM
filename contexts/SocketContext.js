@@ -47,6 +47,8 @@ export const SocketProvider = ({ children }) => {
   // Track current call lifecycle status per conference to ignore speech noise before customer answers.
   // conferenceName -> uiStatus/status
   const conferenceUiStatusRef = useRef(new Map());
+  // Track customer CallSid per conference from call_status_update (phone-number leg).
+  const customerSidByConferenceRef = useRef(new Map());
 
   // Initialize socket connection
   useEffect(() => {
@@ -318,6 +320,10 @@ export const SocketProvider = ({ children }) => {
         if (confName && s) {
           conferenceUiStatusRef.current.set(confName, s);
         }
+        // Track customer sid from phone-number callbacks so we can classify conference participants on the frontend.
+        if (confName && data.webhookSource === 'phone-number' && data.callSid) {
+          customerSidByConferenceRef.current.set(confName, data.callSid);
+        }
       } catch (e) {
         // ignore
       }
@@ -329,6 +335,27 @@ export const SocketProvider = ({ children }) => {
         if (data.conferenceName && endedStatuses.includes(statusForLifecycle)) {
           dispatch(clearConferenceParticipants({ conferenceName: data.conferenceName }));
           conferenceUiStatusRef.current.delete(data.conferenceName);
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      // Ensure customer participant is present/marked joined once the call is truly in-progress.
+      // This fixes cases where conference join callbacks arrive without enough info (From/To missing),
+      // so the customer participant never gets classified as "customer" in Redux.
+      try {
+        const statusForUi = data.uiStatus || data.status;
+        if (statusForUi === 'in-progress' && data.conferenceName && data.callSid) {
+          dispatch(
+            upsertParticipant({
+              conferenceName: data.conferenceName,
+              callSid: data.callSid,
+              role: 'customer',
+              name: 'Customer',
+              joined: true,
+              timestamp: data.timestamp,
+            })
+          );
         }
       } catch (e) {
         // ignore
@@ -357,7 +384,13 @@ export const SocketProvider = ({ children }) => {
       try {
         const conferenceName = data.conferenceName;
         const participantId = data.participantCallSid || data.callSid;
-        const role = data.participantRole || 'unknown';
+        const fromStr = data.from ? String(data.from) : '';
+        const inferredRole = fromStr.startsWith('client:')
+          ? 'agent'
+          : (conferenceName && participantId && customerSidByConferenceRef.current.get(conferenceName) === participantId)
+            ? 'customer'
+            : 'unknown';
+        const role = inferredRole;
         const name = data.participantName || null;
 
         // Ignore speech/speaker events until call is truly in-progress (customer answered).
@@ -378,13 +411,20 @@ export const SocketProvider = ({ children }) => {
           if (conferenceName && participantId) dispatch(removeParticipant({ conferenceName, callSid: participantId }));
         } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold' || data.event === 'unmute' || data.event === 'unhold') {
           if (conferenceName && participantId) {
+            const confStatus = conferenceName ? conferenceUiStatusRef.current.get(conferenceName) : null;
+            const joinedForEvent =
+              typeof data.joined === 'boolean'
+                ? data.joined
+                : (data.event === 'join'
+                    ? (role === 'customer' ? confStatus === 'in-progress' : true)
+                    : null);
             dispatch(
               upsertParticipant({
                 conferenceName,
                 callSid: participantId,
                 role,
                 name,
-                joined: data.event === 'join' ? true : null,
+                joined: joinedForEvent,
                 muted: data.event === 'unmute' ? false : typeof data.muted === 'boolean' ? data.muted : null,
                 hold: data.event === 'unhold' ? false : typeof data.hold === 'boolean' ? data.hold : null,
                 timestamp: data.timestamp,
