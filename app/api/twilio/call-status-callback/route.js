@@ -16,6 +16,8 @@ const agentNameCache = new Map(); // agentId -> "First Last"
 // Track which customer CallSids have definitively answered (via CallStatus=answered).
 // Avoid relying on AnswerTime (often missing) and avoid treating early/false `in-progress` as answered.
 const answeredCallSidSet = new Set();
+// Track whether we've seen a pre-answer state for a customer PSTN callSid (queued/ringing).
+const seenPreAnswerByCallSid = new Set();
 
 async function resolveAgentDisplayName(agentId) {
   if (!agentId) return null;
@@ -923,14 +925,23 @@ export async function POST(request) {
     } else {
       if (callStatus === 'answered') uiStatus = 'in-progress';
 
-      // Outbound: Twilio sometimes sends callStatus=in-progress early; don't rely on AnswerTime (often missing).
-      // For the customer PSTN leg (phone-number), only allow "in-progress" after we saw an "answered" callback.
+      // Outbound customer PSTN leg (phone-number):
+      // Avoid relying on AnswerTime. Also avoid early/false `in-progress` while customer is still ringing.
+      // Rule:
+      // - once we've observed queued/ringing for this CallSid, allow in-progress
+      // - otherwise keep ringing
       if (webhookSource === 'phone-number' && direction !== 'inbound') {
-        if (callStatus === 'answered') {
-          answeredCallSidSet.add(effectiveCallSid);
-          uiStatus = 'in-progress';
-        } else if (callStatus === 'in-progress') {
-          uiStatus = answeredCallSidSet.has(effectiveCallSid) ? 'in-progress' : 'ringing';
+        if (callStatus === 'queued' || callStatus === 'initiated' || callStatus === 'ringing') {
+          seenPreAnswerByCallSid.add(effectiveCallSid);
+          uiStatus = 'ringing';
+        }
+        if (callStatus === 'in-progress') {
+          if (seenPreAnswerByCallSid.has(effectiveCallSid)) {
+            answeredCallSidSet.add(effectiveCallSid);
+            uiStatus = 'in-progress';
+          } else {
+            uiStatus = 'ringing';
+          }
         }
       }
 
@@ -1015,6 +1026,7 @@ export async function POST(request) {
     }
     if (isCallEnded && effectiveCallSid) {
       answeredCallSidSet.delete(effectiveCallSid);
+      seenPreAnswerByCallSid.delete(effectiveCallSid);
     }
     
     // Only fetch call log when call ends (to check if it exists for update vs create)
