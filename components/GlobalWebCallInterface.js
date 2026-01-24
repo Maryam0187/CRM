@@ -68,6 +68,7 @@ export default function GlobalWebCallInterface() {
     
     // Actions
     updateCallStatus,
+    setCurrentCallSid,
     setWebCallInterfaceRef,
     callConnected,
     endCall,
