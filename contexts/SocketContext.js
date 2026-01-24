@@ -44,6 +44,9 @@ export const SocketProvider = ({ children }) => {
   const socketInitializedRef = useRef(false);
   // Track last dispatched status updates to prevent duplicates
   const lastDispatchedStatusRef = useRef(new Map());
+  // Track current call lifecycle status per conference to ignore speech noise before customer answers.
+  // conferenceName -> uiStatus/status
+  const conferenceUiStatusRef = useRef(new Map());
 
   // Initialize socket connection
   useEffect(() => {
@@ -308,12 +311,24 @@ export const SocketProvider = ({ children }) => {
         return newMap;
       });
 
+      // Track conference status for gating speech/speaker events (we only care about in-progress).
+      try {
+        const confName = data.conferenceName;
+        const s = data.uiStatus || data.status;
+        if (confName && s) {
+          conferenceUiStatusRef.current.set(confName, s);
+        }
+      } catch (e) {
+        // ignore
+      }
+
       // Clear participant mapping when call ends (so UI resets cleanly)
       try {
         const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
         const statusForLifecycle = data.uiStatus || data.status;
         if (data.conferenceName && endedStatuses.includes(statusForLifecycle)) {
           dispatch(clearConferenceParticipants({ conferenceName: data.conferenceName }));
+          conferenceUiStatusRef.current.delete(data.conferenceName);
         }
       } catch (e) {
         // ignore
@@ -345,10 +360,20 @@ export const SocketProvider = ({ children }) => {
         const role = data.participantRole || 'unknown';
         const name = data.participantName || null;
 
+        // Ignore speech/speaker events until call is truly in-progress (customer answered).
+        // Twilio can emit speech_start due to background/comfort noise while customer is still ringing.
+        if (data.event === 'speech_start' || data.event === 'speech_stop' || data.event === 'speaker') {
+          const confStatus = conferenceName ? conferenceUiStatusRef.current.get(conferenceName) : null;
+          if (confStatus !== 'in-progress') {
+            return;
+          }
+        }
+
         // NOTE: Twilio may emit `conference-start` AFTER the first participant joins.
         // If we clear on `start`, we can accidentally delete the already-joined agent.
         if (data.event === 'end') {
           if (conferenceName) dispatch(clearConferenceParticipants({ conferenceName }));
+          if (conferenceName) conferenceUiStatusRef.current.delete(conferenceName);
         } else if (data.event === 'leave') {
           if (conferenceName && participantId) dispatch(removeParticipant({ conferenceName, callSid: participantId }));
         } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold' || data.event === 'unmute' || data.event === 'unhold') {

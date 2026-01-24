@@ -86,13 +86,23 @@ export default function GlobalWebCallInterface() {
   );
   const participants = Object.values(participantsBySid || {});
   const callEndedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
-  // UI should only show "in-progress" when the backend says so (customer answered),
-  // not merely when a participant is marked as joined (role heuristics can be wrong).
-  const normalizedCallStatus = callStatus === 'queued' ? 'ringing' : callStatus;
-  const displayCallStatus =
-    normalizedCallStatus && callEndedStatuses.includes(normalizedCallStatus)
-      ? normalizedCallStatus
-      : normalizedCallStatus || (isCalling ? 'ringing' : 'ringing');
+
+  // Keep UI simple and correct:
+  // - show Waiting/Queued before customer answers
+  // - show Ringing while customer phone is ringing
+  // - show In-progress only when backend says so (customer answered)
+  // Never infer "in-progress" from participant join events.
+  const displayCallStatus = (() => {
+    if (callStatus && callEndedStatuses.includes(callStatus)) return callStatus;
+    if (callStatus === 'in-progress') return 'in-progress';
+    if (callStatus === 'ringing') return 'ringing';
+    if (callStatus === 'queued' || callStatus === 'initiated' || !callStatus) {
+      return isCalling ? 'queued' : 'queued';
+    }
+    // default fallback
+    return 'queued';
+  })();
+
   const customerAnswered = displayCallStatus === 'in-progress';
 
   // Capture agent CallSid from Twilio Voice SDK call object and store in Redux
@@ -1521,7 +1531,7 @@ export default function GlobalWebCallInterface() {
 
                     const roleStatus =
                       p.role === 'customer'
-                        ? (customerAnswered ? 'Joined' : 'Ringing')
+                        ? (customerAnswered ? 'Joined' : displayCallStatus === 'queued' ? 'Waiting' : 'Ringing')
                         : p.role === 'agent'
                           ? ((isWebCallConnected || isConnected) ? 'Joined' : 'Connecting')
                           : (p.joined ? 'Joined' : 'Connecting');

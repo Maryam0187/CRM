@@ -13,6 +13,10 @@ const ERROR_STATUSES = ['failed', 'busy', 'no-answer', 'canceled'];
 
 const agentNameCache = new Map(); // agentId -> "First Last"
 
+// Track which customer CallSids have definitively answered (via CallStatus=answered).
+// Avoid relying on AnswerTime (often missing) and avoid treating early/false `in-progress` as answered.
+const answeredCallSidSet = new Set();
+
 async function resolveAgentDisplayName(agentId) {
   if (!agentId) return null;
   if (agentNameCache.has(agentId)) return agentNameCache.get(agentId);
@@ -919,11 +923,16 @@ export async function POST(request) {
     } else {
       if (callStatus === 'answered') uiStatus = 'in-progress';
 
-    // For the customer PSTN leg (phone-number callbacks), treat `in-progress` as answered.
-    // (We already skip twiml-app agent-leg callbacks, so this is safe.)
-    if (webhookSource === 'phone-number' && callStatus === 'in-progress') {
-      uiStatus = 'in-progress';
-    }
+      // Outbound: Twilio sometimes sends callStatus=in-progress early; don't rely on AnswerTime (often missing).
+      // For the customer PSTN leg (phone-number), only allow "in-progress" after we saw an "answered" callback.
+      if (webhookSource === 'phone-number' && direction !== 'inbound') {
+        if (callStatus === 'answered') {
+          answeredCallSidSet.add(effectiveCallSid);
+          uiStatus = 'in-progress';
+        } else if (callStatus === 'in-progress') {
+          uiStatus = answeredCallSidSet.has(effectiveCallSid) ? 'in-progress' : 'ringing';
+        }
+      }
 
       // (Inbound UI status logic is handled by the inbound callback route)
     }
@@ -1003,6 +1012,9 @@ export async function POST(request) {
     if (isCallEnded && callStatusConferenceName && agentCallSidMap.has(callStatusConferenceName)) {
       agentCallSidMap.delete(callStatusConferenceName);
       console.log('🧹 Cleaned up tracked agent callSid for conference:', callStatusConferenceName);
+    }
+    if (isCallEnded && effectiveCallSid) {
+      answeredCallSidSet.delete(effectiveCallSid);
     }
     
     // Only fetch call log when call ends (to check if it exists for update vs create)
