@@ -2,23 +2,16 @@ import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import socketManager from '../../../../lib/socket';
 import { Op } from 'sequelize';
+import {
+  customerCallSidMap,
+  agentCallSidMap,
+  customerJoinBroadcastedMap,
+} from '../../../../lib/twilio/conferenceState.js';
 
 // Constants
 const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
 const ERROR_STATUSES = ['failed', 'busy', 'no-answer', 'canceled'];
 
-// In-memory store to track customer callSids from call-status callbacks
-// Maps conferenceName -> customerCallSid
-// This helps us identify customer when they join conference
-const customerCallSidMap = new Map();
-// Track agent leg CallSid per conference (learned from TwiML-App call-status callbacks)
-// Maps conferenceName -> agentCallSid
-const agentCallSidMap = new Map();
-// Avoid spamming synthetic "in-progress" from conference join
-const customerJoinBroadcastedMap = new Map(); // conferenceName -> Set(participantId)
-// Heuristic for outbound conferences when Twilio conference callbacks omit `From`:
-// first join into `call-<agentId>` is the agent, second join is the customer.
-const outboundFirstJoinMap = new Map(); // conferenceName -> participantId
 const agentNameCache = new Map(); // agentId -> "First Last"
 
 async function resolveAgentDisplayName(agentId) {
@@ -72,7 +65,13 @@ function normalizeConferenceEventName(eventName) {
 function resolveParticipantRole({ conferenceName, participantId, rawFrom }) {
   const fromStr = rawFrom ? String(rawFrom) : '';
   const looksLikeAgent = !!(fromStr && fromStr.startsWith('client:'));
-  const trackedAgent = !!(conferenceName && participantId && agentCallSidMap.get(conferenceName) === participantId);
+  const trackedAgentCallSid = conferenceName ? agentCallSidMap.get(conferenceName) : null;
+  const isTrackedAgent = !!(trackedAgentCallSid && participantId && trackedAgentCallSid === participantId);
+
+  // Strongest/earliest signals for agent:
+  // - Voice SDK identity (`client:`)
+  // - a known agent CallSid for this conference (reported from the frontend Voice SDK)
+  if (looksLikeAgent || isTrackedAgent) return 'agent';
 
   // Strongest signal: if we already know the customer CallSid for this conference,
   // then any other participant is the agent.
@@ -81,18 +80,10 @@ function resolveParticipantRole({ conferenceName, participantId, rawFrom }) {
     return participantId === trackedCustomerCallSid ? 'customer' : 'agent';
   }
 
-  // Outbound conference heuristic: if this is a call-<id> conference and we don't yet know customer CallSid,
-  // treat the first join as agent and any subsequent join as customer.
-  if (conferenceName && participantId && /^call-\d+$/.test(conferenceName)) {
-    const first = outboundFirstJoinMap.get(conferenceName);
-    if (!first) {
-      outboundFirstJoinMap.set(conferenceName, participantId);
-      return 'agent';
-    }
-    return participantId === first ? 'agent' : 'customer';
-  }
+  // If we know the agent CallSid but not the customer yet, anything else is assumed to be customer.
+  // (Other agent legs should still be classified via `client:` when available.)
+  if (trackedAgentCallSid && participantId && participantId !== trackedAgentCallSid) return 'customer';
 
-  if (trackedAgent || looksLikeAgent) return 'agent';
   return 'customer';
 }
 
@@ -915,18 +906,6 @@ export async function POST(request) {
     // Those can come from a TwiML App context, so we always accept Dial callbacks.
     const isCustomer = isDialCallback || isCustomerLeg(from, to);
     if (!isCustomer) {
-      // IMPORTANT: even though we don't broadcast agent leg call-status callbacks,
-      // we still want to learn the agent CallSid so we can correctly identify the agent
-      // in later conference callbacks (where `From` may be missing).
-      try {
-        const conf = String(to || '').trim();
-        if (webhookSource === 'twiml-app' && conf && (conf.startsWith('call-') || conf.startsWith('inbound-')) && effectiveCallSid) {
-          agentCallSidMap.set(conf, effectiveCallSid);
-        }
-      } catch (e) {
-        // ignore
-      }
-
       console.log(`⏭️ Skipping ${webhookSource} callback (agent browser connection):`, { 
         callSid: effectiveCallSid, 
         from, 
@@ -1055,9 +1034,6 @@ export async function POST(request) {
     }
     if (isCallEnded && callStatusConferenceName && customerJoinBroadcastedMap.has(callStatusConferenceName)) {
       customerJoinBroadcastedMap.delete(callStatusConferenceName);
-    }
-    if (isCallEnded && callStatusConferenceName && outboundFirstJoinMap.has(callStatusConferenceName)) {
-      outboundFirstJoinMap.delete(callStatusConferenceName);
     }
     
     // Only fetch call log when call ends (to check if it exists for update vs create)

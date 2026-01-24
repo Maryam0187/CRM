@@ -85,28 +85,20 @@ export default function GlobalWebCallInterface() {
     (state) => (conferenceName && state?.participants?.byConference?.[conferenceName]) || {}
   );
   const participants = Object.values(participantsBySid || {});
-  const customerParticipant = participants.find((p) => p.role === 'customer') || null;
-  const customerJoined = !!customerParticipant?.joined;
   const callEndedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+  // UI should only show "in-progress" when the backend says so (customer answered),
+  // not merely when a participant is marked as joined (role heuristics can be wrong).
+  const normalizedCallStatus = callStatus === 'queued' ? 'ringing' : callStatus;
   const displayCallStatus =
-    callStatus && callEndedStatuses.includes(callStatus)
-      ? callStatus
-      : customerJoined
-        ? 'in-progress'
-        : 'ringing';
-
-  // Debug: log participant redux mapping (helps verify agent/customer classification)
-  useEffect(() => {
-    if (!conferenceName) return;
-    console.log('📌 [PARTICIPANTS REDUX MAP]', {
-      conferenceName,
-      participantsBySid,
-    });
-  }, [conferenceName, participantsBySid]);
+    normalizedCallStatus && callEndedStatuses.includes(normalizedCallStatus)
+      ? normalizedCallStatus
+      : normalizedCallStatus || (isCalling ? 'ringing' : 'ringing');
+  const customerAnswered = displayCallStatus === 'in-progress';
 
   // Capture agent CallSid from Twilio Voice SDK call object and store in Redux
+  const agentSidReportedRef = useRef(new Set());
   const captureAgentCallSid = useCallback(
-    (callObj) => {
+    (callObj, opts = {}) => {
       try {
         if (!conferenceName || !callObj) return;
         const raw =
@@ -116,7 +108,7 @@ export default function GlobalWebCallInterface() {
           null;
         const sid = raw ? String(raw) : null;
         if (!sid || !sid.startsWith('CA')) return; // only store real Twilio CallSids
-        if (participantsBySid?.[sid]) return; // already stored
+        const markJoined = typeof opts.joined === 'boolean' ? opts.joined : null;
 
         dispatch(
           upsertParticipant({
@@ -129,16 +121,24 @@ export default function GlobalWebCallInterface() {
               'Agent',
             muted: false,
             hold: false,
+            joined: markJoined,
             timestamp: new Date().toISOString(),
           })
         );
 
-        console.log('🧩 [AGENT CALLSID]', { conferenceName, callSid: sid });
+        // Report agent CallSid to backend so it can reliably classify participants in conference callbacks.
+        const key = `${conferenceName}:${sid}`;
+        if (!agentSidReportedRef.current.has(key)) {
+          agentSidReportedRef.current.add(key);
+          apiClient
+            .post('/api/twilio/agent-call-sid', { conferenceName, agentCallSid: sid })
+            .catch(() => {});
+        }
       } catch (e) {
         // ignore
       }
     },
-    [conferenceName, dispatch, participantsBySid, user?.firstName, user?.lastName, user?.name]
+    [conferenceName, dispatch, user?.firstName, user?.lastName, user?.name]
   );
   
   const { getCallStatus } = useSocket();
@@ -588,7 +588,6 @@ export default function GlobalWebCallInterface() {
         throw new Error('Failed to get call object from promise');
       }
 
-      console.log('📞 Call object created:', call);
       // Agent leg CallSid becomes available on the SDK Call object once Twilio creates the leg.
       // Capture it as early as possible so agent shows up in participant mapping even if conference callbacks omit `From`.
       captureAgentCallSid(call);
@@ -599,7 +598,8 @@ export default function GlobalWebCallInterface() {
         const attachEvents = (callObj) => {
           const onAccept = () => {
             console.log('✅ Call accepted - connected to conference');
-            captureAgentCallSid(callObj);
+            // Mark agent as joined once SDK connects.
+            captureAgentCallSid(callObj, { joined: true });
             if (!isConnected) {
               setIsConnected(true);
               setIsConnecting(false);
@@ -1518,9 +1518,9 @@ export default function GlobalWebCallInterface() {
 
                     const roleStatus =
                       p.role === 'customer'
-                        ? (p.joined ? 'Joined' : 'Ringing')
+                        ? (customerAnswered ? 'Joined' : 'Ringing')
                         : p.role === 'agent'
-                          ? (p.joined ? 'Joined' : (isWebCallConnected || isConnected) ? 'Connecting' : 'Connecting')
+                          ? ((isWebCallConnected || isConnected) ? 'Joined' : 'Connecting')
                           : (p.joined ? 'Joined' : 'Connecting');
 
                     const statusText = stateText || roleStatus;
@@ -1530,9 +1530,9 @@ export default function GlobalWebCallInterface() {
                         ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
                         : p.muted === true
                           ? 'bg-orange-100 text-orange-800 border-orange-200'
-                          : p.speaking === true
+                          : (canShowSpeaking && p.speaking === true)
                             ? 'bg-green-100 text-green-800 border-green-200'
-                            : p.role === 'customer' && !p.joined
+                            : p.role === 'customer' && !customerAnswered
                               ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
                               : 'bg-blue-100 text-blue-800 border-blue-200';
 
