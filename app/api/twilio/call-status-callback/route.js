@@ -99,33 +99,74 @@ function normalizeConferenceEventName(eventName) {
   return { event: e || 'unknown', eventRaw: raw };
 }
 
-function resolveParticipantRole({ conferenceName, participantId, rawFrom }) {
+function resolveParticipantRole({ conferenceName, participantId, rawFrom, agentIdFromUrl }) {
   const fromStr = rawFrom ? String(rawFrom) : '';
   const looksLikeAgent = !!(fromStr && fromStr.startsWith('client:'));
   const trackedAgentCallSid = conferenceName ? agentCallSidMap.get(conferenceName) : null;
   const isTrackedAgent = !!(trackedAgentCallSid && participantId && trackedAgentCallSid === participantId);
   const looksLikePhone = !!(fromStr && isPhoneNumber(fromStr));
+  const trackedCustomerCallSid = conferenceName ? customerCallSidMap.get(conferenceName) : null;
+  const isTrackedCustomer = !!(trackedCustomerCallSid && participantId && trackedCustomerCallSid === participantId);
+  
+  // Enhanced logging for debugging participant role resolution
+  console.log('🔍 [ROLE RESOLUTION] Resolving participant role:', {
+    conferenceName,
+    participantId: participantId ? participantId.substring(0, 15) + '...' : null,
+    rawFrom: fromStr ? (fromStr.length > 20 ? fromStr.substring(0, 20) + '...' : fromStr) : null,
+    trackedCustomerCallSid: trackedCustomerCallSid ? trackedCustomerCallSid.substring(0, 15) + '...' : 'NOT_TRACKED',
+    trackedAgentCallSid: trackedAgentCallSid ? trackedAgentCallSid.substring(0, 15) + '...' : 'NOT_TRACKED',
+    looksLikeAgent,
+    looksLikePhone,
+    isTrackedAgent,
+    isTrackedCustomer
+  });
 
   // Strongest/earliest signals for agent:
   // - Voice SDK identity (`client:`)
   // - a known agent CallSid for this conference (reported from the frontend Voice SDK)
-  if (looksLikeAgent || isTrackedAgent) return 'agent';
+  if (looksLikeAgent || isTrackedAgent) {
+    console.log('✅ [ROLE RESOLUTION] Identified as AGENT (client: prefix or tracked agent)');
+    return 'agent';
+  }
+
+  // PRIORITY: Check if this is the tracked customer CallSid
+  if (isTrackedCustomer) {
+    console.log('✅ [ROLE RESOLUTION] Identified as CUSTOMER (tracked customer CallSid match)');
+    return 'customer';
+  }
 
   // Strongest signal: if we already know the customer CallSid for this conference,
   // then any other participant is the agent.
-  const trackedCustomerCallSid = conferenceName ? customerCallSidMap.get(conferenceName) : null;
-  if (trackedCustomerCallSid && participantId) {
-    return participantId === trackedCustomerCallSid ? 'customer' : 'agent';
+  if (trackedCustomerCallSid && participantId && participantId !== trackedCustomerCallSid) {
+    console.log('✅ [ROLE RESOLUTION] Identified as AGENT (not the tracked customer)');
+    return 'agent';
   }
 
   // If we know the agent CallSid but not the customer yet, anything else is assumed to be customer.
   // (Other agent legs should still be classified via `client:` when available.)
-  if (trackedAgentCallSid && participantId && participantId !== trackedAgentCallSid) return 'customer';
+  if (trackedAgentCallSid && participantId && participantId !== trackedAgentCallSid) {
+    console.log('✅ [ROLE RESOLUTION] Identified as CUSTOMER (not the tracked agent)');
+    return 'customer';
+  }
+
+  // Fallback: if we have an agentId from URL and no tracked SIDs, try to infer
+  // If participantId looks like a phone number (customer PSTN leg creates such SIDs), it's likely customer
+  if (agentIdFromUrl && looksLikePhone) {
+    console.log('✅ [ROLE RESOLUTION] Identified as CUSTOMER (phone number format + agentId context)');
+    return 'customer';
+  }
 
   // If Twilio didn't give us `From` and we don't yet have either CallSid mapped,
   // don't guess: mark as unknown to avoid "customer joined while ringing".
-  if (!fromStr) return 'unknown';
-  if (looksLikePhone) return 'customer';
+  if (!fromStr) {
+    console.log('⚠️ [ROLE RESOLUTION] UNKNOWN (no From field and no tracked SIDs)');
+    return 'unknown';
+  }
+  if (looksLikePhone) {
+    console.log('✅ [ROLE RESOLUTION] Identified as CUSTOMER (phone number format)');
+    return 'customer';
+  }
+  console.log('⚠️ [ROLE RESOLUTION] UNKNOWN (fallback)');
   return 'unknown';
 }
 
@@ -364,6 +405,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
     conferenceName,
     participantId,
     rawFrom: formData.get('From') || formData.get('Caller') || '',
+    agentIdFromUrl
   });
 
   console.log('📞 [Webhook call-status-callback] conference callback received:', {
@@ -427,21 +469,28 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     case 'join':
-      console.log('👤 Participant joined conference:', {
-        conferenceName,
-        callSid: callSid?.substring(0, 15) + '...',
-        muted,
-        hold
-      });
-      
-      // Backend no longer tries to identify customer vs agent here.
-      // We forward identifiers and raw fields; frontend derives role using:
-      // - Voice SDK agent CallSid in Redux
-      // - customer CallSid from call_status_update (phone-number leg)
-      // - From=client:* when present
+      // Backend now uses enhanced resolveParticipantRole with all available context
       const rawFrom = formData.get('From') || formData.get('Caller') || '';
       const rawTo = formData.get('To') || '';
-      const participantRole = rawFrom && String(rawFrom).startsWith('client:') ? 'agent' : 'unknown';
+      const participantRole = resolveParticipantRole({
+        conferenceName,
+        participantId,
+        rawFrom,
+        agentIdFromUrl
+      });
+      
+      console.log('👤 [PARTICIPANT JOIN] Participant joined conference:', {
+        conferenceName,
+        participantId: participantId?.substring(0, 15) + '...',
+        callSid: callSid?.substring(0, 15) + '...',
+        participantRole,
+        from: rawFrom ? (rawFrom.length > 20 ? rawFrom.substring(0, 20) + '...' : rawFrom) : 'NOT PROVIDED',
+        to: rawTo ? (rawTo.length > 20 ? rawTo.substring(0, 20) + '...' : rawTo) : 'NOT PROVIDED',
+        muted,
+        hold,
+        trackedCustomerSid: customerCallSidMap.get(conferenceName)?.substring(0, 15) + '...' || 'NOT_TRACKED',
+        trackedAgentSid: agentCallSidMap.get(conferenceName)?.substring(0, 15) + '...' || 'NOT_TRACKED'
+      });
 
       let derivedAgentId = null;
       if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
@@ -506,19 +555,25 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     case 'leave':
-      console.log('👋 Participant left conference:', { conferenceName, callSid: callSid?.substring(0, 15) + '...' });
       if (conferenceName && participantId) {
-        const rawFrom = formData.get('From') || formData.get('Caller') || '';
-        const participantRole = resolveParticipantRole({ conferenceName, participantId, rawFrom });
-        let derivedAgentId = null;
-        if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
-        if (!derivedAgentId && conferenceName && /^call-\d+$/.test(conferenceName)) {
-          derivedAgentId = parseInt(conferenceName.split('-')[1], 10);
+        const rawFromLeave = formData.get('From') || formData.get('Caller') || '';
+        const participantRoleLeave = resolveParticipantRole({ conferenceName, participantId, rawFrom: rawFromLeave, agentIdFromUrl });
+        console.log('👋 [PARTICIPANT LEAVE] Participant left conference:', {
+          conferenceName,
+          participantId: participantId?.substring(0, 15) + '...',
+          participantRole: participantRoleLeave,
+          trackedCustomerSid: customerCallSidMap.get(conferenceName)?.substring(0, 15) + '...' || 'NOT_TRACKED',
+          trackedAgentSid: agentCallSidMap.get(conferenceName)?.substring(0, 15) + '...' || 'NOT_TRACKED'
+        });
+        let derivedAgentIdLeave = null;
+        if (agentIdFromUrl) derivedAgentIdLeave = parseInt(agentIdFromUrl, 10);
+        if (!derivedAgentIdLeave && conferenceName && /^call-\d+$/.test(conferenceName)) {
+          derivedAgentIdLeave = parseInt(conferenceName.split('-')[1], 10);
         }
-        const participantName =
-          participantRole === 'agent'
-            ? (await resolveAgentDisplayName(derivedAgentId)) || (rawFrom ? String(rawFrom).replace(/^client:/, '') : 'Agent')
-            : (rawFrom && isPhoneNumber(String(rawFrom)) ? String(rawFrom) : 'Customer');
+        const participantNameLeave =
+          participantRoleLeave === 'agent'
+            ? (await resolveAgentDisplayName(derivedAgentIdLeave)) || (rawFromLeave ? String(rawFromLeave).replace(/^client:/, '') : 'Agent')
+            : (rawFromLeave && isPhoneNumber(String(rawFromLeave)) ? String(rawFromLeave) : 'Customer');
 
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'leave',
@@ -527,8 +582,8 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           conferenceName,
           callSid: participantId,
           participantCallSid: participantCallSid || null,
-          participantRole,
-          participantName,
+          participantRole: participantRoleLeave,
+          participantName: participantNameLeave,
           timestamp
         });
         // Also send updated conference status (participant count decreased)
@@ -544,23 +599,24 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     case 'mute':
-      console.log('🔇 Participant mute status changed:', {
-        conferenceName,
-        callSid: callSid?.substring(0, 15) + '...',
-        muted: muted === 'true'
-      });
       if (conferenceName && participantId) {
-        const rawFrom = formData.get('From') || formData.get('Caller') || '';
-        const participantRole = resolveParticipantRole({ conferenceName, participantId, rawFrom });
-        let derivedAgentId = null;
-        if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
-        if (!derivedAgentId && conferenceName && /^call-\d+$/.test(conferenceName)) {
-          derivedAgentId = parseInt(conferenceName.split('-')[1], 10);
+        const rawFromMute = formData.get('From') || formData.get('Caller') || '';
+        const participantRoleMute = resolveParticipantRole({ conferenceName, participantId, rawFrom: rawFromMute, agentIdFromUrl });
+        console.log('🔇 [PARTICIPANT MUTE] Mute status changed:', {
+          conferenceName,
+          participantId: participantId?.substring(0, 15) + '...',
+          participantRole: participantRoleMute,
+          muted: muted === 'true'
+        });
+        let derivedAgentIdMute = null;
+        if (agentIdFromUrl) derivedAgentIdMute = parseInt(agentIdFromUrl, 10);
+        if (!derivedAgentIdMute && conferenceName && /^call-\d+$/.test(conferenceName)) {
+          derivedAgentIdMute = parseInt(conferenceName.split('-')[1], 10);
         }
-        const participantName =
-          participantRole === 'agent'
-            ? (await resolveAgentDisplayName(derivedAgentId)) || (rawFrom ? String(rawFrom).replace(/^client:/, '') : 'Agent')
-            : (rawFrom && isPhoneNumber(String(rawFrom)) ? String(rawFrom) : 'Customer');
+        const participantNameMute =
+          participantRoleMute === 'agent'
+            ? (await resolveAgentDisplayName(derivedAgentIdMute)) || (rawFromMute ? String(rawFromMute).replace(/^client:/, '') : 'Agent')
+            : (rawFromMute && isPhoneNumber(String(rawFromMute)) ? String(rawFromMute) : 'Customer');
 
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'mute',
@@ -570,8 +626,8 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           callSid: participantId,
           participantCallSid: participantCallSid || null,
           muted: muted === 'true',
-          participantRole,
-          participantName,
+          participantRole: participantRoleMute,
+          participantName: participantNameMute,
           timestamp
         });
       }
@@ -592,23 +648,24 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     case 'hold':
-      console.log('⏸️ Participant hold status changed:', {
-        conferenceName,
-        callSid: callSid?.substring(0, 15) + '...',
-        hold: hold === 'true'
-      });
       if (conferenceName && participantId) {
-        const rawFrom = formData.get('From') || formData.get('Caller') || '';
-        const participantRole = resolveParticipantRole({ conferenceName, participantId, rawFrom });
-        let derivedAgentId = null;
-        if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
-        if (!derivedAgentId && conferenceName && /^call-\d+$/.test(conferenceName)) {
-          derivedAgentId = parseInt(conferenceName.split('-')[1], 10);
+        const rawFromHold = formData.get('From') || formData.get('Caller') || '';
+        const participantRoleHold = resolveParticipantRole({ conferenceName, participantId, rawFrom: rawFromHold, agentIdFromUrl });
+        console.log('⏸️ [PARTICIPANT HOLD] Hold status changed:', {
+          conferenceName,
+          participantId: participantId?.substring(0, 15) + '...',
+          participantRole: participantRoleHold,
+          hold: hold === 'true'
+        });
+        let derivedAgentIdHold = null;
+        if (agentIdFromUrl) derivedAgentIdHold = parseInt(agentIdFromUrl, 10);
+        if (!derivedAgentIdHold && conferenceName && /^call-\d+$/.test(conferenceName)) {
+          derivedAgentIdHold = parseInt(conferenceName.split('-')[1], 10);
         }
-        const participantName =
-          participantRole === 'agent'
-            ? (await resolveAgentDisplayName(derivedAgentId)) || (rawFrom ? String(rawFrom).replace(/^client:/, '') : 'Agent')
-            : (rawFrom && isPhoneNumber(String(rawFrom)) ? String(rawFrom) : 'Customer');
+        const participantNameHold =
+          participantRoleHold === 'agent'
+            ? (await resolveAgentDisplayName(derivedAgentIdHold)) || (rawFromHold ? String(rawFromHold).replace(/^client:/, '') : 'Agent')
+            : (rawFromHold && isPhoneNumber(String(rawFromHold)) ? String(rawFromHold) : 'Customer');
 
         socketManager.sendConferenceEvent(conferenceName, {
           event: 'hold',
@@ -618,8 +675,8 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           callSid: participantId,
           participantCallSid: participantCallSid || null,
           hold: hold === 'true',
-          participantRole,
-          participantName,
+          participantRole: participantRoleHold,
+          participantName: participantNameHold,
           timestamp
         });
       }

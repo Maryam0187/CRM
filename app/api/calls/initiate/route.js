@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getClient, getWebhookUrl, validatePhoneNumber } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
+import { customerCallSidMap } from '../../../../lib/twilio/conferenceState.js';
 
 export async function POST(request) {
   let phoneNumber = null;
@@ -94,6 +95,7 @@ export async function POST(request) {
     statusCallbackUrl.searchParams.set('agentId', String(parseInt(agentId, 10)));
     statusCallbackUrl.searchParams.set('direction', 'outbound-api');
     statusCallbackUrl.searchParams.set('callPurpose', String(callPurpose));
+    statusCallbackUrl.searchParams.set('conferenceName', conferenceName);
     if (customerId) statusCallbackUrl.searchParams.set('customerId', String(customerId));
     if (saleId) statusCallbackUrl.searchParams.set('saleId', String(saleId));
 
@@ -112,6 +114,21 @@ export async function POST(request) {
       // - We therefore subscribe to both `answered` and `in-progress`, but the backend still gates UI state
       //   to avoid "joined/speaking while ringing".
       statusCallbackEvent: ['initiated', 'queued', 'ringing', 'answered', 'in-progress', 'completed']
+    });
+
+    // CRITICAL: Track customer CallSid IMMEDIATELY after call creation
+    // This ensures conference callbacks can identify the customer even if they arrive before call status callbacks
+    customerCallSidMap.set(conferenceName, call.sid);
+    
+    console.log('📞 [CALL INITIATE] Outbound call created:', {
+      customerCallSid: call.sid,
+      conferenceName,
+      agentId: parseInt(agentId, 10),
+      toNumber: formattedNumber,
+      fromNumber,
+      customerIdParam: customerId || null,
+      saleIdParam: saleId || null,
+      trackedInMap: customerCallSidMap.has(conferenceName)
     });
 
     // Return call info for agent

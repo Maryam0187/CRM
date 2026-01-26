@@ -109,18 +109,38 @@ export default function GlobalWebCallInterface() {
 
   const customerAnswered = displayCallStatus === 'in-progress';
   const customerConferenceJoined = !!participants.find((p) => p.role === 'customer' && p.joined === true);
+  
+  // Find agent and customer participants for logging
+  const agentParticipant = participants.find((p) => p.role === 'agent');
+  const customerParticipant = participants.find((p) => p.role === 'customer');
 
-  // Optional debug: enable by running in DevTools:
-  // localStorage.setItem('debugParticipants', '1'); location.reload();
+  // Always log participant state changes for debugging call flow
   useEffect(() => {
     if (!conferenceName) return;
     if (typeof window === 'undefined') return;
-    if (localStorage.getItem('debugParticipants') !== '1') return;
-    console.log('📌 [PARTICIPANTS REDUX MAP]', {
+    
+    // Log current state of agent and customer participants
+    console.log('📊 [REDUX PARTICIPANTS STATE]', {
       conferenceName,
-      participantsBySid,
+      callStatus: displayCallStatus,
+      customerAnswered,
+      customerConferenceJoined,
+      totalParticipants: participants.length,
+      agentSid: agentParticipant?.callSid || 'NOT_IN_REDUX',
+      agentJoined: agentParticipant?.joined ?? 'N/A',
+      agentName: agentParticipant?.name || 'N/A',
+      customerSid: customerParticipant?.callSid || 'NOT_IN_REDUX',
+      customerJoined: customerParticipant?.joined ?? 'N/A',
+      customerName: customerParticipant?.name || 'N/A',
+      currentCallSid: currentCallSid,
+      allParticipants: participants.map(p => ({
+        callSid: p.callSid,
+        role: p.role,
+        joined: p.joined,
+        muted: p.muted
+      }))
     });
-  }, [conferenceName, participantsBySid]);
+  }, [conferenceName, participantsBySid, displayCallStatus, customerAnswered, customerConferenceJoined, participants, agentParticipant, customerParticipant, currentCallSid]);
 
   // Capture agent CallSid from Twilio Voice SDK call object and store in Redux
   const agentSidReportedRef = useRef(new Set());
@@ -136,16 +156,25 @@ export default function GlobalWebCallInterface() {
         const sid = raw ? String(raw) : null;
         if (!sid || !sid.startsWith('CA')) return; // only store real Twilio CallSids
         const markJoined = typeof opts.joined === 'boolean' ? opts.joined : null;
+        
+        const agentName = user?.name ||
+          [user?.firstName, user?.lastName].filter(Boolean).join(' ') ||
+          'Agent';
+
+        console.log('🔑 [AGENT SID CAPTURED] Storing agent CallSid in Redux:', {
+          conferenceName,
+          agentCallSid: sid,
+          agentName,
+          joined: markJoined,
+          customerCallSid: currentCallSid // This is the customer's CallSid from initiate
+        });
 
         dispatch(
           upsertParticipant({
             conferenceName,
             callSid: sid,
             role: 'agent',
-            name:
-              user?.name ||
-              [user?.firstName, user?.lastName].filter(Boolean).join(' ') ||
-              'Agent',
+            name: agentName,
             muted: false,
             hold: false,
             joined: markJoined,
@@ -157,18 +186,27 @@ export default function GlobalWebCallInterface() {
         const key = `${conferenceName}:${sid}`;
         if (!agentSidReportedRef.current.has(key)) {
           agentSidReportedRef.current.add(key);
+          console.log('📤 [AGENT SID REPORT] Sending agent CallSid to backend:', {
+            conferenceName,
+            agentCallSid: sid
+          });
           apiClient
             .post('/api/twilio/agent-call-sid', {
               conferenceName,
               agentCallSid: sid,
             })
-            .catch(() => {});
+            .then(() => {
+              console.log('✅ [AGENT SID REPORT] Backend received agent CallSid successfully');
+            })
+            .catch((err) => {
+              console.error('❌ [AGENT SID REPORT] Failed to report agent CallSid to backend:', err);
+            });
         }
       } catch (e) {
-        // ignore
+        console.error('❌ [AGENT SID CAPTURE] Error capturing agent CallSid:', e);
       }
     },
-    [conferenceName, dispatch, user?.firstName, user?.lastName, user?.name]
+    [conferenceName, dispatch, user?.firstName, user?.lastName, user?.name, currentCallSid]
   );
   
   const { getCallStatus } = useSocket();

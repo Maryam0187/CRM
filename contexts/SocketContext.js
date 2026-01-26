@@ -297,8 +297,13 @@ export const SocketProvider = ({ children }) => {
       // Mark this status as dispatched
       lastDispatchedStatusRef.current.set(data.callSid, statusKey);
 
-      // Minimal log: only callback status info
-      console.log('📞 [CALLBACK STATUS]', {
+      // Enhanced logging for call status with SID tracking
+      const confName = data.conferenceName;
+      const trackedCustomerSid = confName ? customerSidByConferenceRef.current.get(confName) : null;
+      const isThisCustomerLeg = data.callSid && trackedCustomerSid === data.callSid;
+      const isPhoneNumberWebhook = data.webhookSource === 'phone-number';
+      
+      console.log('📞 [CALL STATUS UPDATE]', {
         callSid: data.callSid,
         status: data.status,
         uiStatus: data.uiStatus,
@@ -306,6 +311,10 @@ export const SocketProvider = ({ children }) => {
         dialCallStatus: data.dialCallStatus,
         direction: data.direction,
         webhookSource: data.webhookSource,
+        conferenceName: confName,
+        legType: isPhoneNumberWebhook ? 'CUSTOMER_PSTN' : (data.webhookSource === 'twiml-app' ? 'AGENT_BROWSER' : 'UNKNOWN'),
+        isTrackedCustomer: isThisCustomerLeg,
+        trackedCustomerSid: trackedCustomerSid || 'NOT_YET_TRACKED',
         timestamp: data.timestamp
       });
       
@@ -318,13 +327,20 @@ export const SocketProvider = ({ children }) => {
 
       // Track conference status for gating speech/speaker events (we only care about in-progress).
       try {
-        const confName = data.conferenceName;
         const s = data.uiStatus || data.status;
         if (confName && s) {
           conferenceUiStatusRef.current.set(confName, s);
         }
         // Track customer sid from phone-number callbacks so we can classify conference participants on the frontend.
-        if (confName && data.webhookSource === 'phone-number' && data.callSid) {
+        if (confName && isPhoneNumberWebhook && data.callSid) {
+          const prevCustomerSid = customerSidByConferenceRef.current.get(confName);
+          if (prevCustomerSid !== data.callSid) {
+            console.log('🔑 [SID TRACKING] Setting CUSTOMER CallSid for conference:', {
+              conferenceName: confName,
+              customerCallSid: data.callSid,
+              previousCustomerSid: prevCustomerSid || 'NONE'
+            });
+          }
           customerSidByConferenceRef.current.set(confName, data.callSid);
         }
         // When the call becomes truly in-progress, mark the customer as joined.
@@ -335,6 +351,11 @@ export const SocketProvider = ({ children }) => {
           const customerSid = customerSidByConferenceRef.current.get(confName);
           const alreadyJoined = customerJoinedByConferenceRef.current.get(confName) === true;
           if (customerSid && !alreadyJoined) {
+            console.log('✅ [CUSTOMER ANSWERED] Marking customer as JOINED in Redux:', {
+              conferenceName: confName,
+              customerCallSid: customerSid,
+              status: s
+            });
             customerJoinedByConferenceRef.current.set(confName, true);
             dispatch(
               upsertParticipant({
@@ -378,27 +399,51 @@ export const SocketProvider = ({ children }) => {
 
     // Conference event handlers (start, end, join, leave, mute, hold, speaker)
     socketInstance.on('conference_event', (data) => {
-      // Minimal log: conference callback events only
-      console.log('📞 [CONFERENCE CALLBACK]', {
-        event: data.event,
-        conferenceName: data.conferenceName,
-        conferenceSid: data.conferenceSid,
-        callSid: data.callSid,
-        timestamp: data.timestamp
-      });
-
       // Update participant store (for UI)
       try {
         const conferenceName = data.conferenceName;
         const participantId = data.participantCallSid || data.callSid;
         const fromStr = data.from ? String(data.from) : '';
-        const inferredRole = fromStr.startsWith('client:')
-          ? 'agent'
-          : (conferenceName && participantId && customerSidByConferenceRef.current.get(conferenceName) === participantId)
-            ? 'customer'
-            : 'unknown';
+        const trackedCustomerSid = conferenceName ? customerSidByConferenceRef.current.get(conferenceName) : null;
+        
+        // Enhanced role inference with better logging
+        let inferredRole = 'unknown';
+        let roleReason = '';
+        
+        // First check if the server already provided a role
+        if (data.participantRole && data.participantRole !== 'unknown') {
+          inferredRole = data.participantRole;
+          roleReason = 'server_provided';
+        } else if (fromStr.startsWith('client:')) {
+          inferredRole = 'agent';
+          roleReason = 'client_prefix';
+        } else if (conferenceName && participantId && trackedCustomerSid === participantId) {
+          inferredRole = 'customer';
+          roleReason = 'tracked_customer_match';
+        } else if (trackedCustomerSid && participantId && trackedCustomerSid !== participantId) {
+          // If we know the customer SID and this is a different participant, it's likely the agent
+          inferredRole = 'agent';
+          roleReason = 'not_customer_therefore_agent';
+        }
+        
         const role = inferredRole;
         const name = data.participantName || null;
+        
+        // Enhanced logging for conference events
+        console.log('📞 [CONFERENCE EVENT]', {
+          event: data.event,
+          conferenceName: conferenceName,
+          conferenceSid: data.conferenceSid,
+          participantId: participantId,
+          inferredRole: role,
+          roleReason: roleReason,
+          serverProvidedRole: data.participantRole || 'NOT_PROVIDED',
+          fromField: fromStr || 'NOT_PROVIDED',
+          trackedCustomerSid: trackedCustomerSid || 'NOT_TRACKED',
+          participantName: name,
+          joined: data.joined,
+          timestamp: data.timestamp
+        });
 
         // Ignore speech/speaker events until call is truly in-progress (customer answered).
         // Twilio can emit speech_start due to background/comfort noise while customer is still ringing.
@@ -413,11 +458,17 @@ export const SocketProvider = ({ children }) => {
         // NOTE: Twilio may emit `conference-start` AFTER the first participant joins.
         // If we clear on `start`, we can accidentally delete the already-joined agent.
         if (data.event === 'end') {
+          console.log('🏁 [REDUX] Clearing all participants for conference:', conferenceName);
           if (conferenceName) dispatch(clearConferenceParticipants({ conferenceName }));
           if (conferenceName) conferenceUiStatusRef.current.delete(conferenceName);
           if (conferenceName) customerSidByConferenceRef.current.delete(conferenceName);
           if (conferenceName) customerJoinedByConferenceRef.current.delete(conferenceName);
         } else if (data.event === 'leave') {
+          console.log('👋 [REDUX] Removing participant from Redux:', {
+            conferenceName,
+            callSid: participantId,
+            role: role
+          });
           if (conferenceName && participantId) dispatch(removeParticipant({ conferenceName, callSid: participantId }));
           if (conferenceName && role === 'customer') {
             customerJoinedByConferenceRef.current.delete(conferenceName);
@@ -435,18 +486,28 @@ export const SocketProvider = ({ children }) => {
             if (data.event === 'join' && role === 'customer' && joinedForEvent === true) {
               customerJoinedByConferenceRef.current.set(conferenceName, true);
             }
-            dispatch(
-              upsertParticipant({
-                conferenceName,
-                callSid: participantId,
-                role,
-                name,
-                joined: joinedForEvent,
-                muted: data.event === 'unmute' ? false : typeof data.muted === 'boolean' ? data.muted : null,
-                hold: data.event === 'unhold' ? false : typeof data.hold === 'boolean' ? data.hold : null,
-                timestamp: data.timestamp,
-              })
-            );
+            
+            const participantData = {
+              conferenceName,
+              callSid: participantId,
+              role,
+              name,
+              joined: joinedForEvent,
+              muted: data.event === 'unmute' ? false : typeof data.muted === 'boolean' ? data.muted : null,
+              hold: data.event === 'unhold' ? false : typeof data.hold === 'boolean' ? data.hold : null,
+              timestamp: data.timestamp,
+            };
+            
+            console.log(`🔄 [REDUX] Upserting ${role.toUpperCase()} participant:`, {
+              conferenceName,
+              callSid: participantId,
+              role: role,
+              joined: joinedForEvent,
+              event: data.event,
+              conferenceStatus: confStatus
+            });
+            
+            dispatch(upsertParticipant(participantData));
           }
         } else if (data.event === 'speech_start' || data.event === 'speech_stop') {
           if (conferenceName && participantId) {
@@ -461,7 +522,7 @@ export const SocketProvider = ({ children }) => {
           }
         }
       } catch (e) {
-        // Don't let participant UI updates break socket handling
+        console.error('❌ [REDUX] Error updating participant store:', e);
       }
       
       // Dispatch custom event for components to listen to
