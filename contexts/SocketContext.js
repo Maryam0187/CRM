@@ -343,18 +343,21 @@ export const SocketProvider = ({ children }) => {
           }
           customerSidByConferenceRef.current.set(confName, data.callSid);
         }
-        // When the call becomes truly in-progress, mark the customer as joined.
+        // When the CUSTOMER call becomes truly in-progress, mark the customer as joined.
+        // IMPORTANT: Only do this for CUSTOMER leg callbacks (webhookSource === 'phone-number')
+        // NOT for agent leg callbacks (webhookSource === 'twiml-app')
         // This is the single authoritative transition we want for UI:
         // - while ringing/queued => joined=false
         // - once in-progress (customer answered) => joined=true
-        if (confName && s === 'in-progress') {
+        if (confName && s === 'in-progress' && isPhoneNumberWebhook) {
           const customerSid = customerSidByConferenceRef.current.get(confName);
           const alreadyJoined = customerJoinedByConferenceRef.current.get(confName) === true;
           if (customerSid && !alreadyJoined) {
             console.log('✅ [CUSTOMER ANSWERED] Marking customer as JOINED in Redux:', {
               conferenceName: confName,
               customerCallSid: customerSid,
-              status: s
+              status: s,
+              webhookSource: data.webhookSource
             });
             customerJoinedByConferenceRef.current.set(confName, true);
             dispatch(
@@ -370,6 +373,14 @@ export const SocketProvider = ({ children }) => {
               })
             );
           }
+        } else if (confName && s === 'in-progress' && !isPhoneNumberWebhook) {
+          // This is an agent leg or other non-customer callback - don't mark customer as joined
+          console.log('ℹ️ [AGENT LEG IN-PROGRESS] Ignoring in-progress from non-customer leg:', {
+            conferenceName: confName,
+            callSid: data.callSid,
+            webhookSource: data.webhookSource,
+            status: s
+          });
         }
       } catch (e) {
         // ignore
