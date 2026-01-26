@@ -18,6 +18,9 @@ const agentNameCache = new Map(); // agentId -> "First Last"
 const answeredCallSidSet = new Set();
 // Track whether we've seen a pre-answer state for a customer PSTN callSid (queued/ringing).
 const seenPreAnswerByCallSid = new Set();
+// Also track pre-answer per conferenceName. Some callback streams can change CallSid between
+// early states and the post-answer state, but the conferenceName remains stable.
+const seenPreAnswerByConferenceName = new Set();
 // Track last-known UI status per customer callSid so conference callbacks can mark joined correctly.
 const latestUiStatusByCallSid = new Map();
 
@@ -806,14 +809,19 @@ export async function POST(request) {
       if (webhookSource === 'phone-number' && direction !== 'inbound') {
         if (callStatus === 'queued' || callStatus === 'initiated') {
           seenPreAnswerByCallSid.add(effectiveCallSid);
+          if (callStatusConferenceName) seenPreAnswerByConferenceName.add(callStatusConferenceName);
           uiStatus = 'queued';
         }
         if (callStatus === 'ringing') {
           seenPreAnswerByCallSid.add(effectiveCallSid);
+          if (callStatusConferenceName) seenPreAnswerByConferenceName.add(callStatusConferenceName);
           uiStatus = 'ringing';
         }
         if (callStatus === 'in-progress') {
-          if (seenPreAnswerByCallSid.has(effectiveCallSid)) {
+          const okToTransition =
+            seenPreAnswerByCallSid.has(effectiveCallSid) ||
+            (callStatusConferenceName && seenPreAnswerByConferenceName.has(callStatusConferenceName));
+          if (okToTransition) {
             answeredCallSidSet.add(effectiveCallSid);
             uiStatus = 'in-progress';
           } else {
@@ -911,6 +919,7 @@ export async function POST(request) {
       answeredCallSidSet.delete(effectiveCallSid);
       seenPreAnswerByCallSid.delete(effectiveCallSid);
       latestUiStatusByCallSid.delete(effectiveCallSid);
+      if (callStatusConferenceName) seenPreAnswerByConferenceName.delete(callStatusConferenceName);
     }
     
     // Only fetch call log when call ends (to check if it exists for update vs create)
