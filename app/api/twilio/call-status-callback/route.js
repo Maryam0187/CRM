@@ -23,6 +23,33 @@ const seenPreAnswerByCallSid = new Set();
 const seenPreAnswerByConferenceName = new Set();
 // Track last-known UI status per customer callSid so conference callbacks can mark joined correctly.
 const latestUiStatusByCallSid = new Map();
+// Track monotonic lifecycle rank per callSid to avoid out-of-order downgrades (e.g. in-progress -> ringing).
+const latestLifecycleRankByCallSid = new Map();
+
+function normalizeUiLifecycleStatus(status) {
+  if (!status) return null;
+  const s = String(status);
+  if (s === 'initiated') return 'queued';
+  if (s === 'answered') return 'in-progress';
+  return s;
+}
+
+function lifecycleRank(status) {
+  const s = normalizeUiLifecycleStatus(status);
+  if (!s) return 0;
+  const ranks = {
+    queued: 1,
+    ringing: 2,
+    'in-progress': 3,
+    completed: 4,
+    failed: 4,
+    busy: 4,
+    'no-answer': 4,
+    canceled: 4,
+    voicemail: 4,
+  };
+  return ranks[s] || 0;
+}
 
 async function resolveAgentDisplayName(agentId) {
   if (!agentId) return null;
@@ -332,13 +359,22 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
     ? customerCallSidMap.get(conferenceName)?.substring(0, 15) + '...' 
     : 'NONE';
   
-  console.log('📞 Conference callback received:', {
+  const participantId = participantCallSid || callSid; // stable key to avoid duplicates
+  const inferredRoleForLog = resolveParticipantRole({
+    conferenceName,
+    participantId,
+    rawFrom: formData.get('From') || formData.get('Caller') || '',
+  });
+
+  console.log('📞 [Webhook call-status-callback] conference callback received:', {
     conferenceSid: conferenceSid?.substring(0, 15) + '...',
     conferenceName,
     conferenceEvent,
     sequenceNumber,
     callSid: callSid?.substring(0, 15) + '...',
     participantCallSid: participantCallSid?.substring(0, 15) + '...' || 'NOT PROVIDED',
+    participantId: participantId?.substring(0, 15) + '...' || 'NOT PROVIDED',
+    inferredRole: inferredRoleForLog,
     from: fromField,
     to: toField,
     muted,
@@ -348,7 +384,6 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
   });
   
   const { event: normalizedEvent, eventRaw } = normalizeConferenceEventName(conferenceEvent);
-  const participantId = participantCallSid || callSid; // stable key to avoid duplicates
   
   switch (normalizedEvent) {
     case 'start':
@@ -875,28 +910,46 @@ export async function POST(request) {
       }
     };
 
+    // Twilio callbacks can arrive out-of-order (e.g. in-progress then a delayed ringing retry).
+    // Prevent "downgrades" from being broadcast/used for gating once we've reached a later lifecycle state.
+    const lifecycleStatusForRank = normalizeUiLifecycleStatus(uiStatus || rawStatusToSend);
+    const nextRank = lifecycleRank(lifecycleStatusForRank);
+    const prevRank = effectiveCallSid ? (latestLifecycleRankByCallSid.get(effectiveCallSid) || 0) : 0;
+    const isTerminal = nextRank >= 4;
+    const isStaleDowngrade = prevRank > 0 && nextRank > 0 && nextRank < prevRank && !isTerminal;
+
+    if (!isStaleDowngrade && effectiveCallSid && nextRank > 0) {
+      latestLifecycleRankByCallSid.set(effectiveCallSid, nextRank);
+    }
+
     // Store latest UI status for this callSid (used to gate customer "joined" in conference callbacks).
-    if (effectiveCallSid && (uiStatus || rawStatusToSend)) {
-      latestUiStatusByCallSid.set(effectiveCallSid, uiStatus || rawStatusToSend);
+    // Only update this when we're not processing a stale downgrade.
+    if (!isStaleDowngrade && effectiveCallSid && (uiStatus || rawStatusToSend)) {
+      latestUiStatusByCallSid.set(effectiveCallSid, normalizeUiLifecycleStatus(uiStatus || rawStatusToSend));
     }
 
     // Minimal server log: only callback statuses
-    console.log('📞 [TWILIO CALLBACK]', {
+    console.log('📞 [Webhook call-status-callback] call status received:', {
       callbackType: isDialCallback ? 'dial' : 'call-status',
       webhookSource,
       callSid: effectiveCallSid,
+      parentCallSid: isDialCallback ? callSid : (parentCallSid || null),
       status: rawStatusToSend,
       dialCallStatus: dialCallStatus || null,
       uiStatus,
-      direction
+      direction,
+      conferenceName: callStatusConferenceName
     });
     
     // Broadcast using the effectiveCallSid we believe the UI is tracking.
-    broadcastCallStatus(effectiveCallSid, statusData, agentId, webhookSource);
+    // Skip stale downgrades (prevents in-progress -> ringing in UI and logs).
+    if (!isStaleDowngrade) {
+      broadcastCallStatus(effectiveCallSid, statusData, agentId, webhookSource);
+    }
 
     // Safety: for Dial callbacks, also broadcast on the parent CallSid so UIs tracking the parent
     // still receive end statuses and disconnect correctly.
-    if (isDialCallback && callSid && callSid !== effectiveCallSid) {
+    if (!isStaleDowngrade && isDialCallback && callSid && callSid !== effectiveCallSid) {
       const aliasStatusData = { ...statusData, callSid };
       broadcastCallStatus(callSid, aliasStatusData, agentId, webhookSource);
     }
@@ -919,6 +972,7 @@ export async function POST(request) {
       answeredCallSidSet.delete(effectiveCallSid);
       seenPreAnswerByCallSid.delete(effectiveCallSid);
       latestUiStatusByCallSid.delete(effectiveCallSid);
+      latestLifecycleRankByCallSid.delete(effectiveCallSid);
       if (callStatusConferenceName) seenPreAnswerByConferenceName.delete(callStatusConferenceName);
     }
     

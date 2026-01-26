@@ -16,7 +16,7 @@ export async function POST(request) {
 
 async function handleJoinConference(request) {
   try {
-    console.log('📞 Join conference request received');
+    console.log('📞 [TwiML join-conference] request received (agent Voice SDK leg)');
     
     let formData = null;
     let conferenceName = null;
@@ -35,7 +35,7 @@ async function handleJoinConference(request) {
         formData = await request.formData();
         conferenceName = conferenceName || formData.get('To') || formData.get('conference');
         
-        console.log('📞 Join conference form data:', {
+        console.log('📞 [TwiML join-conference] form data:', {
           To: formData.get('To'),
           From: formData.get('From'),
           CallSid: formData.get('CallSid'),
@@ -64,7 +64,7 @@ async function handleJoinConference(request) {
     // Escape conference name to prevent XML injection
     const safeConferenceName = conferenceName.replace(/[<>&"']/g, '');
     
-    console.log('📞 Joining conference:', safeConferenceName);
+    console.log('📞 [TwiML join-conference] joining conference:', safeConferenceName);
 
     // Get conference callback URL for tracking conference events
     const conferenceCallbackUrl = getWebhookUrl('/api/twilio/call-status-callback');

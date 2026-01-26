@@ -86,6 +86,10 @@ export default function GlobalWebCallInterface() {
   );
   const participants = Object.values(participantsBySid || {});
   const callEndedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+  const callStatusUiRef = useRef(callStatus);
+  useEffect(() => {
+    callStatusUiRef.current = callStatus;
+  }, [callStatus]);
 
   // Keep UI simple and correct:
   // - show Waiting/Queued before customer answers
@@ -1114,14 +1118,37 @@ export default function GlobalWebCallInterface() {
           return; // Don't process client call status updates
         }
         
-        // Backend sends status as-is from Twilio - frontend processes it
-        const statusForUi = callStatusData.uiStatus || callStatusData.status;
-        updateCallStatus(statusForUi);
+        // Backend sends status as-is from Twilio - frontend processes it.
+        // IMPORTANT: Twilio callbacks can arrive out-of-order (e.g. `in-progress` then a delayed `ringing`).
+        // Never allow "downgrades" once we reached a later lifecycle state.
+        const statusForUiRaw = callStatusData.uiStatus || callStatusData.status;
+        const normalizeUiStatus = (s) => {
+          const x = s ? String(s) : '';
+          if (x === 'initiated') return 'queued';
+          if (x === 'answered') return 'in-progress';
+          return x;
+        };
+        const statusForUi = normalizeUiStatus(statusForUiRaw);
+        const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+        const order = { queued: 1, ringing: 2, 'in-progress': 3 };
+        const currentUi = normalizeUiStatus(callStatusUiRef.current);
+        const currentOrder = order[currentUi] || 0;
+        const nextOrder = order[statusForUi] || 0;
+
+        const shouldApply =
+          endedStatuses.includes(statusForUi) ||
+          (!endedStatuses.includes(currentUi) && nextOrder >= currentOrder);
+
+        if (shouldApply) {
+          updateCallStatus(statusForUi);
+        } else {
+          // Ignore stale/downgrade updates (keeps UI stable)
+          return;
+        }
         
         
         // If call is completed/failed/canceled, disconnect the call IMMEDIATELY
         // This handles the case when customer hangs up - agent browser should disconnect too
-        const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
         if (endedStatuses.includes(statusForUi)) {
           // Disconnect immediately if we have any connection (even if just connecting)
           if (isConnected || isWebCallConnected || activeConnection.current) {

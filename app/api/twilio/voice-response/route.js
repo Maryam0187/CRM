@@ -5,14 +5,14 @@ import { handleInboundCall } from '../../../../lib/twilio/inbound/handleInboundC
 
 // Handle both GET and POST requests (Twilio can use either)
 export async function GET(request) {
-  console.log('📞 GET request to voice-response');
+  console.log('📞 [TwiML voice-response] GET request (customer-leg TwiML)');
   console.log('📞 GET request URL:', request.url);
   console.log('📞 GET request headers:', Object.fromEntries(request.headers.entries()));
   return handleVoiceResponse(request);
 }
 
 export async function POST(request) {
-  console.log('📞 POST request to voice-response');
+  console.log('📞 [TwiML voice-response] POST request (customer-leg TwiML)');
   console.log('📞 POST request URL:', request.url);
   try {
     const headers = Object.fromEntries(request.headers.entries());
@@ -38,7 +38,7 @@ async function handleVoiceResponse(request) {
       url = new URL(request.url);
       agentId = url.searchParams.get('agentId');
       conferenceNameFromUrl = url.searchParams.get('conferenceName') || url.searchParams.get('conference');
-      console.log('📞 Voice response request received:', {
+      console.log('📞 [TwiML voice-response] request received:', {
         method: request.method,
         url: request.url,
         agentIdFromUrl: agentId,
@@ -83,7 +83,7 @@ async function handleVoiceResponse(request) {
           }
         }
         
-        console.log('📞 Form data parsed:', {
+        console.log('📞 [TwiML voice-response] form data parsed:', {
           agentIdFromForm,
           finalAgentId: agentId,
           direction: formData.get('Direction'),
