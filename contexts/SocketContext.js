@@ -557,16 +557,29 @@ export const SocketProvider = ({ children }) => {
           }
         } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold' || data.event === 'unmute' || data.event === 'unhold') {
           if (conferenceName && participantId) {
-            const confStatus = conferenceName ? conferenceUiStatusRef.current.get(conferenceName) : null;
+            // For customer: only mark as "joined" if we've ALREADY confirmed they answered (via call_status_update)
+            // Don't rely on conference status - that becomes in-progress when agent joins, not customer
+            const customerAlreadyAnswered = conferenceName ? customerJoinedByConferenceRef.current.get(conferenceName) === true : false;
+            
             const joinedForEvent =
               typeof data.joined === 'boolean'
                 ? data.joined
                 : (data.event === 'join'
-                    ? (role === 'customer' ? confStatus === 'in-progress' : true)
+                    ? (role === 'customer' 
+                        ? customerAlreadyAnswered  // Only true if we already confirmed customer answered
+                        : true)  // Agent is always joined on join event
                     : null);
 
-            if (data.event === 'join' && role === 'customer' && joinedForEvent === true) {
-              customerJoinedByConferenceRef.current.set(conferenceName, true);
+            // Only set customerJoinedByConferenceRef if it was already true (don't set it from join event)
+            // The authoritative source for customer joined is call_status_update with in-progress
+            if (data.event === 'join' && role === 'customer') {
+              console.log('📞 [CUSTOMER JOIN EVENT] Customer join event received:', {
+                conferenceName,
+                participantId: participantId?.substring(0, 15) + '...',
+                customerAlreadyAnswered,
+                joinedForEvent,
+                serverJoined: data.joined
+              });
             }
             
             const participantData = {
