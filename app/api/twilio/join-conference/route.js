@@ -71,12 +71,17 @@ async function handleJoinConference(request) {
     
     // Generate TwiML to join the conference
     // This is used when agent connects via web browser (Twilio Voice SDK)
+    //
+    // NOTE:
+    // `answerOnBridge` mainly affects <Dial><Number>/<Client> bridging behavior (e.g. transfers).
+    // For <Dial><Conference>, it does NOT change our "customer answered" logic (that comes from the PSTN leg CallStatus).
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial record="false" 
   timeout="30" 
   timeLimit="3600" 
-  answerOnMedia="false">
+  answerOnMedia="false"
+  answerOnBridge="true">
     <Conference 
     startConferenceOnEnter="true" 
     endConferenceOnExit="true"  

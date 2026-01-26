@@ -146,7 +146,8 @@ async function handleVoiceResponse(request) {
 
         twiml += `\n  <Dial record="false" 
         timeout="30" timeLimit="3600" 
-        answerOnMedia="false" 
+        answerOnMedia="false"
+        answerOnBridge="true" 
         hangupOnStar="false">`;
         twiml += `\n    <Conference 
         startConferenceOnEnter="true" 

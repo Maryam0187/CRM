@@ -107,7 +107,9 @@ export async function POST(request) {
       timeout,
       statusCallback: statusCallbackUrl.toString(),
       statusCallbackMethod: 'POST',
-      statusCallbackEvent: ['initiated', 'queued', 'in-progress', 'ringing', 'answered', 'completed']
+      // For outbound PSTN leg, rely on `answered` as the "customer picked up" signal.
+      // Requesting `in-progress` here can lead to confusing early transitions depending on carrier/early-media.
+      statusCallbackEvent: ['initiated', 'queued', 'ringing', 'answered', 'completed']
     });
 
     // Return call info for agent

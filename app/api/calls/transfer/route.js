@@ -185,7 +185,8 @@ export async function POST(request) {
           url: warmTransferUrl,
           method: 'POST',
           statusCallback: `${baseUrl}/api/twilio/call-status-callback`,
-          statusCallbackEvent: ['initiated', 'ringing', 'in-progress', 'answered', 'completed'],
+          // Rely on `answered` rather than `in-progress` for "picked up" to avoid early-media quirks.
+          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
           statusCallbackMethod: 'POST'
         });
 
@@ -218,7 +219,8 @@ export async function POST(request) {
 
       } else {
         // Blind transfer: Redirect the call to new destination
-        const transferUrl = `${baseUrl}/api/twilio/transfer-voice-response?to=${encodeURIComponent(destinationPhone)}`;
+        // Include agentId so downstream Dial status callbacks can be routed to the right agent UI.
+        const transferUrl = `${baseUrl}/api/twilio/transfer-voice-response?to=${encodeURIComponent(destinationPhone)}&agentId=${encodeURIComponent(fromAgentId)}`;
         
         const updatedCall = await client.calls(callSid).update({
           url: transferUrl,

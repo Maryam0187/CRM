@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { validatePhoneNumber } from '../../../../lib/twilio';
+import { getWebhookUrl, validatePhoneNumber } from '../../../../lib/twilio';
 
 // Handle both GET and POST requests (Twilio can use either)
 export async function GET(request) {
@@ -14,6 +14,7 @@ async function handleTransferVoiceResponse(request) {
   try {
     const url = new URL(request.url);
     let transferTo = url.searchParams.get('to');
+    const agentId = url.searchParams.get('agentId');
     
     if (!transferTo && request.method === 'POST') {
       try {
@@ -54,10 +55,21 @@ async function handleTransferVoiceResponse(request) {
 
     // Create TwiML to dial the transfer destination
     // Recording is DISABLED
+    const dialStatusCallbackUrl = getWebhookUrl(
+      `/api/twilio/call-status-callback${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''}`
+    );
+
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice">Please hold while we transfer your call.</Say>
-  <Dial record="false" timeout="30" timeLimit="3600" answerOnMedia="false">
+  <Dial record="false"
+        timeout="30"
+        timeLimit="3600"
+        answerOnMedia="false"
+        answerOnBridge="true"
+        statusCallback="${dialStatusCallbackUrl}"
+        statusCallbackMethod="POST"
+        statusCallbackEvent="initiated ringing answered completed">
     <Number>${formattedNumber}</Number>
   </Dial>
   <Hangup/>
