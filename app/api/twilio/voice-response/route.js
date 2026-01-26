@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getWebhookUrl, validatePhoneNumber } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import { handleInboundCall } from '../../../../lib/twilio/inbound/handleInboundCall';
+import { agentCallSidMap, customerCallSidMap } from '../../../../lib/twilio/conferenceState.js';
+import socketManager from '../../../../lib/socket';
 
 // Handle both GET and POST requests (Twilio can use either)
 export async function GET(request) {
@@ -83,18 +85,69 @@ async function handleVoiceResponse(request) {
           }
         }
         
-        console.log('📞 [TwiML voice-response] form data parsed:', {
-          agentIdFromForm,
-          finalAgentId: agentId,
-          direction: formData.get('Direction'),
-          from: formData.get('From'),
-          to: formData.get('To')
-        });
-        
-        // Get call direction from Twilio
+        // Get call direction and identifiers from Twilio
         const direction = formData.get('Direction'); // 'inbound' or 'outbound-dial'
         const callerNumber = formData.get('From');
         const calledNumber = formData.get('To');
+        const callSid = formData.get('CallSid'); // This is the CallSid for THIS leg
+        
+        console.log('📞 [TwiML voice-response] form data parsed:', {
+          agentIdFromForm,
+          finalAgentId: agentId,
+          direction,
+          from: callerNumber,
+          to: calledNumber,
+          callSid: callSid
+        });
+        
+        // CRITICAL: Detect if this is an AGENT leg (from Voice SDK browser)
+        // Agent connections have From = "client:agent-<id>" or similar client: prefix
+        const isAgentLeg = callerNumber && String(callerNumber).startsWith('client:');
+        
+        if (isAgentLeg && callSid) {
+          // This is the agent connecting via Voice SDK
+          // Extract conference name from "To" field (e.g., "call-1" or "inbound-xxx")
+          const confName = calledNumber && (String(calledNumber).startsWith('call-') || String(calledNumber).startsWith('inbound-'))
+            ? String(calledNumber).trim()
+            : (conferenceNameFromUrl || (agentId ? `call-${agentId}` : null));
+          
+          if (confName) {
+            console.log('🔑 [AGENT LEG DETECTED] Capturing agent CallSid on backend:', {
+              agentCallSid: callSid,
+              conferenceName: confName,
+              from: callerNumber,
+              to: calledNumber,
+              agentId: agentId
+            });
+            
+            // Store in the shared state map
+            agentCallSidMap.set(confName, callSid);
+            
+            // Also get the customer CallSid for comparison
+            const customerSid = customerCallSidMap.get(confName);
+            
+            console.log('✅ [AGENT SID STORED] Agent CallSid stored on backend:', {
+              conferenceName: confName,
+              agentCallSid: callSid,
+              customerCallSid: customerSid || 'NOT_YET_TRACKED'
+            });
+            
+            // Broadcast to frontend via socket so UI can update immediately
+            try {
+              socketManager.sendConferenceEvent(confName, {
+                event: 'agent_sid_captured',
+                conferenceName: confName,
+                agentCallSid: callSid,
+                customerCallSid: customerSid || null,
+                agentId: agentId ? parseInt(agentId, 10) : null,
+                from: callerNumber,
+                timestamp: new Date().toISOString()
+              });
+            } catch (socketErr) {
+              console.warn('⚠️ Could not broadcast agent SID via socket:', socketErr);
+            }
+          }
+        }
         
         // If this is an inbound call (no agentId and direction is inbound)
         if (!agentId && (direction === 'inbound' || (!direction && callerNumber && calledNumber))) {

@@ -101,6 +101,14 @@ export function CallProvider({ children }) {
   }, []);
   
   const endCall = useCallback(() => {
+    console.log('🔚 [CALL CONTEXT] endCall triggered - clearing all call state:', {
+      currentCallSid,
+      conferenceName,
+      callStatus,
+      callTimer,
+      isWebCallConnected
+    });
+    
     if (pendingInProgressTimeoutRef.current) {
       clearTimeout(pendingInProgressTimeoutRef.current);
       pendingInProgressTimeoutRef.current = null;
@@ -126,8 +134,9 @@ export function CallProvider({ children }) {
     setTimeout(() => {
       setShowWebInterface(false);
       resetTimer();
+      console.log('✅ [CALL CONTEXT] Call state cleanup completed');
     }, 500);
-  }, [callTimer, callStatus, stopTimer, resetTimer]);
+  }, [callTimer, callStatus, stopTimer, resetTimer, currentCallSid, conferenceName, isWebCallConnected]);
   
   const updateCallStatus = useCallback((status) => {
     const currentStatus = callStatusRef.current;

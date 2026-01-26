@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient';
 import { Device } from '@twilio/voice-sdk';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { upsertParticipant } from '../store/slices/participantsSlice';
+import { clearConferenceParticipants } from '../store/slices/participantsSlice';
 
 // Add global unhandled rejection handler to prevent SDK errors from crashing app
 if (typeof window !== 'undefined' && !window.__twilioRejectionHandlerAdded) {
@@ -142,72 +142,9 @@ export default function GlobalWebCallInterface() {
     });
   }, [conferenceName, participantsBySid, displayCallStatus, customerAnswered, customerConferenceJoined, participants, agentParticipant, customerParticipant, currentCallSid]);
 
-  // Capture agent CallSid from Twilio Voice SDK call object and store in Redux
-  const agentSidReportedRef = useRef(new Set());
-  const captureAgentCallSid = useCallback(
-    (callObj, opts = {}) => {
-      try {
-        if (!conferenceName || !callObj) return;
-        const raw =
-          callObj?.parameters?.CallSid ||
-          callObj?.parameters?.callSid ||
-          callObj?.parameters?.callsid ||
-          null;
-        const sid = raw ? String(raw) : null;
-        if (!sid || !sid.startsWith('CA')) return; // only store real Twilio CallSids
-        const markJoined = typeof opts.joined === 'boolean' ? opts.joined : null;
-        
-        const agentName = user?.name ||
-          [user?.firstName, user?.lastName].filter(Boolean).join(' ') ||
-          'Agent';
-
-        console.log('🔑 [AGENT SID CAPTURED] Storing agent CallSid in Redux:', {
-          conferenceName,
-          agentCallSid: sid,
-          agentName,
-          joined: markJoined,
-          customerCallSid: currentCallSid // This is the customer's CallSid from initiate
-        });
-
-        dispatch(
-          upsertParticipant({
-            conferenceName,
-            callSid: sid,
-            role: 'agent',
-            name: agentName,
-            muted: false,
-            hold: false,
-            joined: markJoined,
-            timestamp: new Date().toISOString(),
-          })
-        );
-
-        // Report agent CallSid to backend so it can reliably classify participants in conference callbacks.
-        const key = `${conferenceName}:${sid}`;
-        if (!agentSidReportedRef.current.has(key)) {
-          agentSidReportedRef.current.add(key);
-          console.log('📤 [AGENT SID REPORT] Sending agent CallSid to backend:', {
-            conferenceName,
-            agentCallSid: sid
-          });
-          apiClient
-            .post('/api/twilio/agent-call-sid', {
-              conferenceName,
-              agentCallSid: sid,
-            })
-            .then(() => {
-              console.log('✅ [AGENT SID REPORT] Backend received agent CallSid successfully');
-            })
-            .catch((err) => {
-              console.error('❌ [AGENT SID REPORT] Failed to report agent CallSid to backend:', err);
-            });
-        }
-      } catch (e) {
-        console.error('❌ [AGENT SID CAPTURE] Error capturing agent CallSid:', e);
-      }
-    },
-    [conferenceName, dispatch, user?.firstName, user?.lastName, user?.name, currentCallSid]
-  );
+  // NOTE: Agent CallSid is now captured on the backend in /api/twilio/voice-response
+  // when Twilio calls the webhook with From=client:agent-X
+  // The backend broadcasts 'agent_sid_captured' event via socket which updates Redux
   
   const { getCallStatus } = useSocket();
   const [isMinimized, setIsMinimized] = useState(false);
@@ -656,9 +593,8 @@ export default function GlobalWebCallInterface() {
         throw new Error('Failed to get call object from promise');
       }
 
-      // Agent leg CallSid becomes available on the SDK Call object once Twilio creates the leg.
-      // Capture it as early as possible so agent shows up in participant mapping even if conference callbacks omit `From`.
-      captureAgentCallSid(call);
+      // NOTE: Agent CallSid is now captured on the backend in /api/twilio/voice-response
+      // The backend broadcasts 'agent_sid_captured' event via socket which updates Redux
       activeConnection.current = call;
 
       // Attach event listeners
@@ -666,8 +602,8 @@ export default function GlobalWebCallInterface() {
         const attachEvents = (callObj) => {
           const onAccept = () => {
             console.log('✅ Call accepted - connected to conference');
-            // Mark agent as joined once SDK connects.
-            captureAgentCallSid(callObj, { joined: true });
+            // NOTE: Agent CallSid is captured on backend via voice-response webhook
+            // and broadcast via socket 'agent_sid_captured' event
             if (!isConnected) {
               setIsConnected(true);
               setIsConnecting(false);
@@ -1004,6 +940,27 @@ export default function GlobalWebCallInterface() {
     }
   };
 
+  // Comprehensive cleanup function - clears all participants and call state
+  const cleanupCallState = useCallback((reason = 'unknown') => {
+    console.log('🧹 [CLEANUP] Starting comprehensive call cleanup:', {
+      reason,
+      conferenceName,
+      currentCallSid,
+      participantsCount: participants.length
+    });
+    
+    // Clear Redux participants for this conference
+    if (conferenceName) {
+      console.log('🧹 [CLEANUP] Clearing all participants from Redux for conference:', conferenceName);
+      dispatch(clearConferenceParticipants({ conferenceName }));
+    }
+    
+    // Clear agent SID reported ref
+    agentSidReportedRef.current.clear();
+    
+    console.log('✅ [CLEANUP] Call cleanup completed');
+  }, [conferenceName, currentCallSid, participants.length, dispatch]);
+
   // Helper function to disconnect call
   const disconnectCall = useCallback((reason = 'manual') => {
     try {
@@ -1047,15 +1004,18 @@ export default function GlobalWebCallInterface() {
       setIsConnecting(false);
       activeConnection.current = null;
       localMediaStream.current = null;
+      
+      // Cleanup Redux participants
+      cleanupCallState(reason);
     } catch (err) {
       console.warn('⚠️ Error in disconnectCall (ignored):', err.message);
     }
-  }, [device]);
+  }, [device, cleanupCallState]);
 
   // Hangup function
   const hangUp = () => {
     try {
-      console.log('📞 hangUp called');
+      console.log('📞 [HANGUP] hangUp called - initiating call termination');
       
       if (activeConnection.current) {
         const call = activeConnection.current;
@@ -1072,20 +1032,20 @@ export default function GlobalWebCallInterface() {
         }
         
         if (status === 'open' || status === 'connected' || status === 'answered') {
-          console.log('📞 Disconnecting active call');
+          console.log('📞 [HANGUP] Disconnecting active call');
           call.disconnect();
         } else {
-          console.log('📞 Canceling call (not yet connected)');
+          console.log('📞 [HANGUP] Canceling call (not yet connected)');
           if (device && typeof device.disconnectAll === 'function') {
             device.disconnectAll();
           }
         }
       } else if (device && typeof device.disconnectAll === 'function') {
-        console.log('📞 No active connection, disconnecting all calls');
+        console.log('📞 [HANGUP] No active connection, disconnecting all calls');
         device.disconnectAll();
       }
       
-      disconnectCall('manual');
+      disconnectCall('hangup_button');
     } catch (err) {
       console.warn('⚠️ Error in hangUp (ignored):', err.message);
     }
@@ -1188,14 +1148,24 @@ export default function GlobalWebCallInterface() {
         // If call is completed/failed/canceled, disconnect the call IMMEDIATELY
         // This handles the case when customer hangs up - agent browser should disconnect too
         if (endedStatuses.includes(statusForUi)) {
+          console.log('🏁 [CALL ENDED] Call status indicates call has ended:', {
+            callSid: callStatusData?.callSid,
+            status: statusForUi,
+            conferenceName,
+            wasConnected: isConnected || isWebCallConnected
+          });
+          
           // Disconnect immediately if we have any connection (even if just connecting)
           if (isConnected || isWebCallConnected || activeConnection.current) {
             // Disconnect immediately - no delay
-            disconnectCall('customer_ended_call');
+            disconnectCall('call_ended_' + statusForUi);
             // End the call in context
             setTimeout(() => {
               endCall();
             }, 200);
+          } else {
+            // Even if not connected, still cleanup participants
+            cleanupCallState('call_ended_not_connected_' + statusForUi);
           }
         }
       }
@@ -1211,6 +1181,15 @@ export default function GlobalWebCallInterface() {
       if (conferenceEventData?.conferenceName === conferenceName) {
         // Handle different conference events
         switch (conferenceEventData.event) {
+          case 'agent_sid_captured':
+            // Backend has captured the agent's CallSid from voice-response
+            console.log('✅ [AGENT SID FROM BACKEND] Received in GlobalWebCallInterface:', {
+              conferenceName,
+              agentCallSid: conferenceEventData.agentCallSid,
+              customerCallSid: conferenceEventData.customerCallSid || currentCallSid,
+              agentId: conferenceEventData.agentId
+            });
+            break;
           case 'join':
             break;
           case 'leave':

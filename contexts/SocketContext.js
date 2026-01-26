@@ -380,13 +380,24 @@ export const SocketProvider = ({ children }) => {
         const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
         const statusForLifecycle = data.uiStatus || data.status;
         if (data.conferenceName && endedStatuses.includes(statusForLifecycle)) {
+          console.log('🧹 [SOCKET CLEANUP] Call ended - clearing all state for conference:', {
+            conferenceName: data.conferenceName,
+            status: statusForLifecycle,
+            callSid: data.callSid,
+            trackedCustomerSid: customerSidByConferenceRef.current.get(data.conferenceName) || 'NONE',
+            customerWasJoined: customerJoinedByConferenceRef.current.get(data.conferenceName) || false
+          });
+          
           dispatch(clearConferenceParticipants({ conferenceName: data.conferenceName }));
           conferenceUiStatusRef.current.delete(data.conferenceName);
           customerSidByConferenceRef.current.delete(data.conferenceName);
           customerJoinedByConferenceRef.current.delete(data.conferenceName);
+          lastDispatchedStatusRef.current.delete(data.callSid);
+          
+          console.log('✅ [SOCKET CLEANUP] Conference cleanup completed:', data.conferenceName);
         }
       } catch (e) {
-        // ignore
+        console.error('❌ [SOCKET CLEANUP] Error during cleanup:', e);
       }
 
       // Dispatch custom event for components to listen to
@@ -424,6 +435,16 @@ export const SocketProvider = ({ children }) => {
           // If we know the customer SID and this is a different participant, it's likely the agent
           inferredRole = 'agent';
           roleReason = 'not_customer_therefore_agent';
+        } else if (data.event === 'join' && !trackedCustomerSid && participantId) {
+          // For join events where we don't have a tracked customer yet,
+          // check if this looks like an agent (no phone number format, not the currentCallSid from context)
+          // For outbound calls, the first participant to join is usually the agent (browser)
+          // The customer joins later when they answer the phone
+          const looksLikePhoneNumber = participantId && /^\+?[1-9]\d{1,14}$/.test(participantId.replace(/[^\d+]/g, ''));
+          if (!looksLikePhoneNumber) {
+            inferredRole = 'agent';
+            roleReason = 'first_joiner_not_phone_number';
+          }
         }
         
         const role = inferredRole;
@@ -458,11 +479,22 @@ export const SocketProvider = ({ children }) => {
         // NOTE: Twilio may emit `conference-start` AFTER the first participant joins.
         // If we clear on `start`, we can accidentally delete the already-joined agent.
         if (data.event === 'end') {
-          console.log('🏁 [REDUX] Clearing all participants for conference:', conferenceName);
-          if (conferenceName) dispatch(clearConferenceParticipants({ conferenceName }));
-          if (conferenceName) conferenceUiStatusRef.current.delete(conferenceName);
-          if (conferenceName) customerSidByConferenceRef.current.delete(conferenceName);
-          if (conferenceName) customerJoinedByConferenceRef.current.delete(conferenceName);
+          console.log('🏁 [CONFERENCE END] Conference ended - clearing ALL participants and state:', {
+            conferenceName,
+            conferenceSid: data.conferenceSid,
+            trackedCustomerSid: trackedCustomerSid || 'NONE',
+            customerWasJoined: conferenceName ? customerJoinedByConferenceRef.current.get(conferenceName) : false,
+            conferenceStatus: conferenceName ? conferenceUiStatusRef.current.get(conferenceName) : 'UNKNOWN'
+          });
+          
+          if (conferenceName) {
+            dispatch(clearConferenceParticipants({ conferenceName }));
+            conferenceUiStatusRef.current.delete(conferenceName);
+            customerSidByConferenceRef.current.delete(conferenceName);
+            customerJoinedByConferenceRef.current.delete(conferenceName);
+          }
+          
+          console.log('✅ [CONFERENCE END] All cleanup completed for conference:', conferenceName);
         } else if (data.event === 'leave') {
           console.log('👋 [REDUX] Removing participant from Redux:', {
             conferenceName,
@@ -519,6 +551,45 @@ export const SocketProvider = ({ children }) => {
                 timestamp: data.timestamp,
               })
             );
+          }
+        } else if (data.event === 'agent_sid_captured') {
+          // Backend captured the agent's CallSid from voice-response webhook
+          // This is 100% reliable because it comes directly from Twilio
+          const agentCallSid = data.agentCallSid;
+          const customerCallSid = data.customerCallSid;
+          
+          console.log('🔑 [AGENT SID FROM BACKEND] Received agent CallSid from backend:', {
+            conferenceName,
+            agentCallSid,
+            customerCallSid,
+            agentId: data.agentId
+          });
+          
+          if (conferenceName && agentCallSid) {
+            // Add/update the agent in Redux with the correct CallSid
+            dispatch(
+              upsertParticipant({
+                conferenceName,
+                callSid: agentCallSid,
+                role: 'agent',
+                name: null, // Will be updated by other events
+                joined: true, // Agent is joining the conference
+                muted: false,
+                hold: false,
+                timestamp: data.timestamp,
+              })
+            );
+            
+            console.log('✅ [AGENT SID FROM BACKEND] Agent added to Redux:', {
+              conferenceName,
+              agentCallSid,
+              role: 'agent'
+            });
+          }
+          
+          // Also update customer tracking if provided
+          if (conferenceName && customerCallSid) {
+            customerSidByConferenceRef.current.set(conferenceName, customerCallSid);
           }
         }
       } catch (e) {
