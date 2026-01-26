@@ -1550,7 +1550,7 @@ export default function GlobalWebCallInterface() {
                       p.role === 'customer'
                         ? (p.joined === true ? 'Joined' : displayCallStatus === 'queued' ? 'Waiting' : 'Ringing')
                         : p.role === 'agent'
-                          ? ((isWebCallConnected || isConnected) ? 'Joined' : 'Connecting')
+                          ? ((p.joined === true || isWebCallConnected || isConnected) ? 'Joined' : 'Connecting')
                           : (p.joined ? 'Joined' : 'Connecting');
 
                     const statusText = stateText || roleStatus;
