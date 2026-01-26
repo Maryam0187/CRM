@@ -332,19 +332,42 @@ export const SocketProvider = ({ children }) => {
           conferenceUiStatusRef.current.set(confName, s);
         }
         // Track customer sid from phone-number callbacks so we can classify conference participants on the frontend.
+        // IMPORTANT: Only set the customer SID if:
+        // 1. We don't have one yet (first callback wins), OR
+        // 2. This is an early status (ringing/queued/initiated) - these are reliable customer indicators
         if (confName && isPhoneNumberWebhook && data.callSid) {
           const prevCustomerSid = customerSidByConferenceRef.current.get(confName);
-          if (prevCustomerSid !== data.callSid) {
-            console.log('🔑 [SID TRACKING] Setting CUSTOMER CallSid for conference:', {
+          const earlyStatuses = ['ringing', 'queued', 'initiated'];
+          const isEarlyStatus = earlyStatuses.includes(s);
+          
+          // Only update customer SID if we don't have one yet, OR this is an early status callback
+          if (!prevCustomerSid || isEarlyStatus) {
+            if (prevCustomerSid !== data.callSid) {
+              console.log('🔑 [SID TRACKING] Setting CUSTOMER CallSid for conference:', {
+                conferenceName: confName,
+                customerCallSid: data.callSid,
+                previousCustomerSid: prevCustomerSid || 'NONE',
+                status: s,
+                isEarlyStatus,
+                reason: !prevCustomerSid ? 'first_callback' : 'early_status_update'
+              });
+            }
+            customerSidByConferenceRef.current.set(confName, data.callSid);
+          } else if (prevCustomerSid && prevCustomerSid !== data.callSid) {
+            // We already have a customer SID and this is a different one - log but don't overwrite
+            console.log('⚠️ [SID TRACKING] Ignoring different CallSid - keeping existing customer:', {
               conferenceName: confName,
-              customerCallSid: data.callSid,
-              previousCustomerSid: prevCustomerSid || 'NONE'
+              existingCustomerSid: prevCustomerSid,
+              newCallSid: data.callSid,
+              status: s,
+              webhookSource: data.webhookSource,
+              reason: 'already_have_customer_sid'
             });
           }
-          customerSidByConferenceRef.current.set(confName, data.callSid);
         }
         // When the CUSTOMER call becomes truly in-progress, mark the customer as joined.
         // IMPORTANT: Only do this for CUSTOMER leg callbacks (webhookSource === 'phone-number')
+        // AND the callback must be for the SAME CallSid we're tracking as the customer
         // NOT for agent leg callbacks (webhookSource === 'twiml-app')
         // This is the single authoritative transition we want for UI:
         // - while ringing/queued => joined=false
@@ -352,12 +375,18 @@ export const SocketProvider = ({ children }) => {
         if (confName && s === 'in-progress' && isPhoneNumberWebhook) {
           const customerSid = customerSidByConferenceRef.current.get(confName);
           const alreadyJoined = customerJoinedByConferenceRef.current.get(confName) === true;
-          if (customerSid && !alreadyJoined) {
+          
+          // CRITICAL: Only mark as joined if this callback is for the SAME CallSid we're tracking as the customer
+          const isThisTheCustomerCallback = data.callSid && customerSid && data.callSid === customerSid;
+          
+          if (customerSid && !alreadyJoined && isThisTheCustomerCallback) {
             console.log('✅ [CUSTOMER ANSWERED] Marking customer as JOINED in Redux:', {
               conferenceName: confName,
               customerCallSid: customerSid,
+              callbackCallSid: data.callSid,
               status: s,
-              webhookSource: data.webhookSource
+              webhookSource: data.webhookSource,
+              sidMatch: true
             });
             customerJoinedByConferenceRef.current.set(confName, true);
             dispatch(
@@ -372,6 +401,16 @@ export const SocketProvider = ({ children }) => {
                 timestamp: data.timestamp,
               })
             );
+          } else if (customerSid && !alreadyJoined && !isThisTheCustomerCallback) {
+            // This is a phone-number webhook but NOT for our tracked customer - ignore it
+            console.log('⚠️ [PHONE WEBHOOK MISMATCH] Received in-progress for different CallSid than tracked customer:', {
+              conferenceName: confName,
+              trackedCustomerSid: customerSid,
+              callbackCallSid: data.callSid,
+              webhookSource: data.webhookSource,
+              status: s,
+              ignoring: true
+            });
           }
         } else if (confName && s === 'in-progress' && !isPhoneNumberWebhook) {
           // This is an agent leg or other non-customer callback - don't mark customer as joined
