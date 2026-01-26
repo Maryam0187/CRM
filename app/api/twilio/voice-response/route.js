@@ -104,6 +104,13 @@ async function handleVoiceResponse(request) {
         // Agent connections have From = "client:agent-<id>" or similar client: prefix
         const isAgentLeg = callerNumber && String(callerNumber).startsWith('client:');
         
+        console.log('🔍 [AGENT LEG CHECK] Checking if this is agent leg:', {
+          from: callerNumber,
+          isAgentLeg,
+          callSid: callSid?.substring(0, 15) + '...',
+          startsWithClient: callerNumber ? String(callerNumber).startsWith('client:') : false
+        });
+        
         if (isAgentLeg && callSid) {
           // This is the agent connecting via Voice SDK
           // Extract conference name from "To" field (e.g., "call-1" or "inbound-xxx")

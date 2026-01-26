@@ -532,6 +532,34 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           timestamp
         });
 
+        // FALLBACK: If this is an agent joining and we haven't already captured their SID,
+        // broadcast agent_sid_captured now so the frontend can track them reliably
+        if (participantRole === 'agent' && participantId) {
+          const existingAgentSid = agentCallSidMap.get(conferenceName);
+          if (!existingAgentSid || existingAgentSid !== participantId) {
+            // Store the agent's CallSid
+            agentCallSidMap.set(conferenceName, participantId);
+            
+            console.log('🔑 [AGENT SID FALLBACK] Broadcasting agent_sid_captured from conference join:', {
+              conferenceName,
+              agentCallSid: participantId,
+              agentId: derivedAgentId,
+              reason: existingAgentSid ? 'different_sid' : 'not_yet_captured'
+            });
+            
+            // Broadcast agent_sid_captured event
+            socketManager.sendConferenceEvent(conferenceName, {
+              event: 'agent_sid_captured',
+              conferenceName,
+              agentCallSid: participantId,
+              customerCallSid: customerCallSidMap.get(conferenceName) || null,
+              agentId: derivedAgentId,
+              from: rawFrom || null,
+              timestamp
+            });
+          }
+        }
+
     // Do NOT emit synthetic "in-progress" from conference join.
     // Twilio can place the PSTN leg into the Conference while still ringing,
     // and the authoritative "answered/completed" state comes from call-status callbacks.
@@ -910,15 +938,30 @@ export async function POST(request) {
           uiStatus = 'ringing';
         }
         if (callStatus === 'in-progress') {
-          const okToTransition =
-            seenPreAnswerByCallSid.has(effectiveCallSid) ||
-            (callStatusConferenceName && seenPreAnswerByConferenceName.has(callStatusConferenceName));
+          // CRITICAL: Only allow in-progress if we've seen ringing/queued for THIS SPECIFIC CallSid
+          // Do NOT use conference name check - that can cause false positives if another callback
+          // (like agent joining) added the conference name before customer's ringing callback arrives
+          const okToTransition = seenPreAnswerByCallSid.has(effectiveCallSid);
+          
+          console.log('🔍 [IN-PROGRESS CHECK] Checking if customer answered:', {
+            callSid: effectiveCallSid?.substring(0, 15) + '...',
+            conferenceName: callStatusConferenceName,
+            seenPreAnswerForThisCallSid: seenPreAnswerByCallSid.has(effectiveCallSid),
+            seenPreAnswerForConference: callStatusConferenceName ? seenPreAnswerByConferenceName.has(callStatusConferenceName) : false,
+            okToTransition,
+            willSendUiStatus: okToTransition ? 'in-progress' : 'ringing'
+          });
+          
           if (okToTransition) {
             answeredCallSidSet.add(effectiveCallSid);
             uiStatus = 'in-progress';
           } else {
-            // If Twilio reports in-progress before we observed queued/ringing, treat as ringing for UI.
+            // If Twilio reports in-progress before we observed queued/ringing for THIS CallSid, treat as ringing for UI.
             uiStatus = 'ringing';
+            console.log('⚠️ [EARLY IN-PROGRESS] Blocking early in-progress - treating as ringing:', {
+              callSid: effectiveCallSid?.substring(0, 15) + '...',
+              reason: 'have_not_seen_ringing_for_this_callsid'
+            });
           }
         }
       }
