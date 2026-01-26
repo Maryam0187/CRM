@@ -66,6 +66,22 @@ async function handleVoiceResponse(request) {
           const m = String(from).match(/agent-(\d+)/);
           if (m) agentId = m[1];
         }
+
+        // If agentId is still missing, try to infer it from a conference name like `call-<agentId>`.
+        // This prevents falling into the "Thank you..." fallback when Twilio hits this webhook
+        // without our query params (or when proxies strip them).
+        if (!agentId) {
+          const confRaw = conferenceNameFromUrl || formData.get('conferenceName') || formData.get('conference') || '';
+          const toRaw = formData.get('To') || '';
+          const candidates = [String(confRaw), String(toRaw)].filter(Boolean);
+          for (const c of candidates) {
+            const m = c.match(/^call-(\d+)$/);
+            if (m) {
+              agentId = m[1];
+              break;
+            }
+          }
+        }
         
         console.log('📞 Form data parsed:', {
           agentIdFromForm,
@@ -90,6 +106,13 @@ async function handleVoiceResponse(request) {
         console.error('❌ Error stack:', e.stack);
         // If we can't parse form data, try to continue with what we have
       }
+    }
+
+    // Also try inference from URL params if agentId is still missing (GET requests / stripped form fields).
+    if (!agentId) {
+      const conf = conferenceNameFromUrl ? String(conferenceNameFromUrl).trim() : '';
+      const m = conf.match(/^call-(\d+)$/);
+      if (m) agentId = m[1];
     }
     
     // Call recording is DISABLED - no calls will be recorded

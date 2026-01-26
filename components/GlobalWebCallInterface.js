@@ -1544,9 +1544,11 @@ export default function GlobalWebCallInterface() {
                             ? 'Speaking'
                             : null;
 
+                    // Customer should only show "Joined" when we have an explicit joined=true signal
+                    // (derived from call_status_update -> in-progress), not just because Twilio emitted noise/join callbacks.
                     const roleStatus =
                       p.role === 'customer'
-                        ? (customerAnswered ? 'Joined' : displayCallStatus === 'queued' ? 'Waiting' : 'Ringing')
+                        ? (p.joined === true ? 'Joined' : displayCallStatus === 'queued' ? 'Waiting' : 'Ringing')
                         : p.role === 'agent'
                           ? ((isWebCallConnected || isConnected) ? 'Joined' : 'Connecting')
                           : (p.joined ? 'Joined' : 'Connecting');

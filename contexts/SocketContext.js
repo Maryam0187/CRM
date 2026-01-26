@@ -327,6 +327,29 @@ export const SocketProvider = ({ children }) => {
         if (confName && data.webhookSource === 'phone-number' && data.callSid) {
           customerSidByConferenceRef.current.set(confName, data.callSid);
         }
+        // When the call becomes truly in-progress, mark the customer as joined.
+        // This is the single authoritative transition we want for UI:
+        // - while ringing/queued => joined=false
+        // - once in-progress (customer answered) => joined=true
+        if (confName && s === 'in-progress') {
+          const customerSid = customerSidByConferenceRef.current.get(confName);
+          const alreadyJoined = customerJoinedByConferenceRef.current.get(confName) === true;
+          if (customerSid && !alreadyJoined) {
+            customerJoinedByConferenceRef.current.set(confName, true);
+            dispatch(
+              upsertParticipant({
+                conferenceName: confName,
+                callSid: customerSid,
+                role: 'customer',
+                name: null,
+                joined: true,
+                muted: null,
+                hold: null,
+                timestamp: data.timestamp,
+              })
+            );
+          }
+        }
       } catch (e) {
         // ignore
       }
