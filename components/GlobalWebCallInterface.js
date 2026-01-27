@@ -87,20 +87,32 @@ export default function GlobalWebCallInterface() {
   const { getCallStatus } = useSocket();
   const [isMinimized, setIsMinimized] = useState(false);
   
+  // Track known CallSids for matching conference participants
+  const [knownSids, setKnownSids] = useState({
+    customerCallSid: null,
+    agentCallSid: null
+  });
+  
   // Participant tracking (local state - no Redux)
+  // Each participant: { callSid, role, status, muted, hold }
+  // status: 'waiting' | 'ringing' | 'connected' | 'left'
   const [participants, setParticipants] = useState([]);
   
-  // Track if customer has joined conference (most reliable indicator they answered)
-  const customerJoinedConference = participants.some(p => p.role === 'customer' && p.joined);
+  // Derived participant info
+  const customerParticipant = participants.find(p => p.role === 'customer');
+  const agentParticipant = participants.find(p => p.role === 'agent');
+  
+  // Customer is connected when they have status 'connected'
+  const customerConnected = customerParticipant?.status === 'connected';
   
   // Keep UI simple and correct:
   // - show Waiting/Queued before customer answers
   // - show Ringing while customer phone is ringing
-  // - show In-progress when customer has joined conference OR backend says so
+  // - show In-progress when customer is connected OR backend says so
   const displayCallStatus = (() => {
     if (callStatus && callEndedStatuses.includes(callStatus)) return callStatus;
-    // Customer joined conference is the most reliable indicator they answered
-    if (customerJoinedConference) return 'in-progress';
+    // Customer connected is the most reliable indicator they answered
+    if (customerConnected) return 'in-progress';
     if (callStatus === 'in-progress') return 'in-progress';
     if (callStatus === 'ringing') return 'ringing';
     if (callStatus === 'queued' || callStatus === 'initiated' || !callStatus) {
@@ -126,8 +138,15 @@ export default function GlobalWebCallInterface() {
   const ringingOscillatorsRef = useRef([]); // For storing oscillators
   const callStatusRef = useRef(callStatus); // Track current call status for interval checks
   
-  // Derived participant info
-  const customerParticipant = participants.find(p => p.role === 'customer');
+  // Helper: Determine participant role by matching CallSid
+  const resolveRoleByCallSid = (callSid) => {
+    if (!callSid) return 'unknown';
+    if (knownSids.customerCallSid && callSid === knownSids.customerCallSid) return 'customer';
+    if (knownSids.agentCallSid && callSid === knownSids.agentCallSid) return 'agent';
+    // If we know current call sid is customer's
+    if (currentCallSid && callSid === currentCallSid) return 'customer';
+    return 'unknown';
+  };
 
   // Fetch Twilio token
   const fetchToken = async () => {
@@ -1130,23 +1149,44 @@ export default function GlobalWebCallInterface() {
       if (conferenceEventData?.conferenceName === conferenceName) {
         const { event: eventType, callSid, participantRole, muted, hold } = conferenceEventData;
         
+        // Helper: Determine role by matching CallSid with known SIDs
+        const determineRole = (sid, providedRole) => {
+          if (providedRole && providedRole !== 'unknown') return providedRole;
+          // Match against known customer/agent SIDs
+          if (sid && sid === knownSids.customerCallSid) return 'customer';
+          if (sid && sid === knownSids.agentCallSid) return 'agent';
+          if (sid && sid === currentCallSid) return 'customer'; // currentCallSid is customer's
+          return 'unknown';
+        };
+        
         switch (eventType) {
           case 'agent_sid_captured':
-            // Backend has captured the agent's CallSid from voice-response
-            console.log('✅ [AGENT SID] Agent CallSid captured:', conferenceEventData.agentCallSid);
-            // Add/update agent participant
+            // Backend captured agent's CallSid - store it for matching
+            console.log('✅ [AGENT SID CAPTURED]', {
+              agentCallSid: conferenceEventData.agentCallSid,
+              customerCallSid: conferenceEventData.customerCallSid
+            });
+            
+            // Store both SIDs for future matching
+            setKnownSids(prev => ({
+              ...prev,
+              agentCallSid: conferenceEventData.agentCallSid || prev.agentCallSid,
+              customerCallSid: conferenceEventData.customerCallSid || prev.customerCallSid
+            }));
+            
+            // Update/add agent participant
             setParticipants(prev => {
-              const existing = prev.find(p => p.role === 'agent');
+              const existing = prev.find(p => p.role === 'agent' || p.callSid === conferenceEventData.agentCallSid);
               if (existing) {
-                return prev.map(p => p.role === 'agent' 
-                  ? { ...p, callSid: conferenceEventData.agentCallSid, joined: true }
+                return prev.map(p => (p.role === 'agent' || p.callSid === conferenceEventData.agentCallSid)
+                  ? { ...p, callSid: conferenceEventData.agentCallSid, role: 'agent', status: 'connected' }
                   : p
                 );
               }
               return [...prev, {
                 callSid: conferenceEventData.agentCallSid,
                 role: 'agent',
-                joined: true,
+                status: 'connected',
                 muted: false,
                 hold: false
               }];
@@ -1154,38 +1194,36 @@ export default function GlobalWebCallInterface() {
             break;
             
           case 'join':
-            // Add participant - joining conference means they've connected
-            // For customer: joining conference = they answered the call
-            // For agent: joining conference = they connected to conference
-            console.log('👤 [PARTICIPANT JOIN]', { participantRole, callSid, currentCallSid });
+            // Participant joined conference
+            // IMPORTANT: For customer, conference join happens during early media (phone ringing)
+            // Customer "connected" status should only be set when callStatus is 'in-progress' with AnswerTime
+            const role = determineRole(callSid, participantRole);
+            console.log('👤 [PARTICIPANT JOIN]', { role, callSid: callSid?.substring(0, 20), participantRole });
+            
             setParticipants(prev => {
-              // Determine the actual role - if unknown, try to infer
-              let actualRole = participantRole;
-              if (!actualRole || actualRole === 'unknown') {
-                // If this callSid matches our known customer callSid, it's the customer
-                if (callSid && callSid === currentCallSid) {
-                  actualRole = 'customer';
-                } else if (prev.some(p => p.role === 'customer' && p.callSid === callSid)) {
-                  actualRole = 'customer';
-                }
-              }
+              const existing = prev.find(p => p.callSid === callSid || p.role === role);
               
-              // Find existing by callSid first, then by role if role is known
-              const existing = prev.find(p => 
-                p.callSid === callSid || 
-                (actualRole && actualRole !== 'unknown' && p.role === actualRole)
-              );
+              // For customer: join event = ringing (early media), not connected yet
+              // For agent: join event = connected (WebRTC established)
+              const newStatus = role === 'customer' ? 'ringing' : 'connected';
               
               if (existing) {
-                return prev.map(p => (p.callSid === callSid || (actualRole && actualRole !== 'unknown' && p.role === actualRole))
-                  ? { ...p, callSid: callSid || p.callSid, role: actualRole || p.role, joined: true, muted: muted === true, hold: hold === true }
+                return prev.map(p => (p.callSid === callSid || p.role === role)
+                  ? { 
+                      ...p, 
+                      callSid: callSid || p.callSid, 
+                      role: role !== 'unknown' ? role : p.role,
+                      status: role === 'customer' ? (p.status === 'connected' ? 'connected' : newStatus) : newStatus,
+                      muted: muted === true, 
+                      hold: hold === true 
+                    }
                   : p
                 );
               }
               return [...prev, {
                 callSid,
-                role: actualRole || 'unknown',
-                joined: true, // Joining conference = they're connected
+                role,
+                status: newStatus,
                 muted: muted === true,
                 hold: hold === true
               }];
@@ -1193,32 +1231,60 @@ export default function GlobalWebCallInterface() {
             break;
             
           case 'leave':
-            // Remove participant
-            setParticipants(prev => prev.filter(p => p.callSid !== callSid));
+            // Participant left - update status to 'left'
+            const leaveRole = determineRole(callSid, participantRole);
+            console.log('👋 [PARTICIPANT LEAVE]', { role: leaveRole, callSid: callSid?.substring(0, 20) });
+            setParticipants(prev => prev.map(p => 
+              (p.callSid === callSid || p.role === leaveRole) 
+                ? { ...p, status: 'left' } 
+                : p
+            ));
             break;
             
           case 'mute':
           case 'unmute':
             // Update mute status
+            const muteRole = determineRole(callSid, participantRole);
             setParticipants(prev => prev.map(p => 
-              p.callSid === callSid ? { ...p, muted: eventType === 'mute' } : p
+              (p.callSid === callSid || p.role === muteRole) 
+                ? { ...p, muted: eventType === 'mute' } 
+                : p
             ));
             break;
             
           case 'hold':
           case 'unhold':
             // Update hold status
+            const holdRole = determineRole(callSid, participantRole);
             setParticipants(prev => prev.map(p => 
-              p.callSid === callSid ? { ...p, hold: eventType === 'hold' } : p
+              (p.callSid === callSid || p.role === holdRole)
+                ? { ...p, hold: eventType === 'hold' } 
+                : p
             ));
+            break;
+          
+          case 'speech-start':
+          case 'speech-stop':
+            // Speech detection - useful for visual feedback
+            const speechRole = determineRole(callSid, participantRole);
+            console.log(`🎤 [${eventType.toUpperCase()}]`, { role: speechRole, callSid: callSid?.substring(0, 20) });
+            // Could add speaking indicator here if needed
+            break;
+            
+          case 'start':
+            // Conference started
+            console.log('🎉 [CONFERENCE START]', conferenceName);
             break;
             
           case 'end':
-            // Clear all participants
+            // Conference ended - clear all participants
+            console.log('🏁 [CONFERENCE END]', conferenceName);
             setParticipants([]);
+            setKnownSids({ customerCallSid: null, agentCallSid: null });
             break;
             
           default:
+            console.log('📞 [CONFERENCE EVENT]', eventType, { callSid: callSid?.substring(0, 20), participantRole });
             break;
         }
       }
@@ -1232,7 +1298,7 @@ export default function GlobalWebCallInterface() {
       
       if (conferenceStatusData?.conferenceName === conferenceName) {
         // Handle conference status updates
-        // You can use this to update UI, show participant count, etc.
+        console.log('📊 [CONFERENCE STATUS]', conferenceStatusData);
       }
     };
 
@@ -1246,7 +1312,7 @@ export default function GlobalWebCallInterface() {
       window.removeEventListener('conferenceStatus', handleConferenceStatus);
       clearInterval(interval);
     };
-  }, [currentCallSid, conferenceName, getCallStatus, updateCallStatus, device, endCall, disconnectCall]);
+  }, [currentCallSid, conferenceName, getCallStatus, updateCallStatus, device, endCall, disconnectCall, knownSids]);
 
   // Sync mute state
   useEffect(() => {
@@ -1295,12 +1361,14 @@ export default function GlobalWebCallInterface() {
     callStatusRef.current = callStatus;
   }, [callStatus]);
 
-  // Sync participant "joined" status with call status
+  // Sync participant status with call status from backend
   useEffect(() => {
-    // When call becomes in-progress, mark customer as joined
+    // When call status becomes 'in-progress', customer has answered
+    // This is the reliable indicator (backend checks AnswerTime)
     if (callStatus === 'in-progress') {
+      console.log('✅ [CUSTOMER ANSWERED] Call status is in-progress - marking customer as connected');
       setParticipants(prev => prev.map(p => 
-        p.role === 'customer' ? { ...p, joined: true } : p
+        p.role === 'customer' ? { ...p, status: 'connected' } : p
       ));
     }
     
@@ -1308,19 +1376,26 @@ export default function GlobalWebCallInterface() {
     const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
     if (callStatus && endedStatuses.includes(callStatus)) {
       setParticipants([]);
+      setKnownSids({ customerCallSid: null, agentCallSid: null });
     }
   }, [callStatus]);
 
-  // Initialize participants when call starts
+  // Initialize participants and known SIDs when call starts
   useEffect(() => {
     if (conferenceName && currentCallSid && isCalling) {
+      // Store customer CallSid for matching
+      setKnownSids(prev => ({
+        ...prev,
+        customerCallSid: currentCallSid
+      }));
+      
       // Initialize with customer participant (from the call we initiated)
       setParticipants(prev => {
         if (prev.length === 0) {
           return [{
             callSid: currentCallSid,
             role: 'customer',
-            joined: false, // Not joined until they answer
+            status: 'waiting', // Waiting for conference join
             muted: false,
             hold: false
           }];
@@ -1332,6 +1407,7 @@ export default function GlobalWebCallInterface() {
     // Clear when no longer calling
     if (!conferenceName && !isCalling) {
       setParticipants([]);
+      setKnownSids({ customerCallSid: null, agentCallSid: null });
     }
   }, [conferenceName, currentCallSid, isCalling]);
 
@@ -1624,52 +1700,72 @@ export default function GlobalWebCallInterface() {
               <div className="mb-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
                 <div className="text-xs font-semibold text-gray-700 mb-2">Participants</div>
                 <div className="space-y-2">
-                  {/* Agent Status */}
+                  {/* Agent Status - use participant status or connection state */}
                   <div className="flex items-center justify-between text-xs text-gray-700">
                     <div className="truncate">
                       <span className="font-medium">Agent:</span> <span>{user?.firstName || user?.name || 'You'}</span>
                     </div>
-                    <span className={`text-[11px] px-2 py-0.5 rounded border ${
-                      (isWebCallConnected || isConnected) 
-                        ? 'bg-green-100 text-green-800 border-green-200' 
-                        : isConnecting
-                          ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
-                          : 'bg-gray-100 text-gray-600 border-gray-200'
-                    }`}>
-                      {(isWebCallConnected || isConnected) ? 'Joined' : isConnecting ? 'Connecting' : 'Waiting'}
-                    </span>
+                    {(() => {
+                      const agentStatus = agentParticipant?.status || (isConnected || isWebCallConnected ? 'connected' : isConnecting ? 'connecting' : 'waiting');
+                      const statusConfig = {
+                        connected: { bg: 'bg-green-100', text: 'text-green-800', border: 'border-green-200', label: 'Connected' },
+                        connecting: { bg: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-200', label: 'Connecting' },
+                        waiting: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', label: 'Waiting' },
+                        left: { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-200', label: 'Left' }
+                      };
+                      const config = statusConfig[agentStatus] || statusConfig.waiting;
+                      return (
+                        <span className={`text-[11px] px-2 py-0.5 rounded border ${config.bg} ${config.text} ${config.border}`}>
+                          {config.label}
+                        </span>
+                      );
+                    })()}
                   </div>
                   
-                  {/* Customer Status */}
+                  {/* Customer Status - use participant status */}
                   <div className="flex items-center justify-between text-xs text-gray-700">
                     <div className="truncate">
                       <span className="font-medium">Customer:</span> <span>{callMetadata?.customerName || callMetadata?.phoneNumber || 'Customer'}</span>
                     </div>
-                    <span className={`text-[11px] px-2 py-0.5 rounded border ${
-                      displayCallStatus === 'in-progress'
-                        ? 'bg-green-100 text-green-800 border-green-200'
-                        : displayCallStatus === 'ringing'
-                          ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
-                          : displayCallStatus === 'queued'
-                            ? 'bg-gray-100 text-gray-600 border-gray-200'
-                            : callEndedStatuses.includes(displayCallStatus)
-                              ? 'bg-red-100 text-red-800 border-red-200'
-                              : 'bg-gray-100 text-gray-600 border-gray-200'
-                    }`}>
-                      {displayCallStatus === 'in-progress' ? 'Joined' 
-                        : displayCallStatus === 'ringing' ? 'Ringing'
-                        : displayCallStatus === 'queued' ? 'Waiting'
-                        : displayCallStatus === 'completed' ? 'Left'
-                        : displayCallStatus === 'no-answer' ? 'No Answer'
-                        : displayCallStatus === 'busy' ? 'Busy'
-                        : displayCallStatus === 'failed' ? 'Failed'
-                        : displayCallStatus === 'canceled' ? 'Canceled'
-                        : 'Waiting'}
-                    </span>
+                    {(() => {
+                      // Use participant status, fallback to call status
+                      const custStatus = customerParticipant?.status || 
+                        (displayCallStatus === 'in-progress' ? 'connected' : 
+                         displayCallStatus === 'ringing' ? 'ringing' : 
+                         callEndedStatuses.includes(displayCallStatus) ? 'left' : 'waiting');
+                      const statusConfig = {
+                        connected: { bg: 'bg-green-100', text: 'text-green-800', border: 'border-green-200', label: 'Connected' },
+                        ringing: { bg: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-200', label: 'Ringing' },
+                        waiting: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', label: 'Waiting' },
+                        left: { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-200', label: 'Left' }
+                      };
+                      // Handle call-ended statuses
+                      if (callEndedStatuses.includes(displayCallStatus)) {
+                        const endedLabels = {
+                          completed: 'Ended',
+                          'no-answer': 'No Answer',
+                          busy: 'Busy',
+                          failed: 'Failed',
+                          canceled: 'Canceled',
+                          voicemail: 'Voicemail'
+                        };
+                        return (
+                          <span className="text-[11px] px-2 py-0.5 rounded border bg-red-100 text-red-800 border-red-200">
+                            {endedLabels[displayCallStatus] || 'Ended'}
+                          </span>
+                        );
+                      }
+                      const config = statusConfig[custStatus] || statusConfig.waiting;
+                      return (
+                        <span className={`text-[11px] px-2 py-0.5 rounded border ${config.bg} ${config.text} ${config.border}`}>
+                          {config.label}
+                        </span>
+                      );
+                    })()}
                   </div>
                   
-                  {/* Mute indicator for customer if in call */}
-                  {displayCallStatus === 'in-progress' && customerParticipant?.muted && (
+                  {/* Mute indicator for customer if connected */}
+                  {customerParticipant?.status === 'connected' && customerParticipant?.muted && (
                     <div className="text-[10px] text-orange-600 pl-2">
                       Customer is muted
                     </div>
