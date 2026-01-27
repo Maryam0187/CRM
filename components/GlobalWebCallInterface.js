@@ -98,6 +98,18 @@ export default function GlobalWebCallInterface() {
   // status: 'waiting' | 'ringing' | 'connected' | 'left'
   const [participants, setParticipants] = useState([]);
   
+  // Debug: Log participants state changes
+  useEffect(() => {
+    console.log('👥 [PARTICIPANTS STATE CHANGED]', {
+      count: participants.length,
+      participants: participants.map(p => ({
+        role: p.role,
+        status: p.status,
+        callSid: p.callSid?.substring(0, 15) + '...'
+      }))
+    });
+  }, [participants]);
+  
   // Derived participant info
   const customerParticipant = participants.find(p => p.role === 'customer');
   const agentParticipant = participants.find(p => p.role === 'agent');
@@ -1071,6 +1083,14 @@ export default function GlobalWebCallInterface() {
     const handleStatusUpdate = (event) => {
       const { callStatusData } = event.detail;
       
+      console.log('📥 [STATUS EVENT RECEIVED]', {
+        receivedCallSid: callStatusData?.callSid?.substring(0, 20),
+        currentCallSid: currentCallSid?.substring(0, 20),
+        status: callStatusData?.status,
+        uiStatus: callStatusData?.uiStatus,
+        matches: callStatusData?.callSid === currentCallSid
+      });
+      
       // Adopt real callSid once we start receiving Twilio callbacks.
       // When call starts, we use a temporary callSid like "pending-...".
       if (currentCallSid?.startsWith('pending-') && callStatusData?.callSid) {
@@ -1106,8 +1126,16 @@ export default function GlobalWebCallInterface() {
           (!endedStatuses.includes(currentUi) && nextOrder >= currentOrder);
 
         if (shouldApply) {
+          console.log('📨 [STATUS UPDATE APPLIED]', { 
+            statusForUi, 
+            currentUi, 
+            currentOrder, 
+            nextOrder,
+            callSid: callStatusData?.callSid?.substring(0, 20)
+          });
           updateCallStatus(statusForUi);
         } else {
+          console.log('⏭️ [STATUS UPDATE SKIPPED - DOWNGRADE]', { statusForUi, currentUi });
           // Ignore stale/downgrade updates (keeps UI stable)
           return;
         }
@@ -1145,6 +1173,16 @@ export default function GlobalWebCallInterface() {
     // Listen for conference events (join, leave, mute, hold, etc.)
     const handleConferenceEvent = (event) => {
       const { conferenceEventData } = event.detail;
+      
+      // Debug: Log all received events
+      console.log('🎯 [CONFERENCE EVENT RECEIVED]', {
+        receivedConferenceName: conferenceEventData?.conferenceName,
+        expectedConferenceName: conferenceName,
+        matches: conferenceEventData?.conferenceName === conferenceName,
+        eventType: conferenceEventData?.event,
+        participantRole: conferenceEventData?.participantRole,
+        callSid: conferenceEventData?.callSid?.substring(0, 20)
+      });
       
       if (conferenceEventData?.conferenceName === conferenceName) {
         const { event: eventType, callSid, participantRole, muted, hold } = conferenceEventData;
@@ -1230,6 +1268,14 @@ export default function GlobalWebCallInterface() {
               // For customer: join event = ringing (early media), not connected yet
               // For agent: join event = connected (WebRTC established)
               const newStatus = role === 'customer' ? 'ringing' : 'connected';
+              
+              console.log('✅ [PARTICIPANTS UPDATE - JOIN]', {
+                role,
+                newStatus,
+                existingFound: !!existing,
+                prevCount: prev.length,
+                callSid: callSid?.substring(0, 20)
+              });
               
               if (existing) {
                 return prev.map(p => (p.callSid === callSid || (role !== 'unknown' && p.role === role))
@@ -1387,13 +1433,18 @@ export default function GlobalWebCallInterface() {
 
   // Sync participant status with call status from backend
   useEffect(() => {
+    console.log('📊 [CALL STATUS CHANGED]', { callStatus, previousRef: callStatusRef.current });
+    
     // When call status becomes 'in-progress', customer has answered
     // This is the reliable indicator (backend checks AnswerTime)
     if (callStatus === 'in-progress') {
       console.log('✅ [CUSTOMER ANSWERED] Call status is in-progress - marking customer as connected');
-      setParticipants(prev => prev.map(p => 
-        p.role === 'customer' ? { ...p, status: 'connected' } : p
-      ));
+      setParticipants(prev => {
+        console.log('📊 [UPDATING CUSTOMER TO CONNECTED] prev participants:', prev);
+        return prev.map(p => 
+          p.role === 'customer' ? { ...p, status: 'connected' } : p
+        );
+      });
     }
     
     // Clear participants when call ends

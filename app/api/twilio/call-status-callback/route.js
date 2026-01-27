@@ -428,9 +428,11 @@ export async function POST(request) {
     let uiStatus = effectiveStatus;
     if (effectiveStatus === 'answered' || (effectiveStatus === 'in-progress' && answerTime)) {
       uiStatus = 'in-progress';
+      console.log('✅ [CUSTOMER ANSWERED - BACKEND]', { effectiveStatus, answerTime, uiStatus });
     } else if (effectiveStatus === 'in-progress' && !answerTime) {
       // Early media - customer phone ringing but not answered
       uiStatus = 'ringing';
+      console.log('📱 [EARLY MEDIA - RINGING]', { effectiveStatus, answerTime: 'NONE', uiStatus });
     } else if (effectiveStatus === 'initiated' || effectiveStatus === 'queued') {
       uiStatus = 'queued';
     }
