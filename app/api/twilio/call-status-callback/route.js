@@ -46,10 +46,22 @@ async function resolveParticipantRole({ conferenceName, participantId, rawFrom }
       });
       
       if (callLog) {
-        if (callLog.customerCallSid && participantId === callLog.customerCallSid) return 'customer';
-        if (callLog.agentCallSid && participantId === callLog.agentCallSid) return 'agent';
-        if (callLog.customerCallSid && participantId !== callLog.customerCallSid) return 'agent';
-        if (callLog.agentCallSid && participantId !== callLog.agentCallSid) return 'customer';
+        const { customerCallSid, agentCallSid } = callLog;
+        
+        // Direct match on participantId
+        if (customerCallSid && participantId === customerCallSid) return 'customer';
+        if (agentCallSid && participantId === agentCallSid) return 'agent';
+        
+        // If we know both SIDs and participant doesn't match either, use From to decide
+        if (customerCallSid && agentCallSid) {
+          if (isPhoneNumber(fromStr)) return 'customer';
+          return 'agent'; // Assume agent for non-phone From
+        }
+        
+        // If we only know customer SID and this participant is different, it's agent
+        if (customerCallSid && participantId !== customerCallSid) return 'agent';
+        // If we only know agent SID and this participant is different, it's customer
+        if (agentCallSid && participantId !== agentCallSid) return 'customer';
       }
     } catch (err) {
       console.error('Error querying call log for role resolution:', err.message);
@@ -58,6 +70,14 @@ async function resolveParticipantRole({ conferenceName, participantId, rawFrom }
   
   // Fallback: phone number format suggests customer
   if (isPhoneNumber(fromStr)) return 'customer';
+  
+  // For speech events without good data, try to infer from participantId format
+  // Twilio CallSids start with CA - if we have one and no other info, default to customer
+  // since customers are typically the PSTN leg
+  if (participantId && participantId.startsWith('CA') && !fromStr) {
+    // Could be either, but customer is more likely for speech events
+    return 'unknown'; // Keep unknown if we really can't tell
+  }
   
   return 'unknown';
 }
@@ -153,9 +173,39 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
     ?.replace(/^(conference-|participant-)/, '')
     ?.replace(/\s+/g, '-') || 'unknown';
   
-  console.log('📞 [CONFERENCE CALLBACK]', { event, conferenceName, participantId: participantId?.substring(0, 15) + '...' });
+  console.log('📞 [CONFERENCE CALLBACK]', { 
+    event, 
+    conferenceName, 
+    participantId: participantId?.substring(0, 20) + '...', 
+    rawFrom: rawFrom?.substring(0, 25) 
+  });
+  
+  // Query DB to log stored SIDs for debugging
+  let dbDebugInfo = null;
+  try {
+    const debugLog = await sequelizeDb.CallLog.findOne({
+      where: { conferenceName },
+      attributes: ['customerCallSid', 'agentCallSid'],
+      order: [['created_at', 'DESC']]
+    });
+    if (debugLog) {
+      dbDebugInfo = {
+        customerCallSid: debugLog.customerCallSid?.substring(0, 20),
+        agentCallSid: debugLog.agentCallSid?.substring(0, 20)
+      };
+    }
+  } catch (e) { /* ignore */ }
   
   const role = await resolveParticipantRole({ conferenceName, participantId, rawFrom });
+  console.log('📞 [PARTICIPANT ROLE RESOLVED]', { 
+    event, 
+    role, 
+    participantId: participantId?.substring(0, 20), 
+    rawFrom: rawFrom?.substring(0, 25),
+    dbSids: dbDebugInfo,
+    matchesCustomer: dbDebugInfo?.customerCallSid && participantId?.startsWith(dbDebugInfo.customerCallSid.replace('...', '')),
+    matchesAgent: dbDebugInfo?.agentCallSid && participantId?.startsWith(dbDebugInfo.agentCallSid.replace('...', ''))
+  });
   
   switch (event) {
     case 'start':
@@ -251,14 +301,28 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
         timestamp
       });
       break;
-      
-    default:
-      // Forward unknown events
+    
+    case 'speech-start':
+    case 'speech-stop':
+      // Speech detection events - include participant role
       socketManager.sendConferenceEvent(conferenceName, {
         event: event,
         conferenceSid,
         conferenceName,
         callSid: participantId,
+        participantRole: role,
+        timestamp
+      });
+      break;
+      
+    default:
+      // Forward unknown events with role if available
+      socketManager.sendConferenceEvent(conferenceName, {
+        event: event,
+        conferenceSid,
+        conferenceName,
+        callSid: participantId,
+        participantRole: role,
         timestamp
       });
   }
