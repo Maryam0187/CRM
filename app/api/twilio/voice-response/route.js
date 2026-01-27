@@ -247,7 +247,7 @@ async function handleVoiceResponse(request) {
         answerOnBridge="true" 
         hangupOnStar="false">`;
         twiml += `\n    <Conference 
-        startConferenceOnEnter="true" 
+        startConferenceOnEnter="false" 
         endConferenceOnExit="true" 
          maxParticipants="10"
           muted="false" 
