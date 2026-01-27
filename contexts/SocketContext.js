@@ -561,6 +561,7 @@ export const SocketProvider = ({ children }) => {
             // The backend might send joined=true due to timing issues with Twilio callbacks
             // The authoritative source for customer joined is call_status_update with in-progress
             const customerAlreadyAnswered = conferenceName ? customerJoinedByConferenceRef.current.get(conferenceName) === true : false;
+            const confStatus = conferenceName ? conferenceUiStatusRef.current.get(conferenceName) : null;
             
             let joinedForEvent;
             if (role === 'customer') {
@@ -582,6 +583,7 @@ export const SocketProvider = ({ children }) => {
                 customerAlreadyAnswered,
                 joinedForEvent,
                 serverJoined: data.joined,
+                confStatus,
                 decision: customerAlreadyAnswered ? 'JOINED (answered)' : 'NOT JOINED (still ringing)'
               });
             }

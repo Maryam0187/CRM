@@ -583,16 +583,16 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
     // and the authoritative "answered/completed" state comes from call-status callbacks.
 
         // Also send updated conference status (participant count increased)
-        // Note: We don't have exact count here, but we can indicate a participant joined
+        // Note: Conference is ALWAYS 'in-progress' when someone joins it.
+        // Don't confuse conference status with customer call status.
+        // Conference status = is the conference active?
+        // Customer call status = has the customer answered? (tracked separately via call_status_update)
         socketManager.sendConferenceStatus(conferenceName, {
-          status:
-            participantRole === 'agent'
-              ? 'in-progress'
-              : participantRole === 'customer'
-                ? (joined ? 'in-progress' : 'ringing')
-                : 'ringing',
+          status: 'in-progress', // Conference is active when anyone joins
           conferenceSid,
           participantJoined: true,
+          participantRole, // Include who joined so frontend can distinguish
+          participantJoined_isCustomerAnswered: participantRole === 'customer' ? joined : null,
           participantCallSid: callSid,
           callSid: callSid,
           timestamp
