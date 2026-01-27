@@ -106,6 +106,30 @@ module.exports = (sequelize) => {
       type: DataTypes.JSON,
       allowNull: true,
       field: 'twilio_data'
+    },
+    conferenceName: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      field: 'conference_name',
+      comment: 'Conference name (e.g., call-{agentId})'
+    },
+    conferenceSid: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: 'conference_sid',
+      comment: 'Twilio Conference SID (CF...)'
+    },
+    customerCallSid: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: 'customer_call_sid',
+      comment: 'Twilio CallSid for customer PSTN leg (CA...)'
+    },
+    agentCallSid: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: 'agent_call_sid',
+      comment: 'Twilio CallSid for agent Voice SDK leg (CA...)'
     }
   }, {
     tableName: 'call_logs',

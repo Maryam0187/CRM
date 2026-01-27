@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { getClient, getWebhookUrl, validatePhoneNumber } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
-import { customerCallSidMap } from '../../../../lib/twilio/conferenceState.js';
 
 export async function POST(request) {
   let phoneNumber = null;
@@ -116,10 +115,6 @@ export async function POST(request) {
       statusCallbackEvent: ['initiated', 'queued', 'ringing', 'answered', 'in-progress', 'completed']
     });
 
-    // CRITICAL: Track customer CallSid IMMEDIATELY after call creation
-    // This ensures conference callbacks can identify the customer even if they arrive before call status callbacks
-    customerCallSidMap.set(conferenceName, call.sid);
-    
     console.log('📞 [CALL INITIATE] Outbound call created:', {
       customerCallSid: call.sid,
       conferenceName,
@@ -127,9 +122,35 @@ export async function POST(request) {
       toNumber: formattedNumber,
       fromNumber,
       customerIdParam: customerId || null,
-      saleIdParam: saleId || null,
-      trackedInMap: customerCallSidMap.has(conferenceName)
+      saleIdParam: saleId || null
     });
+
+    // CRITICAL: Save call log IMMEDIATELY with customer_call_sid
+    // This avoids webhook race conditions - we know the customer CallSid right here
+    try {
+      await sequelizeDb.CallLog.create({
+        callSid: call.sid,                    // Use customer CallSid as primary identifier
+        customerCallSid: call.sid,            // Also store explicitly for clarity
+        conferenceName: conferenceName,
+        agentId: parseInt(agentId, 10),
+        customerId: customerId ? parseInt(customerId, 10) : null,
+        saleId: saleId ? parseInt(saleId, 10) : null,
+        direction: 'outbound',
+        fromNumber: fromNumber,
+        toNumber: formattedNumber,
+        status: 'queued',                      // Initial status
+        callPurpose: callPurpose || 'follow_up',
+        twilioData: {
+          customerCallSid: call.sid,
+          conferenceName: conferenceName,
+          initiatedAt: new Date().toISOString()
+        }
+      });
+      console.log('💾 [CALL INITIATE] Call log created immediately with customer_call_sid:', call.sid);
+    } catch (dbError) {
+      // Log but don't fail the call if DB save fails
+      console.error('❌ [CALL INITIATE] Failed to create initial call log:', dbError.message);
+    }
 
     // Return call info for agent
     return NextResponse.json({

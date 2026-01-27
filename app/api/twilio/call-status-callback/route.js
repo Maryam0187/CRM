@@ -2,192 +2,18 @@ import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import socketManager from '../../../../lib/socket';
 import { Op } from 'sequelize';
-import {
-  customerCallSidMap,
-  agentCallSidMap,
-} from '../../../../lib/twilio/conferenceState.js';
 
 // Constants
 const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
-const ERROR_STATUSES = ['failed', 'busy', 'no-answer', 'canceled'];
 
-const agentNameCache = new Map(); // agentId -> "First Last"
-
-// Track which customer CallSids have definitively answered (via CallStatus=answered).
-// Avoid relying on AnswerTime (often missing) and avoid treating early/false `in-progress` as answered.
-const answeredCallSidSet = new Set();
-// Track whether we've seen a pre-answer state for a customer PSTN callSid (queued/ringing).
-const seenPreAnswerByCallSid = new Set();
-// Also track pre-answer per conferenceName. Some callback streams can change CallSid between
-// early states and the post-answer state, but the conferenceName remains stable.
-const seenPreAnswerByConferenceName = new Set();
-// Track last-known UI status per customer callSid so conference callbacks can mark joined correctly.
-const latestUiStatusByCallSid = new Map();
-// Track monotonic lifecycle rank per callSid to avoid out-of-order downgrades (e.g. in-progress -> ringing).
-const latestLifecycleRankByCallSid = new Map();
-
-function normalizeUiLifecycleStatus(status) {
-  if (!status) return null;
-  const s = String(status);
-  if (s === 'initiated') return 'queued';
-  if (s === 'answered') return 'in-progress';
-  return s;
-}
-
-function lifecycleRank(status) {
-  const s = normalizeUiLifecycleStatus(status);
-  if (!s) return 0;
-  const ranks = {
-    queued: 1,
-    ringing: 2,
-    'in-progress': 3,
-    completed: 4,
-    failed: 4,
-    busy: 4,
-    'no-answer': 4,
-    canceled: 4,
-    voicemail: 4,
-  };
-  return ranks[s] || 0;
-}
-
-async function resolveAgentDisplayName(agentId) {
-  if (!agentId) return null;
-  if (agentNameCache.has(agentId)) return agentNameCache.get(agentId);
-  try {
-    const agent = await sequelizeDb.User.findByPk(agentId, {
-      attributes: ['id', 'firstName', 'lastName'],
-    });
-    const name = agent ? `${agent.firstName || ''} ${agent.lastName || ''}`.trim() : null;
-    if (name) agentNameCache.set(agentId, name);
-    return name || null;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeConferenceEventName(eventName) {
-  if (!eventName) return { event: 'unknown', eventRaw: eventName };
-  const raw = String(eventName);
-  let e = raw.toLowerCase();
-
-  // Common Twilio prefixes
-  if (e.startsWith('conference-')) e = e.replace(/^conference-/, '');
-  if (e.startsWith('participant-')) e = e.replace(/^participant-/, '');
-
-  // Normalize separators
-  e = e.replace(/\s+/g, '-');
-
-  // Keep speech start/stop readable
-  if (e === 'speech-start') return { event: 'speech_start', eventRaw: raw };
-  if (e === 'speech-stop') return { event: 'speech_stop', eventRaw: raw };
-
-  // Common participant events
-  const mapped = {
-    start: 'start',
-    end: 'end',
-    join: 'join',
-    leave: 'leave',
-    mute: 'mute',
-    unmute: 'unmute',
-    hold: 'hold',
-    unhold: 'unhold',
-    speaker: 'speaker',
-  };
-
-  if (mapped[e]) return { event: mapped[e], eventRaw: raw };
-  return { event: e || 'unknown', eventRaw: raw };
-}
-
-function resolveParticipantRole({ conferenceName, participantId, rawFrom, agentIdFromUrl }) {
-  const fromStr = rawFrom ? String(rawFrom) : '';
-  const looksLikeAgent = !!(fromStr && fromStr.startsWith('client:'));
-  const trackedAgentCallSid = conferenceName ? agentCallSidMap.get(conferenceName) : null;
-  const isTrackedAgent = !!(trackedAgentCallSid && participantId && trackedAgentCallSid === participantId);
-  const looksLikePhone = !!(fromStr && isPhoneNumber(fromStr));
-  const trackedCustomerCallSid = conferenceName ? customerCallSidMap.get(conferenceName) : null;
-  const isTrackedCustomer = !!(trackedCustomerCallSid && participantId && trackedCustomerCallSid === participantId);
-  
-  // Enhanced logging for debugging participant role resolution
-  console.log('🔍 [ROLE RESOLUTION] Resolving participant role:', {
-    conferenceName,
-    participantId: participantId ? participantId.substring(0, 15) + '...' : null,
-    rawFrom: fromStr ? (fromStr.length > 20 ? fromStr.substring(0, 20) + '...' : fromStr) : null,
-    trackedCustomerCallSid: trackedCustomerCallSid ? trackedCustomerCallSid.substring(0, 15) + '...' : 'NOT_TRACKED',
-    trackedAgentCallSid: trackedAgentCallSid ? trackedAgentCallSid.substring(0, 15) + '...' : 'NOT_TRACKED',
-    looksLikeAgent,
-    looksLikePhone,
-    isTrackedAgent,
-    isTrackedCustomer
-  });
-
-  // Strongest/earliest signals for agent:
-  // - Voice SDK identity (`client:`)
-  // - a known agent CallSid for this conference (reported from the frontend Voice SDK)
-  if (looksLikeAgent || isTrackedAgent) {
-    console.log('✅ [ROLE RESOLUTION] Identified as AGENT (client: prefix or tracked agent)');
-    return 'agent';
-  }
-
-  // PRIORITY: Check if this is the tracked customer CallSid
-  if (isTrackedCustomer) {
-    console.log('✅ [ROLE RESOLUTION] Identified as CUSTOMER (tracked customer CallSid match)');
-    return 'customer';
-  }
-
-  // Strongest signal: if we already know the customer CallSid for this conference,
-  // then any other participant is the agent.
-  if (trackedCustomerCallSid && participantId && participantId !== trackedCustomerCallSid) {
-    console.log('✅ [ROLE RESOLUTION] Identified as AGENT (not the tracked customer)');
-    return 'agent';
-  }
-
-  // If we know the agent CallSid but not the customer yet, anything else is assumed to be customer.
-  // (Other agent legs should still be classified via `client:` when available.)
-  if (trackedAgentCallSid && participantId && participantId !== trackedAgentCallSid) {
-    console.log('✅ [ROLE RESOLUTION] Identified as CUSTOMER (not the tracked agent)');
-    return 'customer';
-  }
-
-  // Fallback: if we have an agentId from URL and no tracked SIDs, try to infer
-  // If participantId looks like a phone number (customer PSTN leg creates such SIDs), it's likely customer
-  if (agentIdFromUrl && looksLikePhone) {
-    console.log('✅ [ROLE RESOLUTION] Identified as CUSTOMER (phone number format + agentId context)');
-    return 'customer';
-  }
-
-  // If Twilio didn't give us `From` and we don't yet have either CallSid mapped,
-  // don't guess: mark as unknown to avoid "customer joined while ringing".
-  if (!fromStr) {
-    console.log('⚠️ [ROLE RESOLUTION] UNKNOWN (no From field and no tracked SIDs)');
-    return 'unknown';
-  }
-  if (looksLikePhone) {
-    console.log('✅ [ROLE RESOLUTION] Identified as CUSTOMER (phone number format)');
-    return 'customer';
-  }
-  console.log('⚠️ [ROLE RESOLUTION] UNKNOWN (fallback)');
-  return 'unknown';
-}
+// Simple deduplication - track last processed status per callSid
+const lastProcessedStatus = new Map();
 
 // Helper: Normalize Twilio direction to database enum values
 function normalizeDirection(twilioDirection) {
   if (!twilioDirection) return 'outbound';
-  
   const direction = String(twilioDirection).toLowerCase();
-  
-  // Twilio sends various direction values, normalize to 'inbound' or 'outbound'
-  if (direction === 'inbound' || direction === 'inbound-api') {
-    return 'inbound';
-  }
-  
-  // All outbound variations map to 'outbound'
-  // 'outbound-api', 'outbound-dial', 'outbound', etc.
-  if (direction.startsWith('outbound')) {
-    return 'outbound';
-  }
-  
-  // Default to outbound if unknown
+  if (direction === 'inbound' || direction === 'inbound-api') return 'inbound';
   return 'outbound';
 }
 
@@ -197,81 +23,80 @@ function isPhoneNumber(num) {
   return num.startsWith('+') || /^\+?[1-9]\d{1,14}$/.test(num.replace(/[^\d+]/g, ''));
 }
 
-// Helper: Check if callback is for customer leg (phone call) vs agent leg (browser)
+// Helper: Identify if this is a customer leg (phone call) vs agent leg (browser)
 function isCustomerLeg(from, to) {
-  // Agent browser connections (TwiML App) have 'client:' prefix
   const isAgentLeg = from?.startsWith('client:') || to?.startsWith('client:');
-  
-  // Customer leg: phone numbers (not client: connections)
-  const isCustomerLeg = !isAgentLeg && (isPhoneNumber(from) || isPhoneNumber(to));
-  
-  return isCustomerLeg;
+  return !isAgentLeg && (isPhoneNumber(from) || isPhoneNumber(to));
 }
 
-// Helper: Identify callback source (TwiML App vs Phone Number)
-function identifyCallbackSource(from, to) {
-  if (from?.startsWith('client:') || to?.startsWith('client:')) {
-    return 'twiml-app'; // Agent browser connection via TwiML App
+// Helper: Resolve participant role for conference events (queries DB)
+async function resolveParticipantRole({ conferenceName, participantId, rawFrom }) {
+  const fromStr = rawFrom ? String(rawFrom) : '';
+  
+  // Agent: Voice SDK identity (client:)
+  if (fromStr.startsWith('client:')) return 'agent';
+  
+  // Query database for tracked SIDs
+  if (conferenceName) {
+    try {
+      const callLog = await sequelizeDb.CallLog.findOne({
+        where: { conferenceName },
+        attributes: ['customerCallSid', 'agentCallSid'],
+        order: [['created_at', 'DESC']]
+      });
+      
+      if (callLog) {
+        if (callLog.customerCallSid && participantId === callLog.customerCallSid) return 'customer';
+        if (callLog.agentCallSid && participantId === callLog.agentCallSid) return 'agent';
+        if (callLog.customerCallSid && participantId !== callLog.customerCallSid) return 'agent';
+        if (callLog.agentCallSid && participantId !== callLog.agentCallSid) return 'customer';
+      }
+    } catch (err) {
+      console.error('Error querying call log for role resolution:', err.message);
+    }
   }
-  if (isPhoneNumber(from) || isPhoneNumber(to)) {
-    return 'phone-number'; // Customer phone call via Phone Number config
-  }
+  
+  // Fallback: phone number format suggests customer
+  if (isPhoneNumber(fromStr)) return 'customer';
+  
   return 'unknown';
 }
 
-// Helper: Find agentId from related calls
-async function findAgentIdFromRelatedCalls(from, to) {
-  if (!from || !to || from === 'unknown' || to === 'unknown') return null;
+// Helper: Find call log by conference name or customer call sid
+async function findCallLog(conferenceName, customerCallSid) {
+  const conditions = [];
+  if (conferenceName) conditions.push({ conferenceName });
+  if (customerCallSid) conditions.push({ customerCallSid });
+  if (customerCallSid) conditions.push({ callSid: customerCallSid });
   
-  const fromNum = String(from).trim();
-  const toNum = String(to).trim();
-  if (!fromNum || !toNum) return null;
-
-  try {
-    const relatedCall = await sequelizeDb.CallLog.findOne({
-      where: {
-        [Op.and]: [
-          {
-            [Op.or]: [
-              { fromNumber: fromNum, toNumber: toNum },
-              { fromNumber: toNum, toNumber: fromNum }
-            ]
-          },
-          { agentId: { [Op.ne]: null } }
-        ]
-      },
-      order: [['created_at', 'DESC']],
-      limit: 1
-    });
-    return relatedCall?.agentId || null;
-  } catch (error) {
-    console.error('Error finding agentId from related calls:', error);
-    return null;
-  }
+  if (conditions.length === 0) return null;
+  
+  return await sequelizeDb.CallLog.findOne({
+    where: { [Op.or]: conditions },
+    order: [['created_at', 'DESC']]
+  });
 }
 
-// Helper: Get agentId from URL or callLog or related calls
-async function resolveAgentId(agentIdFromUrl, callLog, from, to) {
-  if (agentIdFromUrl) return parseInt(agentIdFromUrl, 10);
-  if (callLog?.agentId) return callLog.agentId;
-  return await findAgentIdFromRelatedCalls(from, to);
+// Helper: Update call log
+async function updateCallLog(callLog, updates) {
+  if (!callLog) return null;
+  await callLog.update(updates);
+  await callLog.reload();
+  return callLog;
 }
 
-// Helper: Broadcast call status to all relevant parties
-// Broadcast call status to frontend - ONLY for phone call callbacks (not TwiML App)
-function broadcastCallStatus(callSid, statusData, agentId, webhookSource) {
-  // OUTBOUND REFACTOR:
-  // For browser-first Dial (<Dial><Number>), Dial callbacks may come from the TwiML App context.
-  // We must broadcast Dial callbacks even if webhookSource is not phone-number.
-  const shouldBroadcast = webhookSource === 'phone-number' || statusData?.callbackType === 'dial';
-  if (!shouldBroadcast) return;
-  
+// Helper: Broadcast call status to frontend via WebSocket
+function broadcastCallStatus(conferenceName, statusData, agentId) {
+  // Send to agent
   if (agentId) {
-    socketManager.sendCallStatusToAgent(agentId, callSid, statusData);
+    socketManager.sendCallStatusToAgent(agentId, statusData.callSid, statusData);
   }
-  socketManager.sendCallStatusUpdate(callSid, statusData);
-  socketManager.sendCallStatusToSupervisors(callSid, statusData);
-  socketManager.sendCallStatusToRoom(`call_${callSid}`, callSid, statusData);
+  // Send to call room and supervisors
+  socketManager.sendCallStatusUpdate(statusData.callSid, statusData);
+  socketManager.sendCallStatusToSupervisors(statusData.callSid, statusData);
+  if (statusData.callSid) {
+    socketManager.sendCallStatusToRoom(`call_${statusData.callSid}`, statusData.callSid, statusData);
+  }
 }
 
 // Helper: Update agent status based on call
@@ -282,7 +107,6 @@ async function updateAgentStatus(agentId, callStatus, duration, callSid) {
     const agent = await sequelizeDb.User.findByPk(agentId);
     if (!agent) return;
 
-    // Set busy when call starts
     if (callStatus === 'in-progress' && agent.callStatus !== 'busy') {
       await agent.update({ callStatus: 'busy' });
       await agent.reload();
@@ -290,7 +114,6 @@ async function updateAgentStatus(agentId, callStatus, duration, callSid) {
       return;
     }
 
-    // Set available when call ends (if no other active calls)
     if (CALL_END_STATUSES.includes(callStatus)) {
       const activeCalls = await sequelizeDb.CallLog.count({
         where: {
@@ -315,508 +138,139 @@ async function updateAgentStatus(agentId, callStatus, duration, callSid) {
   }
 }
 
-// Helper: Handle special call endings (voicemail, no-answer)
-async function handleSpecialEndings(callSid, answeredBy, callStatus) {
-  const { getClient } = require('../../../../lib/twilio');
-  const client = getClient();
-
-  if (answeredBy === 'machine') {
-    setTimeout(async () => {
-      try {
-        await client.calls(callSid).update({ status: 'completed' });
-      } catch (err) {
-        console.error('Error hanging up voicemail:', err);
-      }
-    }, 30000);
-  }
-
-  if (callStatus === 'no-answer') {
-    try {
-      await client.calls(callSid).update({ status: 'completed' });
-    } catch (err) {
-      console.error('Error disconnecting no-answer:', err);
-    }
-  }
-}
-
-// Helper: Create or update call log
-async function saveCallLog(callSid, data, callLog) {
-  const {
-    agentId,
-    customerId,
-    saleId,
-    direction,
-    from,
-    to,
-    status,
-    duration,
-    callPurpose,
-    twilioData
-  } = data;
-
-  if (!agentId) {
-    console.error(`❌ Cannot save call log for ${callSid}: agentId is required`);
-    return null;
-  }
-
-  const logData = {
-    callSid,
-    agentId,
-    customerId: customerId ? parseInt(customerId, 10) : null,
-    saleId: saleId ? parseInt(saleId, 10) : null,
-    direction: normalizeDirection(direction) || 'outbound', // Ensure direction is normalized
-    fromNumber: from || 'unknown',
-    toNumber: to || 'unknown',
-    status,
-    duration: duration ? parseInt(duration) : null,
-    callPurpose: callPurpose || 'follow_up',
-    twilioData,
-    updatedAt: new Date()
-  };
-
-  if (callLog) {
-    await callLog.update(logData);
-    await callLog.reload();
-    return callLog;
-  } else {
-    return await sequelizeDb.CallLog.create(logData);
-  }
-}
-
-// Helper: Update related records (customer, sale)
-// Helper: Handle conference callbacks
-async function handleConferenceCallback(formData, conferenceSid, conferenceName, conferenceEvent, agentIdFromUrl) {
-  const sequenceNumber = formData.get('SequenceNumber');
+// Handle conference callbacks
+async function handleConferenceCallback(formData, conferenceSid, conferenceName, conferenceEvent) {
   const callSid = formData.get('CallSid');
   const participantCallSid = formData.get('ParticipantCallSid');
+  const participantId = participantCallSid || callSid;
+  const rawFrom = formData.get('From') || formData.get('Caller') || '';
   const muted = formData.get('Muted');
   const hold = formData.get('Hold');
   const timestamp = formData.get('Timestamp');
   
-  // Log all available fields for debugging
-  const fromField = formData.get('From') || 'NOT PROVIDED';
-  const toField = formData.get('To') || 'NOT PROVIDED';
-  const trackedCallSid = conferenceName && customerCallSidMap.has(conferenceName) 
-    ? customerCallSidMap.get(conferenceName)?.substring(0, 15) + '...' 
-    : 'NONE';
+  // Normalize event name
+  const event = conferenceEvent?.toLowerCase()
+    ?.replace(/^(conference-|participant-)/, '')
+    ?.replace(/\s+/g, '-') || 'unknown';
   
-  const participantId = participantCallSid || callSid; // stable key to avoid duplicates
-  const inferredRoleForLog = resolveParticipantRole({
-    conferenceName,
-    participantId,
-    rawFrom: formData.get('From') || formData.get('Caller') || '',
-    agentIdFromUrl
-  });
-
-  console.log('📞 [Webhook call-status-callback] conference callback received:', {
-    conferenceSid: conferenceSid?.substring(0, 15) + '...',
-    conferenceName,
-    conferenceEvent,
-    sequenceNumber,
-    callSid: callSid?.substring(0, 15) + '...',
-    participantCallSid: participantCallSid?.substring(0, 15) + '...' || 'NOT PROVIDED',
-    participantId: participantId?.substring(0, 15) + '...' || 'NOT PROVIDED',
-    inferredRole: inferredRoleForLog,
-    from: fromField,
-    to: toField,
-    muted,
-    hold,
-    timestamp,
-    trackedCustomerCallSid: trackedCallSid
-  });
+  console.log('📞 [CONFERENCE CALLBACK]', { event, conferenceName, participantId: participantId?.substring(0, 15) + '...' });
   
-  const { event: normalizedEvent, eventRaw } = normalizeConferenceEventName(conferenceEvent);
+  const role = await resolveParticipantRole({ conferenceName, participantId, rawFrom });
   
-  switch (normalizedEvent) {
+  switch (event) {
     case 'start':
-      console.log('🎉 Conference started:', { conferenceName, conferenceSid: conferenceSid?.substring(0, 15) + '...' });
-      if (conferenceName) {
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: 'start',
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          timestamp
-        });
-        // Also send conference status
-        socketManager.sendConferenceStatus(conferenceName, {
-          status: 'in-progress', // Conference is active
-          conferenceSid,
-          participantsCount: 0, // Will be updated as participants join
-          callSid: callSid || null
-        });
+      console.log('🎉 Conference started:', conferenceName);
+      
+      // CRITICAL: Save conference_sid to call log on conference start
+      try {
+        const callLog = await findCallLog(conferenceName, null);
+        if (callLog && !callLog.conferenceSid) {
+          await updateCallLog(callLog, { conferenceSid: conferenceSid });
+          console.log('💾 [CONFERENCE START] Conference SID saved:', conferenceSid);
+        }
+      } catch (err) {
+        console.error('❌ Failed to save conference SID:', err.message);
       }
+      
+      socketManager.sendConferenceEvent(conferenceName, {
+        event: 'start',
+        conferenceSid,
+        conferenceName,
+        timestamp
+      });
+      socketManager.sendConferenceStatus(conferenceName, {
+        status: 'in-progress',
+        conferenceSid,
+        participantsCount: 0
+      });
       break;
       
     case 'end':
-      console.log('🏁 Conference ended:', { conferenceName, conferenceSid: conferenceSid?.substring(0, 15) + '...' });
-      if (conferenceName) {
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: 'end',
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          timestamp
-        });
-        // Also send conference status
-        socketManager.sendConferenceStatus(conferenceName, {
-          status: 'completed', // Conference has ended
-          conferenceSid,
-          participantsCount: 0, // All participants have left
-          callSid: callSid || null
-        });
-        
-        // CLEANUP: Now that conference has ended, clean up all tracked SIDs
-        // This is the right place to cleanup because all participant events have been processed
-        console.log('🧹 [CONFERENCE END CLEANUP] Cleaning up tracked SIDs for ended conference:', {
-          conferenceName,
-          trackedCustomerSid: customerCallSidMap.get(conferenceName) || 'NONE',
-          trackedAgentSid: agentCallSidMap.get(conferenceName) || 'NONE'
-        });
-        
-        if (customerCallSidMap.has(conferenceName)) {
-          customerCallSidMap.delete(conferenceName);
-          console.log('🧹 [CONFERENCE END CLEANUP] Deleted customer CallSid mapping');
-        }
-        if (agentCallSidMap.has(conferenceName)) {
-          agentCallSidMap.delete(conferenceName);
-          console.log('🧹 [CONFERENCE END CLEANUP] Deleted agent CallSid mapping');
-        }
-        seenPreAnswerByConferenceName.delete(conferenceName);
-      }
+      console.log('🏁 Conference ended:', conferenceName);
+      socketManager.sendConferenceEvent(conferenceName, {
+        event: 'end',
+        conferenceSid,
+        conferenceName,
+        timestamp
+      });
+      socketManager.sendConferenceStatus(conferenceName, {
+        status: 'completed',
+        conferenceSid,
+        participantsCount: 0
+      });
       break;
       
     case 'join':
-      // Backend now uses enhanced resolveParticipantRole with all available context
-      const rawFrom = formData.get('From') || formData.get('Caller') || '';
-      const rawTo = formData.get('To') || '';
-      const participantRole = resolveParticipantRole({
+      console.log('👤 Participant joined:', { conferenceName, role, participantId: participantId?.substring(0, 15) + '...' });
+      socketManager.sendConferenceEvent(conferenceName, {
+        event: 'join',
+        conferenceSid,
         conferenceName,
-        participantId,
-        rawFrom,
-        agentIdFromUrl
+        callSid: participantId,
+        participantRole: role,
+        muted: muted === 'true',
+        hold: hold === 'true',
+        timestamp
       });
-      
-      console.log('👤 [PARTICIPANT JOIN] Participant joined conference:', {
-        conferenceName,
-        participantId: participantId?.substring(0, 15) + '...',
-        callSid: callSid?.substring(0, 15) + '...',
-        participantRole,
-        from: rawFrom ? (rawFrom.length > 20 ? rawFrom.substring(0, 20) + '...' : rawFrom) : 'NOT PROVIDED',
-        to: rawTo ? (rawTo.length > 20 ? rawTo.substring(0, 20) + '...' : rawTo) : 'NOT PROVIDED',
-        muted,
-        hold,
-        trackedCustomerSid: customerCallSidMap.get(conferenceName)?.substring(0, 15) + '...' || 'NOT_TRACKED',
-        trackedAgentSid: agentCallSidMap.get(conferenceName)?.substring(0, 15) + '...' || 'NOT_TRACKED'
-      });
-
-      let derivedAgentId = null;
-      if (agentIdFromUrl) derivedAgentId = parseInt(agentIdFromUrl, 10);
-      if (!derivedAgentId && conferenceName && /^call-\d+$/.test(conferenceName)) {
-        derivedAgentId = parseInt(conferenceName.split('-')[1], 10);
-      }
-      const participantName =
-        participantRole === 'agent'
-          ? (await resolveAgentDisplayName(derivedAgentId)) || (rawFrom ? String(rawFrom).replace(/^client:/, '') : 'Agent')
-          : null;
-
-      // Broadcast participant joined event
-      if (conferenceName && participantId) {
-        // Only agents are always "joined" on join event.
-        // For customer leg: consider "joined" true only when the customer call is truly in-progress.
-        // Unknown role should NOT be treated as joined; frontend will infer role using call_status_update.
-        const uiForParticipant = participantRole === 'customer' ? latestUiStatusByCallSid.get(participantId) : null;
-        const joined =
-          participantRole === 'agent'
-            ? true
-            : participantRole === 'customer'
-              ? uiForParticipant === 'in-progress'
-              : false;
-
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: 'join',
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          callSid: participantId,
-          participantCallSid: participantCallSid || null,
-          from: rawFrom || null,
-          to: rawTo || null,
-          muted: muted === 'true',
-          hold: hold === 'true',
-          participantRole,
-          participantName,
-          joined,
-          timestamp
-        });
-
-        // FALLBACK: If this is an agent joining and we haven't already captured their SID,
-        // broadcast agent_sid_captured now so the frontend can track them reliably
-        if (participantRole === 'agent' && participantId) {
-          const existingAgentSid = agentCallSidMap.get(conferenceName);
-          if (!existingAgentSid || existingAgentSid !== participantId) {
-            // Store the agent's CallSid
-            agentCallSidMap.set(conferenceName, participantId);
-            
-            console.log('🔑 [AGENT SID FALLBACK] Broadcasting agent_sid_captured from conference join:', {
-              conferenceName,
-              agentCallSid: participantId,
-              agentId: derivedAgentId,
-              reason: existingAgentSid ? 'different_sid' : 'not_yet_captured'
-            });
-            
-            // Broadcast agent_sid_captured event
-            socketManager.sendConferenceEvent(conferenceName, {
-              event: 'agent_sid_captured',
-              conferenceName,
-              agentCallSid: participantId,
-              customerCallSid: customerCallSidMap.get(conferenceName) || null,
-              agentId: derivedAgentId,
-              from: rawFrom || null,
-              timestamp
-            });
-          }
-        }
-
-    // Do NOT emit synthetic "in-progress" from conference join.
-    // Twilio can place the PSTN leg into the Conference while still ringing,
-    // and the authoritative "answered/completed" state comes from call-status callbacks.
-
-        // Also send updated conference status (participant count increased)
-        // Note: Conference is ALWAYS 'in-progress' when someone joins it.
-        // Don't confuse conference status with customer call status.
-        // Conference status = is the conference active?
-        // Customer call status = has the customer answered? (tracked separately via call_status_update)
-        socketManager.sendConferenceStatus(conferenceName, {
-          status: 'in-progress', // Conference is active when anyone joins
-          conferenceSid,
-          participantJoined: true,
-          participantRole, // Include who joined so frontend can distinguish
-          participantJoined_isCustomerAnswered: participantRole === 'customer' ? joined : null,
-          participantCallSid: callSid,
-          callSid: callSid,
-          timestamp
-        });
-      }
       break;
       
     case 'leave':
-      if (conferenceName && participantId) {
-        const rawFromLeave = formData.get('From') || formData.get('Caller') || '';
-        const participantRoleLeave = resolveParticipantRole({ conferenceName, participantId, rawFrom: rawFromLeave, agentIdFromUrl });
-        console.log('👋 [PARTICIPANT LEAVE] Participant left conference:', {
-          conferenceName,
-          participantId: participantId?.substring(0, 15) + '...',
-          participantRole: participantRoleLeave,
-          trackedCustomerSid: customerCallSidMap.get(conferenceName)?.substring(0, 15) + '...' || 'NOT_TRACKED',
-          trackedAgentSid: agentCallSidMap.get(conferenceName)?.substring(0, 15) + '...' || 'NOT_TRACKED'
-        });
-        let derivedAgentIdLeave = null;
-        if (agentIdFromUrl) derivedAgentIdLeave = parseInt(agentIdFromUrl, 10);
-        if (!derivedAgentIdLeave && conferenceName && /^call-\d+$/.test(conferenceName)) {
-          derivedAgentIdLeave = parseInt(conferenceName.split('-')[1], 10);
-        }
-        const participantNameLeave =
-          participantRoleLeave === 'agent'
-            ? (await resolveAgentDisplayName(derivedAgentIdLeave)) || (rawFromLeave ? String(rawFromLeave).replace(/^client:/, '') : 'Agent')
-            : (rawFromLeave && isPhoneNumber(String(rawFromLeave)) ? String(rawFromLeave) : 'Customer');
-
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: 'leave',
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          callSid: participantId,
-          participantCallSid: participantCallSid || null,
-          participantRole: participantRoleLeave,
-          participantName: participantNameLeave,
-          timestamp
-        });
-        // Also send updated conference status (participant count decreased)
-        socketManager.sendConferenceStatus(conferenceName, {
-          status: 'in-progress',
-          conferenceSid,
-          participantLeft: true,
-          participantCallSid: callSid,
-          callSid: callSid,
-          timestamp
-        });
-      }
+      console.log('👋 Participant left:', { conferenceName, role });
+      socketManager.sendConferenceEvent(conferenceName, {
+        event: 'leave',
+        conferenceSid,
+        conferenceName,
+        callSid: participantId,
+        participantRole: role,
+        timestamp
+      });
       break;
       
     case 'mute':
-      if (conferenceName && participantId) {
-        const rawFromMute = formData.get('From') || formData.get('Caller') || '';
-        const participantRoleMute = resolveParticipantRole({ conferenceName, participantId, rawFrom: rawFromMute, agentIdFromUrl });
-        console.log('🔇 [PARTICIPANT MUTE] Mute status changed:', {
-          conferenceName,
-          participantId: participantId?.substring(0, 15) + '...',
-          participantRole: participantRoleMute,
-          muted: muted === 'true'
-        });
-        let derivedAgentIdMute = null;
-        if (agentIdFromUrl) derivedAgentIdMute = parseInt(agentIdFromUrl, 10);
-        if (!derivedAgentIdMute && conferenceName && /^call-\d+$/.test(conferenceName)) {
-          derivedAgentIdMute = parseInt(conferenceName.split('-')[1], 10);
-        }
-        const participantNameMute =
-          participantRoleMute === 'agent'
-            ? (await resolveAgentDisplayName(derivedAgentIdMute)) || (rawFromMute ? String(rawFromMute).replace(/^client:/, '') : 'Agent')
-            : (rawFromMute && isPhoneNumber(String(rawFromMute)) ? String(rawFromMute) : 'Customer');
-
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: 'mute',
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          callSid: participantId,
-          participantCallSid: participantCallSid || null,
-          muted: muted === 'true',
-          participantRole: participantRoleMute,
-          participantName: participantNameMute,
-          timestamp
-        });
-      }
-      break;
-      
     case 'unmute':
-      if (conferenceName && callSid) {
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: 'unmute',
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          callSid,
-          muted: false,
-          timestamp,
-        });
-      }
+      socketManager.sendConferenceEvent(conferenceName, {
+        event: event,
+        conferenceSid,
+        conferenceName,
+        callSid: participantId,
+        participantRole: role,
+        muted: muted === 'true',
+        timestamp
+      });
       break;
       
     case 'hold':
-      if (conferenceName && participantId) {
-        const rawFromHold = formData.get('From') || formData.get('Caller') || '';
-        const participantRoleHold = resolveParticipantRole({ conferenceName, participantId, rawFrom: rawFromHold, agentIdFromUrl });
-        console.log('⏸️ [PARTICIPANT HOLD] Hold status changed:', {
-          conferenceName,
-          participantId: participantId?.substring(0, 15) + '...',
-          participantRole: participantRoleHold,
-          hold: hold === 'true'
-        });
-        let derivedAgentIdHold = null;
-        if (agentIdFromUrl) derivedAgentIdHold = parseInt(agentIdFromUrl, 10);
-        if (!derivedAgentIdHold && conferenceName && /^call-\d+$/.test(conferenceName)) {
-          derivedAgentIdHold = parseInt(conferenceName.split('-')[1], 10);
-        }
-        const participantNameHold =
-          participantRoleHold === 'agent'
-            ? (await resolveAgentDisplayName(derivedAgentIdHold)) || (rawFromHold ? String(rawFromHold).replace(/^client:/, '') : 'Agent')
-            : (rawFromHold && isPhoneNumber(String(rawFromHold)) ? String(rawFromHold) : 'Customer');
-
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: 'hold',
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          callSid: participantId,
-          participantCallSid: participantCallSid || null,
-          hold: hold === 'true',
-          participantRole: participantRoleHold,
-          participantName: participantNameHold,
-          timestamp
-        });
-      }
-      break;
-      
     case 'unhold':
-      if (conferenceName && callSid) {
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: 'unhold',
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          callSid,
-          hold: false,
-          timestamp,
-        });
-      }
-      break;
-      
-    case 'speech_start':
-    case 'speech_stop':
-      // Always forward speech events to UI for visibility/debugging
-      if (conferenceName) {
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: normalizedEvent,
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          callSid: callSid || null,
-          participantCallSid: participantCallSid || null,
-          timestamp,
-        });
-      }
-      break;
-      
-    case 'speaker':
-      console.log('🎤 Speaker changed:', { conferenceName, callSid: callSid?.substring(0, 15) + '...' });
-      if (conferenceName && callSid) {
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: 'speaker',
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          callSid,
-          timestamp
-        });
-      }
+      socketManager.sendConferenceEvent(conferenceName, {
+        event: event,
+        conferenceSid,
+        conferenceName,
+        callSid: participantId,
+        participantRole: role,
+        hold: hold === 'true',
+        timestamp
+      });
       break;
       
     default:
-      // Forward unknown/unhandled events so UI can still display them.
-      if (conferenceName) {
-        socketManager.sendConferenceEvent(conferenceName, {
-          event: normalizedEvent || 'unknown',
-          eventRaw,
-          conferenceSid,
-          conferenceName,
-          callSid: callSid || null,
-          participantCallSid: participantCallSid || null,
-          muted: muted === 'true' ? true : muted === 'false' ? false : null,
-          hold: hold === 'true' ? true : hold === 'false' ? false : null,
-          timestamp,
-        });
-      }
+      // Forward unknown events
+      socketManager.sendConferenceEvent(conferenceName, {
+        event: event,
+        conferenceSid,
+        conferenceName,
+        callSid: participantId,
+        timestamp
+      });
   }
   
-  // Return empty TwiML response (conference callbacks don't need TwiML)
   return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
     headers: { 'Content-Type': 'text/xml' }
   });
 }
 
-async function updateRelatedRecords(callLog, duration) {
-  if (!duration || duration <= 0 || !callLog) return;
-
-  const updates = [];
-  if (callLog.customerId) {
-    updates.push(sequelizeDb.Customer.update({ updatedAt: new Date() }, { where: { id: callLog.customerId } }));
-  }
-  if (callLog.saleId) {
-    updates.push(sequelizeDb.Sale.update({ updatedAt: new Date() }, { where: { id: callLog.saleId } }));
-  }
-  await Promise.all(updates);
-}
-
-// Helper: Check if callSid belongs to customer (phone call) vs agent (browser)
-// We identify customer calls by:
-// 1. Checking if call log exists and has phone numbers (not client:)
-// 2. Checking active calls - if callSid matches an outbound call from status callbacks, it's customer
-// 3. Agent calls have callSids that start with different patterns or are from client: connections
-// Main POST handler - Handles both Call Status Callbacks and Conference Callbacks
+// Main POST handler
 export async function POST(request) {
   try {
-    // Extract URL parameters
     const url = new URL(request.url);
     const agentIdFromUrl = url.searchParams.get('agentId');
     const customerIdFromUrl = url.searchParams.get('customerId');
@@ -824,375 +278,195 @@ export async function POST(request) {
     const callPurposeFromUrl = url.searchParams.get('callPurpose');
     const directionFromUrl = url.searchParams.get('direction');
 
-    // Extract form data
     const formData = await request.formData();
     
-    // ===== IDENTIFY CALLBACK TYPE =====
-    // Conference callbacks have StatusCallbackEvent and ConferenceSid
+    // Identify callback type
     const conferenceEvent = formData.get('StatusCallbackEvent');
     const conferenceSid = formData.get('ConferenceSid');
     const conferenceName = formData.get('FriendlyName');
-    
-    // Dial callbacks have DialCallSid and DialCallStatus
     const dialCallStatus = formData.get('DialCallStatus');
     const dialCallSid = formData.get('DialCallSid');
-    
-    // Regular call status callbacks have CallStatus and CallSid
     const callSid = formData.get('CallSid');
     const callStatus = formData.get('CallStatus');
     
-    // Determine callback type
     const isConferenceCallback = !!conferenceEvent && !!conferenceSid;
     const isDialCallback = !!dialCallStatus && !!dialCallSid;
-    // Some Dial status callbacks do NOT include CallStatus, so accept Dial callbacks too.
     const isCallStatusCallback = !!callSid && (!!callStatus || isDialCallback);
     
-    // ===== HANDLE CONFERENCE CALLBACKS =====
+    // Handle Conference Callbacks
     if (isConferenceCallback) {
-      return handleConferenceCallback(formData, conferenceSid, conferenceName, conferenceEvent, agentIdFromUrl);
+      return handleConferenceCallback(formData, conferenceSid, conferenceName, conferenceEvent);
     }
     
-    // ===== HANDLE CALL STATUS + DIAL CALLBACKS =====
+    // Handle Call Status Callbacks
     if (!isCallStatusCallback) {
-      return NextResponse.json({ success: false, message: 'Invalid callback - missing required fields' }, { status: 400 });
+      return NextResponse.json({ success: false, message: 'Invalid callback' }, { status: 400 });
     }
-    
-    // Clear conferenceName from conference callback scope to avoid conflicts
-    // (We'll get it from callLog for call status callbacks)
     
     const twilioDirection = formData.get('Direction') || directionFromUrl || 'outbound';
-    const direction = normalizeDirection(twilioDirection); // Normalize to 'inbound' or 'outbound'
+    const direction = normalizeDirection(twilioDirection);
     const from = formData.get('From');
     const to = formData.get('To');
     const duration = formData.get('CallDuration');
-    const startTime = formData.get('StartTime');
-    const endTime = formData.get('EndTime');
     const answerTime = formData.get('AnswerTime');
-    const hangupCause = formData.get('HangupCause');
     const answeredBy = formData.get('AnsweredBy');
-    const parentCallSid = formData.get('ParentCallSid');
     
-    const callbackSource = isDialCallback ? 'dial-conference' : 'voice-api';
-    
-    // Identify if this is from TwiML App (agent browser) or Phone Number (customer call)
-    const webhookSource = identifyCallbackSource(from, to);
-
-    // Handle Dial verb callbacks (from <Dial> wrapping Conference)
-    // Note: Both Voice API callbacks and Dial callbacks use the same endpoint
-    // - Voice API: Direct call status updates (CallSid = customer leg)
-    // - Dial: Dial operation status (CallSid = parent, DialCallSid = dialed call)
-    // For conference calls, we care about the customer leg status, so we use CallSid
-    // (Dial callback fields are still included in the broadcast payload; we just don't spam logs here.)
-
-    // IMPORTANT:
-    // For Dial callbacks, Twilio sends CallSid (parent leg executing <Dial>) and DialCallSid (dialed leg).
-    // For UI we usually track the dialed leg (customer) so we must broadcast using DialCallSid, otherwise
-    // the frontend may ignore updates because it is tracking the customer's CallSid.
+    // Get effective CallSid (for Dial callbacks, use DialCallSid)
     const effectiveCallSid = isDialCallback ? dialCallSid : callSid;
-
-    // Skip non-customer leg callbacks (agent browser connections from TwiML App)
-    // NOTE: For browser-first Dial, the "real customer status" arrives as Dial callbacks.
-    // Those can come from a TwiML App context, so we always accept Dial callbacks.
-    const isCustomer = isDialCallback || isCustomerLeg(from, to);
-    if (!isCustomer) {
-      console.log(`⏭️ Skipping ${webhookSource} callback (agent browser connection):`, { 
-        callSid: effectiveCallSid, 
-        from, 
-        to, 
-        callStatus, 
-        callbackSource,
-        webhookSource,
-        reason: 'This is an agent browser connection, not a customer phone call'
-      });
+    const effectiveStatus = isDialCallback ? dialCallStatus : callStatus;
+    
+    // Skip agent leg callbacks
+    if (!isDialCallback && !isCustomerLeg(from, to)) {
       return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
         headers: { 'Content-Type': 'text/xml' }
       });
     }
     
-    // NOTE: We don't fetch call log here because call logs are only saved when call ends.
-    
-    // Resolve agentId - callLog is null for active calls, so we only use it as a fallback
-    const agentId = await resolveAgentId(agentIdFromUrl, null, from, to);
-
-    // OUTBOUND ONLY:
-    // Inbound callbacks are handled by `/api/twilio/inbound/call-status-callback`
-    // so inbound changes do not affect outbound.
-    let callStatusConferenceName = null;
-    if (agentId) callStatusConferenceName = `call-${agentId}`;
-    
-    // Track customer callSid for this conference (from phone-number callbacks)
-    // This helps us identify customer when they join conference
-    if (callStatusConferenceName && webhookSource === 'phone-number' && effectiveCallSid) {
-      customerCallSidMap.set(callStatusConferenceName, effectiveCallSid);
+    // Deduplication: Skip if we've already processed this exact status
+    const statusKey = `${effectiveCallSid}-${effectiveStatus}`;
+    if (lastProcessedStatus.get(effectiveCallSid) === statusKey) {
+      return NextResponse.json({ success: true, message: 'Duplicate callback ignored' });
     }
-
-    // UI STATUS (minimal derivation for UX):
-    // Goal: show "ringing" until the customer answers, then "in-progress".
-    // We keep `status` as the raw Twilio CallStatus, and provide `uiStatus` for frontend display/timer logic.
-    let uiStatus = callStatus;
-
-    if (isDialCallback && dialCallStatus) {
-      // DialCallStatus is the most reliable "answered" signal when using <Dial>.
-      if (dialCallStatus === 'answered') uiStatus = 'in-progress';
-      else if (['initiated', 'ringing', 'queued'].includes(dialCallStatus)) uiStatus = 'ringing';
-      else uiStatus = dialCallStatus; // busy/no-answer/failed/canceled/completed
-    } else {
-      if (callStatus === 'answered') uiStatus = 'in-progress';
-
-      // Outbound customer PSTN leg (phone-number):
-      // Avoid relying on AnswerTime. Also avoid early/false `in-progress` while customer is still ringing.
-      // Rule:
-      // - once we've observed queued/ringing for this CallSid, allow in-progress
-      // - otherwise keep ringing
-      if (webhookSource === 'phone-number' && direction !== 'inbound') {
-        if (callStatus === 'queued' || callStatus === 'initiated') {
-          seenPreAnswerByCallSid.add(effectiveCallSid);
-          if (callStatusConferenceName) seenPreAnswerByConferenceName.add(callStatusConferenceName);
-          uiStatus = 'queued';
-        }
-        if (callStatus === 'ringing') {
-          seenPreAnswerByCallSid.add(effectiveCallSid);
-          if (callStatusConferenceName) seenPreAnswerByConferenceName.add(callStatusConferenceName);
-          uiStatus = 'ringing';
-        }
-        if (callStatus === 'in-progress') {
-          // CRITICAL: Only allow in-progress if we've seen ringing/queued for THIS SPECIFIC CallSid
-          // Do NOT use conference name check - that can cause false positives if another callback
-          // (like agent joining) added the conference name before customer's ringing callback arrives
-          const okToTransition = seenPreAnswerByCallSid.has(effectiveCallSid);
-          
-          console.log('🔍 [IN-PROGRESS CHECK] Checking if customer answered:', {
-            callSid: effectiveCallSid?.substring(0, 15) + '...',
-            conferenceName: callStatusConferenceName,
-            seenPreAnswerForThisCallSid: seenPreAnswerByCallSid.has(effectiveCallSid),
-            seenPreAnswerForConference: callStatusConferenceName ? seenPreAnswerByConferenceName.has(callStatusConferenceName) : false,
-            okToTransition,
-            willSendUiStatus: okToTransition ? 'in-progress' : 'ringing'
-          });
-          
-          if (okToTransition) {
-            answeredCallSidSet.add(effectiveCallSid);
-            uiStatus = 'in-progress';
-          } else {
-            // If Twilio reports in-progress before we observed queued/ringing for THIS CallSid, treat as ringing for UI.
-            uiStatus = 'ringing';
-            console.log('⚠️ [EARLY IN-PROGRESS] Blocking early in-progress - treating as ringing:', {
-              callSid: effectiveCallSid?.substring(0, 15) + '...',
-              reason: 'have_not_seen_ringing_for_this_callsid'
-            });
-          }
-        }
-      }
-
-      // (Inbound UI status logic is handled by the inbound callback route)
+    lastProcessedStatus.set(effectiveCallSid, statusKey);
+    
+    // Derive conference name from agentId
+    const agentId = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
+    const derivedConferenceName = agentId ? `call-${agentId}` : null;
+    
+    // Determine UI status
+    // - Show "ringing" until customer answers (has AnswerTime or status is explicitly 'answered')
+    // - Show "in-progress" when customer has actually answered
+    let uiStatus = effectiveStatus;
+    if (effectiveStatus === 'answered' || (effectiveStatus === 'in-progress' && answerTime)) {
+      uiStatus = 'in-progress';
+    } else if (effectiveStatus === 'in-progress' && !answerTime) {
+      // Early media - customer phone ringing but not answered
+      uiStatus = 'ringing';
+    } else if (effectiveStatus === 'initiated' || effectiveStatus === 'queued') {
+      uiStatus = 'queued';
     }
-
-    const rawStatusToSend = callStatus || (isDialCallback ? dialCallStatus : null);
-
+    
+    console.log('📞 [CALL STATUS]', {
+      callSid: effectiveCallSid?.substring(0, 15) + '...',
+      status: effectiveStatus,
+      uiStatus,
+      direction,
+      conferenceName: derivedConferenceName
+    });
+    
+    // Build status data for frontend
     const statusData = {
       callSid: effectiveCallSid,
-      status: rawStatusToSend, // CallStatus if present, otherwise DialCallStatus
+      status: effectiveStatus,
       uiStatus,
-      duration: duration ? parseInt(duration) : null,
       direction,
       from,
       to,
-      startTime,
-      endTime,
-      answerTime,
-      hangupCause,
+      duration: duration ? parseInt(duration) : null,
+      conferenceName: derivedConferenceName,
       agentId,
       customerId: customerIdFromUrl || null,
-      saleId: saleIdFromUrl || null,
-      callPurpose: callPurposeFromUrl || null,
-      conferenceName: callStatusConferenceName,
-      webhookSource, // Include source for debugging
-      callbackType: isDialCallback ? 'dial' : 'call-status',
-      dialCallSid: dialCallSid || null,
-      dialCallStatus: dialCallStatus || null,
-      twilioData: {
-        callStatus: callStatus || null,
-        dialCallSid: dialCallSid || null,
-        dialCallStatus: dialCallStatus || null,
-        direction: twilioDirection, // Keep original Twilio direction in twilioData
-        normalizedDirection: direction, // Store normalized direction
-        from,
-        to,
-        duration,
-        startTime,
-        endTime,
-        answerTime,
-        hangupCause,
-        answeredBy,
-        parentCallSid: parentCallSid || (isDialCallback ? callSid : null)
-      }
+      saleId: saleIdFromUrl || null
     };
-
-    // Twilio callbacks can arrive out-of-order (e.g. in-progress then a delayed ringing retry).
-    // Prevent "downgrades" from being broadcast/used for gating once we've reached a later lifecycle state.
-    const lifecycleStatusForRank = normalizeUiLifecycleStatus(uiStatus || rawStatusToSend);
-    const nextRank = lifecycleRank(lifecycleStatusForRank);
-    const prevRank = effectiveCallSid ? (latestLifecycleRankByCallSid.get(effectiveCallSid) || 0) : 0;
-    const isTerminal = nextRank >= 4;
-    const isStaleDowngrade = prevRank > 0 && nextRank > 0 && nextRank < prevRank && !isTerminal;
-
-    if (!isStaleDowngrade && effectiveCallSid && nextRank > 0) {
-      latestLifecycleRankByCallSid.set(effectiveCallSid, nextRank);
-    }
-
-    // Store latest UI status for this callSid (used to gate customer "joined" in conference callbacks).
-    // Only update this when we're not processing a stale downgrade.
-    if (!isStaleDowngrade && effectiveCallSid && (uiStatus || rawStatusToSend)) {
-      latestUiStatusByCallSid.set(effectiveCallSid, normalizeUiLifecycleStatus(uiStatus || rawStatusToSend));
-    }
-
-    // Minimal server log: only callback statuses
-    console.log('📞 [Webhook call-status-callback] call status received:', {
-      callbackType: isDialCallback ? 'dial' : 'call-status',
-      webhookSource,
-      callSid: effectiveCallSid,
-      parentCallSid: isDialCallback ? callSid : (parentCallSid || null),
-      status: rawStatusToSend,
-      dialCallStatus: dialCallStatus || null,
-      uiStatus,
-      direction,
-      conferenceName: callStatusConferenceName
-    });
     
-    // Broadcast using the effectiveCallSid we believe the UI is tracking.
-    // Skip stale downgrades (prevents in-progress -> ringing in UI and logs).
-    if (!isStaleDowngrade) {
-      broadcastCallStatus(effectiveCallSid, statusData, agentId, webhookSource);
-    }
-
-    // Safety: for Dial callbacks, also broadcast on the parent CallSid so UIs tracking the parent
-    // still receive end statuses and disconnect correctly.
-    if (!isStaleDowngrade && isDialCallback && callSid && callSid !== effectiveCallSid) {
-      const aliasStatusData = { ...statusData, callSid };
-      broadcastCallStatus(callSid, aliasStatusData, agentId, webhookSource);
-    }
-
-    // Save to database ONLY when call ends (successfully or failed)
-    // For Dial callbacks, we don't persist (we persist on the real call-status stream).
-    const endStatusForLifecycle = callStatus || (isDialCallback ? dialCallStatus : null);
-    const isCallEnded = !!endStatusForLifecycle && CALL_END_STATUSES.includes(endStatusForLifecycle);
+    // Broadcast to frontend via WebSocket
+    broadcastCallStatus(derivedConferenceName, statusData, agentId);
     
-    // Clean up per-CallSid state when call ends
-    // NOTE: customerCallSidMap and agentCallSidMap are cleaned up on conference-end event,
-    // NOT here, to avoid race conditions with participant-leave events that need role resolution
+    // Update call log when call ends
+    const isCallEnded = CALL_END_STATUSES.includes(effectiveStatus);
+    
     if (isCallEnded) {
-      console.log('🧹 [CALL END CLEANUP] Call ended - cleaning up per-CallSid state:', {
-        conferenceName: callStatusConferenceName,
-        callSid: effectiveCallSid,
-        endStatus: endStatusForLifecycle
-      });
+      // Cleanup deduplication map
+      lastProcessedStatus.delete(effectiveCallSid);
       
-      // Only clean up per-CallSid sets, NOT the conference-level SID maps
-      if (effectiveCallSid) {
-        answeredCallSidSet.delete(effectiveCallSid);
-        seenPreAnswerByCallSid.delete(effectiveCallSid);
-        latestUiStatusByCallSid.delete(effectiveCallSid);
-        latestLifecycleRankByCallSid.delete(effectiveCallSid);
+      // Find and update call log
+      const callLog = await findCallLog(derivedConferenceName, effectiveCallSid);
+      
+      if (callLog) {
+        // Determine final status
+        let finalStatus = effectiveStatus;
+        if (answeredBy === 'machine') {
+          finalStatus = 'voicemail';
+        }
+        
+        await updateCallLog(callLog, {
+          status: finalStatus,
+          duration: duration ? parseInt(duration) : callLog.duration,
+          twilioData: {
+            ...callLog.twilioData,
+            callStatus: effectiveStatus,
+            endedAt: new Date().toISOString(),
+            duration,
+            answeredBy
+          }
+        });
+        
+        console.log('💾 [CALL END] Call log updated:', { callSid: effectiveCallSid, status: finalStatus });
+        
+        // Update related records
+        if (duration && parseInt(duration) > 0) {
+          if (callLog.customerId) {
+            await sequelizeDb.Customer.update({ updatedAt: new Date() }, { where: { id: callLog.customerId } });
+          }
+          if (callLog.saleId) {
+            await sequelizeDb.Sale.update({ updatedAt: new Date() }, { where: { id: callLog.saleId } });
+          }
+        }
+      } else if (agentId) {
+        // Create call log if it doesn't exist
+        try {
+          await sequelizeDb.CallLog.create({
+            callSid: effectiveCallSid,
+            customerCallSid: effectiveCallSid,
+            conferenceName: derivedConferenceName,
+            agentId,
+            customerId: customerIdFromUrl ? parseInt(customerIdFromUrl, 10) : null,
+            saleId: saleIdFromUrl ? parseInt(saleIdFromUrl, 10) : null,
+            direction,
+            fromNumber: from || 'unknown',
+            toNumber: to || 'unknown',
+            status: answeredBy === 'machine' ? 'voicemail' : effectiveStatus,
+            duration: duration ? parseInt(duration) : null,
+            callPurpose: callPurposeFromUrl || 'follow_up',
+            twilioData: {
+              callStatus: effectiveStatus,
+              endedAt: new Date().toISOString(),
+              answeredBy
+            }
+          });
+          console.log('💾 [CALL END] New call log created:', effectiveCallSid);
+        } catch (dbErr) {
+          console.error('❌ Failed to create call log:', dbErr.message);
+        }
       }
       
-      console.log('✅ [CALL END CLEANUP] Per-CallSid state cleaned up:', {
-        callSid: effectiveCallSid?.substring(0, 15) + '...',
-        conferenceName: callStatusConferenceName
-      });
-    }
-    
-    // Only fetch call log when call ends (to check if it exists for update vs create)
-    let finalCallLog = null;
-    
-    // Only persist on real call-status callbacks (not Dial callbacks) to avoid saving parent-leg noise.
-    if (isCallEnded && !isDialCallback) {
-      // Fetch existing call log if it exists (might exist if call was saved earlier)
-      finalCallLog = await sequelizeDb.CallLog.findOne({ where: { callSid: effectiveCallSid } });
-      console.log('💾 Saving call log to database (call ended)', {
-        callSid: effectiveCallSid.substring(0, 15) + '...',
-        callStatus,
-        hasExistingLog: !!finalCallLog
-      });
-      const twilioData = {
-        callSid: effectiveCallSid,
-        callStatus, // Original Twilio status
-        direction: twilioDirection, // Keep original Twilio direction
-        normalizedDirection: direction, // Store normalized direction
-        from,
-        to,
-        duration,
-        startTime,
-        endTime,
-        answerTime,
-        hangupCause,
-        answeredBy,
-        parentCallSid: parentCallSid || (isDialCallback ? callSid : null),
-        conferenceName: callStatusConferenceName,
-        createdAt: new Date().toISOString(),
-        lastUpdated: new Date().toISOString()
-      };
-
-      // Handle voicemail status
-      let finalStatus = callStatus;
-      if (answeredBy === 'machine') {
-        finalStatus = 'voicemail';
-        twilioData.isVoicemail = true;
-        twilioData.voicemailDetectedAt = new Date().toISOString();
-      }
-
-      finalCallLog = await saveCallLog(effectiveCallSid, {
-        agentId,
-        customerId: customerIdFromUrl,
-        saleId: saleIdFromUrl,
-        direction,
-        from,
-        to,
-        status: finalStatus,
-        duration,
-        callPurpose: callPurposeFromUrl,
-        twilioData
-      }, finalCallLog);
-
-      // Handle special endings (voicemail, no-answer)
-      await handleSpecialEndings(effectiveCallSid, answeredBy, callStatus);
-    }
-
-    // Update agent status (during call and on call end)
-    if (agentId) {
-      await updateAgentStatus(agentId, callStatus, duration, effectiveCallSid);
-    }
-
-    // Update related records for completed calls
-    if (callStatus === 'completed' && duration && finalCallLog) {
-      await updateRelatedRecords(finalCallLog, parseInt(duration));
-    }
-
-    // Cleanup call room after call ends (with 2 minute delay)
-    if (isCallEnded) {
+      // Update agent status
+      await updateAgentStatus(agentId, effectiveStatus, duration, effectiveCallSid);
+      
+      // Cleanup call room after delay
       setTimeout(() => {
         socketManager.cleanupCallRoom(effectiveCallSid);
-      }, 2 * 60 * 1000); // 2 minutes
+      }, 2 * 60 * 1000);
+    } else {
+      // Update call status during the call (not ended)
+      const callLog = await findCallLog(derivedConferenceName, effectiveCallSid);
+      if (callLog && callLog.status !== effectiveStatus) {
+        await updateCallLog(callLog, { status: effectiveStatus });
+      }
+      
+      // Update agent status for in-progress
+      if (effectiveStatus === 'in-progress') {
+        await updateAgentStatus(agentId, effectiveStatus, null, effectiveCallSid);
+      }
     }
 
-    return NextResponse.json({ success: true, message: 'Call status updated successfully' });
+    return NextResponse.json({ success: true, message: 'Call status processed' });
 
   } catch (error) {
     console.error('Error processing call status callback:', error);
-    
-    // Try to reset agent status on error
-    try {
-      const url = new URL(request.url);
-      const agentIdFromUrl = url.searchParams.get('agentId');
-      if (agentIdFromUrl) {
-        await updateAgentStatus(parseInt(agentIdFromUrl, 10), 'failed', null, null);
-      }
-    } catch (agentError) {
-      console.error('Error resetting agent status:', agentError);
-    }
-
     return NextResponse.json({
       success: false,
-      message: 'Failed to process call status callback',
+      message: 'Failed to process callback',
       error: error.message
     }, { status: 500 });
   }

@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { getWebhookUrl, validatePhoneNumber } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import { handleInboundCall } from '../../../../lib/twilio/inbound/handleInboundCall';
-import { agentCallSidMap, customerCallSidMap } from '../../../../lib/twilio/conferenceState.js';
 import socketManager from '../../../../lib/socket';
+import { Op } from 'sequelize';
 
 // Handle both GET and POST requests (Twilio can use either)
 export async function GET(request) {
@@ -127,17 +127,31 @@ async function handleVoiceResponse(request) {
               agentId: agentId
             });
             
-            // Store in the shared state map
-            agentCallSidMap.set(confName, callSid);
-            
-            // Also get the customer CallSid for comparison
-            const customerSid = customerCallSidMap.get(confName);
-            
-            console.log('✅ [AGENT SID STORED] Agent CallSid stored on backend:', {
-              conferenceName: confName,
-              agentCallSid: callSid,
-              customerCallSid: customerSid || 'NOT_YET_TRACKED'
-            });
+            // CRITICAL: Save agent_call_sid to the call log immediately
+            // This happens BEFORE conference join, so we have the agent CallSid early
+            let customerSid = null;
+            try {
+              // Find the call log by conference name
+              const callLog = await sequelizeDb.CallLog.findOne({
+                where: { conferenceName: confName },
+                order: [['created_at', 'DESC']]
+              });
+              
+              if (callLog) {
+                customerSid = callLog.customerCallSid;
+                await callLog.update({ agentCallSid: callSid });
+                console.log('💾 [AGENT SID SAVED] Agent CallSid saved to call log:', {
+                  callLogId: callLog.id,
+                  agentCallSid: callSid,
+                  customerCallSid: customerSid,
+                  conferenceName: confName
+                });
+              } else {
+                console.log('⚠️ [AGENT SID] No call log found to update (call might not be initiated yet)');
+              }
+            } catch (dbErr) {
+              console.error('❌ [AGENT SID] Failed to save agent CallSid to DB:', dbErr.message);
+            }
             
             // Broadcast to frontend via socket so UI can update immediately
             try {
@@ -145,7 +159,7 @@ async function handleVoiceResponse(request) {
                 event: 'agent_sid_captured',
                 conferenceName: confName,
                 agentCallSid: callSid,
-                customerCallSid: customerSid || null,
+                customerCallSid: customerSid,
                 agentId: agentId ? parseInt(agentId, 10) : null,
                 from: callerNumber,
                 timestamp: new Date().toISOString()

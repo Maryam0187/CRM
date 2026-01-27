@@ -1,13 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useCall } from '../contexts/CallContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient';
 import { Device } from '@twilio/voice-sdk';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { clearConferenceParticipants } from '../store/slices/participantsSlice';
 
 // Add global unhandled rejection handler to prevent SDK errors from crashing app
 if (typeof window !== 'undefined' && !window.__twilioRejectionHandlerAdded) {
@@ -80,11 +78,6 @@ export default function GlobalWebCallInterface() {
   
   // Get user and access token from auth context (needed for device setup)
   const { user, accessToken } = useAuth();
-  const dispatch = useAppDispatch();
-  const participantsBySid = useAppSelector(
-    (state) => (conferenceName && state?.participants?.byConference?.[conferenceName]) || {}
-  );
-  const participants = Object.values(participantsBySid || {});
   const callEndedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
   const callStatusUiRef = useRef(callStatus);
   useEffect(() => {
@@ -95,7 +88,6 @@ export default function GlobalWebCallInterface() {
   // - show Waiting/Queued before customer answers
   // - show Ringing while customer phone is ringing
   // - show In-progress only when backend says so (customer answered)
-  // Never infer "in-progress" from participant join events.
   const displayCallStatus = (() => {
     if (callStatus && callEndedStatuses.includes(callStatus)) return callStatus;
     if (callStatus === 'in-progress') return 'in-progress';
@@ -103,48 +95,10 @@ export default function GlobalWebCallInterface() {
     if (callStatus === 'queued' || callStatus === 'initiated' || !callStatus) {
       return isCalling ? 'queued' : 'queued';
     }
-    // default fallback
     return 'queued';
   })();
 
   const customerAnswered = displayCallStatus === 'in-progress';
-  const customerConferenceJoined = !!participants.find((p) => p.role === 'customer' && p.joined === true);
-  
-  // Find agent and customer participants for logging
-  const agentParticipant = participants.find((p) => p.role === 'agent');
-  const customerParticipant = participants.find((p) => p.role === 'customer');
-
-  // Always log participant state changes for debugging call flow
-  useEffect(() => {
-    if (!conferenceName) return;
-    if (typeof window === 'undefined') return;
-    
-    // Log current state of agent and customer participants
-    console.log('📊 [REDUX PARTICIPANTS STATE]', {
-      conferenceName,
-      callStatus: displayCallStatus,
-      customerAnswered,
-      customerConferenceJoined,
-      totalParticipants: participants.length,
-      agentSid: agentParticipant?.callSid || 'NOT_IN_REDUX',
-      agentJoined: agentParticipant?.joined ?? 'N/A',
-      agentName: agentParticipant?.name || 'N/A',
-      customerSid: customerParticipant?.callSid || 'NOT_IN_REDUX',
-      customerJoined: customerParticipant?.joined ?? 'N/A',
-      customerName: customerParticipant?.name || 'N/A',
-      currentCallSid: currentCallSid,
-      allParticipants: participants.map(p => ({
-        callSid: p.callSid,
-        role: p.role,
-        joined: p.joined,
-        muted: p.muted
-      }))
-    });
-  }, [conferenceName, participantsBySid, displayCallStatus, customerAnswered, customerConferenceJoined, participants, agentParticipant, customerParticipant, currentCallSid]);
-
-  // NOTE: Agent CallSid is now captured on the backend in /api/twilio/voice-response
-  // when Twilio calls the webhook with From=client:agent-X
-  // The backend broadcasts 'agent_sid_captured' event via socket which updates Redux
   
   const { getCallStatus } = useSocket();
   const [isMinimized, setIsMinimized] = useState(false);
@@ -940,26 +894,10 @@ export default function GlobalWebCallInterface() {
     }
   };
 
-  // Comprehensive cleanup function - clears all participants and call state
+  // Cleanup function for call state
   const cleanupCallState = useCallback((reason = 'unknown') => {
-    console.log('🧹 [CLEANUP] Starting comprehensive call cleanup:', {
-      reason,
-      conferenceName,
-      currentCallSid,
-      participantsCount: participants.length
-    });
-    
-    // Clear Redux participants for this conference
-    if (conferenceName) {
-      console.log('🧹 [CLEANUP] Clearing all participants from Redux for conference:', conferenceName);
-      dispatch(clearConferenceParticipants({ conferenceName }));
-    }
-    
-    // Clear agent SID reported ref
-    agentSidReportedRef.current.clear();
-    
-    console.log('✅ [CLEANUP] Call cleanup completed');
-  }, [conferenceName, currentCallSid, participants.length, dispatch]);
+    console.log('🧹 [CLEANUP] Call cleanup:', { reason, conferenceName, currentCallSid });
+  }, [conferenceName, currentCallSid]);
 
   // Helper function to disconnect call
   const disconnectCall = useCallback((reason = 'manual') => {
@@ -1005,7 +943,7 @@ export default function GlobalWebCallInterface() {
       activeConnection.current = null;
       localMediaStream.current = null;
       
-      // Cleanup Redux participants
+      // Cleanup call state
       cleanupCallState(reason);
     } catch (err) {
       console.warn('⚠️ Error in disconnectCall (ignored):', err.message);
@@ -1164,7 +1102,7 @@ export default function GlobalWebCallInterface() {
               endCall();
             }, 200);
           } else {
-            // Even if not connected, still cleanup participants
+            // Cleanup call state even if not connected
             cleanupCallState('call_ended_not_connected_' + statusForUi);
           }
         }
@@ -1559,83 +1497,6 @@ export default function GlobalWebCallInterface() {
                 <div className="w-3 h-3 rounded-full animate-pulse bg-green-500"></div>
                 <div className="text-sm font-semibold text-green-700">
                   Call Connected
-                </div>
-              </div>
-            )}
-
-            {/* Participants */}
-            {conferenceName && participants.length > 0 && (
-              <div className="mb-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                <div className="text-xs font-semibold text-gray-700 mb-2">Participants</div>
-                <div className="space-y-1">
-                  {participants.map((p) => {
-                    const roleLabel = p.role === 'agent' ? 'Agent' : p.role === 'customer' ? 'Customer' : 'Participant';
-                    const displayName =
-                      p.role === 'customer'
-                        ? (callMetadata?.customerName || p.name || callMetadata?.phoneNumber || 'Customer')
-                        : (p.name || user?.name || 'Agent');
-
-                    // Status priority: hold > muted > speaking > joined/ringing/connecting
-                    // Only show "Speaking" after the customer has actually joined (prevents early noise while ringing).
-                    const canShowSpeaking =
-                      displayCallStatus === 'in-progress' && customerConferenceJoined && p.joined === true;
-                    const stateText =
-                      p.hold === true
-                        ? 'Hold'
-                        : p.muted === true
-                          ? 'Muted'
-                          : canShowSpeaking && p.speaking === true
-                            ? 'Speaking'
-                            : null;
-
-                    // Customer should only show "Joined" when we have an explicit joined=true signal
-                    // (derived from call_status_update -> in-progress), not just because Twilio emitted noise/join callbacks.
-                    const roleStatus =
-                      p.role === 'customer'
-                        ? (p.joined === true ? 'Joined' : displayCallStatus === 'queued' ? 'Waiting' : 'Ringing')
-                        : p.role === 'agent'
-                          ? ((p.joined === true || isWebCallConnected || isConnected) ? 'Joined' : 'Connecting')
-                          : (p.joined ? 'Joined' : 'Connecting');
-
-                    const statusText = stateText || roleStatus;
-
-                    const statusColor =
-                      p.hold === true
-                        ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
-                        : p.muted === true
-                          ? 'bg-orange-100 text-orange-800 border-orange-200'
-                          : (canShowSpeaking && p.speaking === true)
-                            ? 'bg-green-100 text-green-800 border-green-200'
-                            : p.role === 'customer' && !customerAnswered
-                              ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
-                              : 'bg-blue-100 text-blue-800 border-blue-200';
-
-                    return (
-                      <div key={p.callSid} className="flex items-center justify-between text-xs text-gray-700">
-                        <div className="truncate">
-                          <span className="font-medium">{roleLabel}:</span> <span>{displayName}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {canShowSpeaking && p.speaking === true && (
-                            <svg
-                              className="w-4 h-4 text-green-600"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              aria-label="Speaking"
-                            >
-                              <path strokeWidth="2" strokeLinecap="round" d="M12 3v18" />
-                              <path strokeWidth="2" strokeLinecap="round" d="M8 7v10" />
-                              <path strokeWidth="2" strokeLinecap="round" d="M16 7v10" />
-                            </svg>
-                          )}
-                          <span className={`text-[11px] px-2 py-0.5 rounded border ${statusColor}`}>
-                            {statusText}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
                 </div>
               </div>
             )}

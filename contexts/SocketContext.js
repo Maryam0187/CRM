@@ -6,12 +6,6 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from './AuthContext';
 import { useAppDispatch } from '../store/hooks';
 import { addNotification } from '../store/slices/notificationSlice';
-import {
-  upsertParticipant,
-  removeParticipant,
-  clearConferenceParticipants,
-  setSpeakingExclusive,
-} from '../store/slices/participantsSlice';
 import { useToast } from './ToastContext';
 
 const SocketContext = createContext();
@@ -44,14 +38,6 @@ export const SocketProvider = ({ children }) => {
   const socketInitializedRef = useRef(false);
   // Track last dispatched status updates to prevent duplicates
   const lastDispatchedStatusRef = useRef(new Map());
-  // Track current call lifecycle status per conference to ignore speech noise before customer answers.
-  // conferenceName -> uiStatus/status
-  const conferenceUiStatusRef = useRef(new Map());
-  // Track customer CallSid per conference from call_status_update (phone-number leg).
-  const customerSidByConferenceRef = useRef(new Map());
-  // Track whether the customer is actually joined (answered) per conference.
-  // conferenceName -> boolean
-  const customerJoinedByConferenceRef = useRef(new Map());
 
   // Initialize socket connection
   useEffect(() => {
@@ -281,41 +267,22 @@ export const SocketProvider = ({ children }) => {
       });
     });
 
-    // Call status update handlers
+    // Call status update handlers - simplified, no Redux
     socketInstance.on('call_status_update', (data) => {
-      // Create a unique key for this status update
-      // IMPORTANT: include uiStatus/dialCallStatus in dedupe key so we don't miss UI transitions
-      // when raw CallStatus stays the same (e.g. raw=in-progress but uiStatus changes ringing→in-progress).
-      const statusKey = `${data.callSid}-${data.status}-${data.uiStatus || ''}-${data.callbackType || ''}-${data.dialCallStatus || ''}`;
+      // Simple deduplication
+      const statusKey = `${data.callSid}-${data.status}-${data.uiStatus || ''}`;
       const lastDispatched = lastDispatchedStatusRef.current.get(data.callSid);
       
-      // Skip if we've already dispatched this exact status update
       if (lastDispatched === statusKey) {
         return;
       }
-      
-      // Mark this status as dispatched
       lastDispatchedStatusRef.current.set(data.callSid, statusKey);
 
-      // Enhanced logging for call status with SID tracking
-      const confName = data.conferenceName;
-      const trackedCustomerSid = confName ? customerSidByConferenceRef.current.get(confName) : null;
-      const isThisCustomerLeg = data.callSid && trackedCustomerSid === data.callSid;
-      const isPhoneNumberWebhook = data.webhookSource === 'phone-number';
-      
       console.log('📞 [CALL STATUS UPDATE]', {
-        callSid: data.callSid,
+        callSid: data.callSid?.substring(0, 15) + '...',
         status: data.status,
         uiStatus: data.uiStatus,
-        callbackType: data.callbackType,
-        dialCallStatus: data.dialCallStatus,
-        direction: data.direction,
-        webhookSource: data.webhookSource,
-        conferenceName: confName,
-        legType: isPhoneNumberWebhook ? 'CUSTOMER_PSTN' : (data.webhookSource === 'twiml-app' ? 'AGENT_BROWSER' : 'UNKNOWN'),
-        isTrackedCustomer: isThisCustomerLeg,
-        trackedCustomerSid: trackedCustomerSid || 'NOT_YET_TRACKED',
-        timestamp: data.timestamp
+        conferenceName: data.conferenceName
       });
       
       // Update call status in state
@@ -325,129 +292,11 @@ export const SocketProvider = ({ children }) => {
         return newMap;
       });
 
-      // Track conference status for gating speech/speaker events (we only care about in-progress).
-      try {
-        const s = data.uiStatus || data.status;
-        if (confName && s) {
-          conferenceUiStatusRef.current.set(confName, s);
-        }
-        // Track customer sid from phone-number callbacks so we can classify conference participants on the frontend.
-        // IMPORTANT: Only set the customer SID if:
-        // 1. We don't have one yet (first callback wins), OR
-        // 2. This is an early status (ringing/queued/initiated) - these are reliable customer indicators
-        if (confName && isPhoneNumberWebhook && data.callSid) {
-          const prevCustomerSid = customerSidByConferenceRef.current.get(confName);
-          const earlyStatuses = ['ringing', 'queued', 'initiated'];
-          const isEarlyStatus = earlyStatuses.includes(s);
-          
-          // Only update customer SID if we don't have one yet, OR this is an early status callback
-          if (!prevCustomerSid || isEarlyStatus) {
-            if (prevCustomerSid !== data.callSid) {
-              console.log('🔑 [SID TRACKING] Setting CUSTOMER CallSid for conference:', {
-                conferenceName: confName,
-                customerCallSid: data.callSid,
-                previousCustomerSid: prevCustomerSid || 'NONE',
-                status: s,
-                isEarlyStatus,
-                reason: !prevCustomerSid ? 'first_callback' : 'early_status_update'
-              });
-            }
-            customerSidByConferenceRef.current.set(confName, data.callSid);
-          } else if (prevCustomerSid && prevCustomerSid !== data.callSid) {
-            // We already have a customer SID and this is a different one - log but don't overwrite
-            console.log('⚠️ [SID TRACKING] Ignoring different CallSid - keeping existing customer:', {
-              conferenceName: confName,
-              existingCustomerSid: prevCustomerSid,
-              newCallSid: data.callSid,
-              status: s,
-              webhookSource: data.webhookSource,
-              reason: 'already_have_customer_sid'
-            });
-          }
-        }
-        // When the CUSTOMER call becomes truly in-progress, mark the customer as joined.
-        // IMPORTANT: Only do this for CUSTOMER leg callbacks (webhookSource === 'phone-number')
-        // AND the callback must be for the SAME CallSid we're tracking as the customer
-        // NOT for agent leg callbacks (webhookSource === 'twiml-app')
-        // This is the single authoritative transition we want for UI:
-        // - while ringing/queued => joined=false
-        // - once in-progress (customer answered) => joined=true
-        if (confName && s === 'in-progress' && isPhoneNumberWebhook) {
-          const customerSid = customerSidByConferenceRef.current.get(confName);
-          const alreadyJoined = customerJoinedByConferenceRef.current.get(confName) === true;
-          
-          // CRITICAL: Only mark as joined if this callback is for the SAME CallSid we're tracking as the customer
-          const isThisTheCustomerCallback = data.callSid && customerSid && data.callSid === customerSid;
-          
-          if (customerSid && !alreadyJoined && isThisTheCustomerCallback) {
-            console.log('✅ [CUSTOMER ANSWERED] Marking customer as JOINED in Redux:', {
-              conferenceName: confName,
-              customerCallSid: customerSid,
-              callbackCallSid: data.callSid,
-              status: s,
-              webhookSource: data.webhookSource,
-              sidMatch: true
-            });
-            customerJoinedByConferenceRef.current.set(confName, true);
-            dispatch(
-              upsertParticipant({
-                conferenceName: confName,
-                callSid: customerSid,
-                role: 'customer',
-                name: null,
-                joined: true,
-                muted: null,
-                hold: null,
-                timestamp: data.timestamp,
-              })
-            );
-          } else if (customerSid && !alreadyJoined && !isThisTheCustomerCallback) {
-            // This is a phone-number webhook but NOT for our tracked customer - ignore it
-            console.log('⚠️ [PHONE WEBHOOK MISMATCH] Received in-progress for different CallSid than tracked customer:', {
-              conferenceName: confName,
-              trackedCustomerSid: customerSid,
-              callbackCallSid: data.callSid,
-              webhookSource: data.webhookSource,
-              status: s,
-              ignoring: true
-            });
-          }
-        } else if (confName && s === 'in-progress' && !isPhoneNumberWebhook) {
-          // This is an agent leg or other non-customer callback - don't mark customer as joined
-          console.log('ℹ️ [AGENT LEG IN-PROGRESS] Ignoring in-progress from non-customer leg:', {
-            conferenceName: confName,
-            callSid: data.callSid,
-            webhookSource: data.webhookSource,
-            status: s
-          });
-        }
-      } catch (e) {
-        // ignore
-      }
-
-      // Clear participant mapping when call ends (so UI resets cleanly)
-      try {
-        const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
-        const statusForLifecycle = data.uiStatus || data.status;
-        if (data.conferenceName && endedStatuses.includes(statusForLifecycle)) {
-          console.log('🧹 [SOCKET CLEANUP] Call ended - clearing all state for conference:', {
-            conferenceName: data.conferenceName,
-            status: statusForLifecycle,
-            callSid: data.callSid,
-            trackedCustomerSid: customerSidByConferenceRef.current.get(data.conferenceName) || 'NONE',
-            customerWasJoined: customerJoinedByConferenceRef.current.get(data.conferenceName) || false
-          });
-          
-          dispatch(clearConferenceParticipants({ conferenceName: data.conferenceName }));
-          conferenceUiStatusRef.current.delete(data.conferenceName);
-          customerSidByConferenceRef.current.delete(data.conferenceName);
-          customerJoinedByConferenceRef.current.delete(data.conferenceName);
-          lastDispatchedStatusRef.current.delete(data.callSid);
-          
-          console.log('✅ [SOCKET CLEANUP] Conference cleanup completed:', data.conferenceName);
-        }
-      } catch (e) {
-        console.error('❌ [SOCKET CLEANUP] Error during cleanup:', e);
+      // Cleanup on call end
+      const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+      const statusForLifecycle = data.uiStatus || data.status;
+      if (data.callSid && endedStatuses.includes(statusForLifecycle)) {
+        lastDispatchedStatusRef.current.delete(data.callSid);
       }
 
       // Dispatch custom event for components to listen to
@@ -458,212 +307,13 @@ export const SocketProvider = ({ children }) => {
     });
 
 
-    // Conference event handlers (start, end, join, leave, mute, hold, speaker)
+    // Conference event handlers - simplified, no Redux
     socketInstance.on('conference_event', (data) => {
-      // Update participant store (for UI)
-      try {
-        const conferenceName = data.conferenceName;
-        const participantId = data.participantCallSid || data.callSid;
-        const fromStr = data.from ? String(data.from) : '';
-        const trackedCustomerSid = conferenceName ? customerSidByConferenceRef.current.get(conferenceName) : null;
-        
-        // Enhanced role inference with better logging
-        let inferredRole = 'unknown';
-        let roleReason = '';
-        
-        // First check if the server already provided a role
-        if (data.participantRole && data.participantRole !== 'unknown') {
-          inferredRole = data.participantRole;
-          roleReason = 'server_provided';
-        } else if (fromStr.startsWith('client:')) {
-          inferredRole = 'agent';
-          roleReason = 'client_prefix';
-        } else if (conferenceName && participantId && trackedCustomerSid === participantId) {
-          inferredRole = 'customer';
-          roleReason = 'tracked_customer_match';
-        } else if (trackedCustomerSid && participantId && trackedCustomerSid !== participantId) {
-          // If we know the customer SID and this is a different participant, it's likely the agent
-          inferredRole = 'agent';
-          roleReason = 'not_customer_therefore_agent';
-        } else if (data.event === 'join' && !trackedCustomerSid && participantId) {
-          // For join events where we don't have a tracked customer yet,
-          // check if this looks like an agent (no phone number format, not the currentCallSid from context)
-          // For outbound calls, the first participant to join is usually the agent (browser)
-          // The customer joins later when they answer the phone
-          const looksLikePhoneNumber = participantId && /^\+?[1-9]\d{1,14}$/.test(participantId.replace(/[^\d+]/g, ''));
-          if (!looksLikePhoneNumber) {
-            inferredRole = 'agent';
-            roleReason = 'first_joiner_not_phone_number';
-          }
-        }
-        
-        const role = inferredRole;
-        const name = data.participantName || null;
-        
-        // Enhanced logging for conference events
-        console.log('📞 [CONFERENCE EVENT]', {
-          event: data.event,
-          conferenceName: conferenceName,
-          conferenceSid: data.conferenceSid,
-          participantId: participantId,
-          inferredRole: role,
-          roleReason: roleReason,
-          serverProvidedRole: data.participantRole || 'NOT_PROVIDED',
-          fromField: fromStr || 'NOT_PROVIDED',
-          trackedCustomerSid: trackedCustomerSid || 'NOT_TRACKED',
-          participantName: name,
-          joined: data.joined,
-          timestamp: data.timestamp
-        });
-
-        // Ignore speech/speaker events until call is truly in-progress (customer answered).
-        // Twilio can emit speech_start due to background/comfort noise while customer is still ringing.
-        if (data.event === 'speech_start' || data.event === 'speech_stop' || data.event === 'speaker') {
-          const confStatus = conferenceName ? conferenceUiStatusRef.current.get(conferenceName) : null;
-          const customerJoined = conferenceName ? customerJoinedByConferenceRef.current.get(conferenceName) : false;
-          if (confStatus !== 'in-progress' || !customerJoined) {
-            return;
-          }
-        }
-
-        // NOTE: Twilio may emit `conference-start` AFTER the first participant joins.
-        // If we clear on `start`, we can accidentally delete the already-joined agent.
-        if (data.event === 'end') {
-          console.log('🏁 [CONFERENCE END] Conference ended - clearing ALL participants and state:', {
-            conferenceName,
-            conferenceSid: data.conferenceSid,
-            trackedCustomerSid: trackedCustomerSid || 'NONE',
-            customerWasJoined: conferenceName ? customerJoinedByConferenceRef.current.get(conferenceName) : false,
-            conferenceStatus: conferenceName ? conferenceUiStatusRef.current.get(conferenceName) : 'UNKNOWN'
-          });
-          
-          if (conferenceName) {
-            dispatch(clearConferenceParticipants({ conferenceName }));
-            conferenceUiStatusRef.current.delete(conferenceName);
-            customerSidByConferenceRef.current.delete(conferenceName);
-            customerJoinedByConferenceRef.current.delete(conferenceName);
-          }
-          
-          console.log('✅ [CONFERENCE END] All cleanup completed for conference:', conferenceName);
-        } else if (data.event === 'leave') {
-          console.log('👋 [REDUX] Removing participant from Redux:', {
-            conferenceName,
-            callSid: participantId,
-            role: role
-          });
-          if (conferenceName && participantId) dispatch(removeParticipant({ conferenceName, callSid: participantId }));
-          if (conferenceName && role === 'customer') {
-            customerJoinedByConferenceRef.current.delete(conferenceName);
-          }
-        } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold' || data.event === 'unmute' || data.event === 'unhold') {
-          if (conferenceName && participantId) {
-            // For customer: ALWAYS use our own tracking, never trust server's joined value
-            // The backend might send joined=true due to timing issues with Twilio callbacks
-            // The authoritative source for customer joined is call_status_update with in-progress
-            const customerAlreadyAnswered = conferenceName ? customerJoinedByConferenceRef.current.get(conferenceName) === true : false;
-            const confStatus = conferenceName ? conferenceUiStatusRef.current.get(conferenceName) : null;
-            
-            let joinedForEvent;
-            if (role === 'customer') {
-              // CUSTOMER: Always use our local tracking - never trust data.joined from server
-              // Customer is only "joined" if we received in-progress call_status_update
-              joinedForEvent = data.event === 'join' ? customerAlreadyAnswered : (typeof data.joined === 'boolean' ? data.joined : null);
-            } else {
-              // AGENT and others: Trust server or default to true for join events
-              joinedForEvent = typeof data.joined === 'boolean'
-                ? data.joined
-                : (data.event === 'join' ? true : null);
-            }
-
-            // Log customer join events for debugging
-            if (data.event === 'join' && role === 'customer') {
-              console.log('📞 [CUSTOMER JOIN EVENT] Customer join event received:', {
-                conferenceName,
-                participantId: participantId?.substring(0, 15) + '...',
-                customerAlreadyAnswered,
-                joinedForEvent,
-                serverJoined: data.joined,
-                confStatus,
-                decision: customerAlreadyAnswered ? 'JOINED (answered)' : 'NOT JOINED (still ringing)'
-              });
-            }
-            
-            const participantData = {
-              conferenceName,
-              callSid: participantId,
-              role,
-              name,
-              joined: joinedForEvent,
-              muted: data.event === 'unmute' ? false : typeof data.muted === 'boolean' ? data.muted : null,
-              hold: data.event === 'unhold' ? false : typeof data.hold === 'boolean' ? data.hold : null,
-              timestamp: data.timestamp,
-            };
-            
-            console.log(`🔄 [REDUX] Upserting ${role.toUpperCase()} participant:`, {
-              conferenceName,
-              callSid: participantId,
-              role: role,
-              joined: joinedForEvent,
-              event: data.event,
-              conferenceStatus: confStatus
-            });
-            
-            dispatch(upsertParticipant(participantData));
-          }
-        } else if (data.event === 'speech_start' || data.event === 'speech_stop') {
-          if (conferenceName && participantId) {
-            dispatch(
-              setSpeakingExclusive({
-                conferenceName,
-                callSid: participantId,
-                speaking: data.event === 'speech_start',
-                timestamp: data.timestamp,
-              })
-            );
-          }
-        } else if (data.event === 'agent_sid_captured') {
-          // Backend captured the agent's CallSid from voice-response webhook
-          // This is 100% reliable because it comes directly from Twilio
-          const agentCallSid = data.agentCallSid;
-          const customerCallSid = data.customerCallSid;
-          
-          console.log('🔑 [AGENT SID FROM BACKEND] Received agent CallSid from backend:', {
-            conferenceName,
-            agentCallSid,
-            customerCallSid,
-            agentId: data.agentId
-          });
-          
-          if (conferenceName && agentCallSid) {
-            // Add/update the agent in Redux with the correct CallSid
-            dispatch(
-              upsertParticipant({
-                conferenceName,
-                callSid: agentCallSid,
-                role: 'agent',
-                name: null, // Will be updated by other events
-                joined: true, // Agent is joining the conference
-                muted: false,
-                hold: false,
-                timestamp: data.timestamp,
-              })
-            );
-            
-            console.log('✅ [AGENT SID FROM BACKEND] Agent added to Redux:', {
-              conferenceName,
-              agentCallSid,
-              role: 'agent'
-            });
-          }
-          
-          // Also update customer tracking if provided
-          if (conferenceName && customerCallSid) {
-            customerSidByConferenceRef.current.set(conferenceName, customerCallSid);
-          }
-        }
-      } catch (e) {
-        console.error('❌ [REDUX] Error updating participant store:', e);
-      }
+      console.log('📞 [CONFERENCE EVENT]', {
+        event: data.event,
+        conferenceName: data.conferenceName,
+        participantRole: data.participantRole || 'unknown'
+      });
       
       // Dispatch custom event for components to listen to
       const conferenceEvent = new CustomEvent('conferenceEvent', {
