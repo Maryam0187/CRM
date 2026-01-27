@@ -557,28 +557,32 @@ export const SocketProvider = ({ children }) => {
           }
         } else if (data.event === 'join' || data.event === 'mute' || data.event === 'hold' || data.event === 'unmute' || data.event === 'unhold') {
           if (conferenceName && participantId) {
-            // For customer: only mark as "joined" if we've ALREADY confirmed they answered (via call_status_update)
-            // Don't rely on conference status - that becomes in-progress when agent joins, not customer
+            // For customer: ALWAYS use our own tracking, never trust server's joined value
+            // The backend might send joined=true due to timing issues with Twilio callbacks
+            // The authoritative source for customer joined is call_status_update with in-progress
             const customerAlreadyAnswered = conferenceName ? customerJoinedByConferenceRef.current.get(conferenceName) === true : false;
             
-            const joinedForEvent =
-              typeof data.joined === 'boolean'
+            let joinedForEvent;
+            if (role === 'customer') {
+              // CUSTOMER: Always use our local tracking - never trust data.joined from server
+              // Customer is only "joined" if we received in-progress call_status_update
+              joinedForEvent = data.event === 'join' ? customerAlreadyAnswered : (typeof data.joined === 'boolean' ? data.joined : null);
+            } else {
+              // AGENT and others: Trust server or default to true for join events
+              joinedForEvent = typeof data.joined === 'boolean'
                 ? data.joined
-                : (data.event === 'join'
-                    ? (role === 'customer' 
-                        ? customerAlreadyAnswered  // Only true if we already confirmed customer answered
-                        : true)  // Agent is always joined on join event
-                    : null);
+                : (data.event === 'join' ? true : null);
+            }
 
-            // Only set customerJoinedByConferenceRef if it was already true (don't set it from join event)
-            // The authoritative source for customer joined is call_status_update with in-progress
+            // Log customer join events for debugging
             if (data.event === 'join' && role === 'customer') {
               console.log('📞 [CUSTOMER JOIN EVENT] Customer join event received:', {
                 conferenceName,
                 participantId: participantId?.substring(0, 15) + '...',
                 customerAlreadyAnswered,
                 joinedForEvent,
-                serverJoined: data.joined
+                serverJoined: data.joined,
+                decision: customerAlreadyAnswered ? 'JOINED (answered)' : 'NOT JOINED (still ringing)'
               });
             }
             

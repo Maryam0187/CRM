@@ -465,6 +465,24 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           participantsCount: 0, // All participants have left
           callSid: callSid || null
         });
+        
+        // CLEANUP: Now that conference has ended, clean up all tracked SIDs
+        // This is the right place to cleanup because all participant events have been processed
+        console.log('🧹 [CONFERENCE END CLEANUP] Cleaning up tracked SIDs for ended conference:', {
+          conferenceName,
+          trackedCustomerSid: customerCallSidMap.get(conferenceName) || 'NONE',
+          trackedAgentSid: agentCallSidMap.get(conferenceName) || 'NONE'
+        });
+        
+        if (customerCallSidMap.has(conferenceName)) {
+          customerCallSidMap.delete(conferenceName);
+          console.log('🧹 [CONFERENCE END CLEANUP] Deleted customer CallSid mapping');
+        }
+        if (agentCallSidMap.has(conferenceName)) {
+          agentCallSidMap.delete(conferenceName);
+          console.log('🧹 [CONFERENCE END CLEANUP] Deleted agent CallSid mapping');
+        }
+        seenPreAnswerByConferenceName.delete(conferenceName);
       }
       break;
       
@@ -1059,28 +1077,17 @@ export async function POST(request) {
     const endStatusForLifecycle = callStatus || (isDialCallback ? dialCallStatus : null);
     const isCallEnded = !!endStatusForLifecycle && CALL_END_STATUSES.includes(endStatusForLifecycle);
     
-    // Clean up tracked SIDs and state when call ends
+    // Clean up per-CallSid state when call ends
+    // NOTE: customerCallSidMap and agentCallSidMap are cleaned up on conference-end event,
+    // NOT here, to avoid race conditions with participant-leave events that need role resolution
     if (isCallEnded) {
-      console.log('🧹 [BACKEND CLEANUP] Call ended - cleaning up all tracked state:', {
+      console.log('🧹 [CALL END CLEANUP] Call ended - cleaning up per-CallSid state:', {
         conferenceName: callStatusConferenceName,
         callSid: effectiveCallSid,
-        endStatus: endStatusForLifecycle,
-        trackedCustomerSid: customerCallSidMap.get(callStatusConferenceName) || 'NONE',
-        trackedAgentSid: agentCallSidMap.get(callStatusConferenceName) || 'NONE'
+        endStatus: endStatusForLifecycle
       });
       
-      if (callStatusConferenceName) {
-        if (customerCallSidMap.has(callStatusConferenceName)) {
-          customerCallSidMap.delete(callStatusConferenceName);
-          console.log('🧹 [BACKEND CLEANUP] Deleted customer CallSid mapping');
-        }
-        if (agentCallSidMap.has(callStatusConferenceName)) {
-          agentCallSidMap.delete(callStatusConferenceName);
-          console.log('🧹 [BACKEND CLEANUP] Deleted agent CallSid mapping');
-        }
-        seenPreAnswerByConferenceName.delete(callStatusConferenceName);
-      }
-      
+      // Only clean up per-CallSid sets, NOT the conference-level SID maps
       if (effectiveCallSid) {
         answeredCallSidSet.delete(effectiveCallSid);
         seenPreAnswerByCallSid.delete(effectiveCallSid);
@@ -1088,7 +1095,10 @@ export async function POST(request) {
         latestLifecycleRankByCallSid.delete(effectiveCallSid);
       }
       
-      console.log('✅ [BACKEND CLEANUP] All tracked state cleaned up for conference:', callStatusConferenceName);
+      console.log('✅ [CALL END CLEANUP] Per-CallSid state cleaned up:', {
+        callSid: effectiveCallSid?.substring(0, 15) + '...',
+        conferenceName: callStatusConferenceName
+      });
     }
     
     // Only fetch call log when call ends (to check if it exists for update vs create)
