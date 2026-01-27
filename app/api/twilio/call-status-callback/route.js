@@ -251,13 +251,38 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     case 'join':
-      console.log('👤 Participant joined:', { conferenceName, role, participantId: participantId?.substring(0, 15) + '...' });
+      // Get known SIDs from database for better role matching on frontend
+      let customerSidForJoin = null;
+      let agentSidForJoin = null;
+      try {
+        const callLogForJoin = await findCallLog(conferenceName, null);
+        if (callLogForJoin) {
+          customerSidForJoin = callLogForJoin.customerCallSid;
+          agentSidForJoin = callLogForJoin.agentCallSid;
+        }
+      } catch (err) {
+        console.warn('⚠️ Could not fetch SIDs for join event:', err.message);
+      }
+      
+      console.log('👤 Participant joined:', { 
+        conferenceName, 
+        role, 
+        participantId: participantId?.substring(0, 20),
+        customerSid: customerSidForJoin?.substring(0, 20),
+        agentSid: agentSidForJoin?.substring(0, 20),
+        isCustomerMatch: participantId === customerSidForJoin,
+        isAgentMatch: participantId === agentSidForJoin
+      });
+      
       socketManager.sendConferenceEvent(conferenceName, {
         event: 'join',
         conferenceSid,
         conferenceName,
         callSid: participantId,
         participantRole: role,
+        // Include known SIDs so frontend can match
+        customerCallSid: customerSidForJoin,
+        agentCallSid: agentSidForJoin,
         muted: muted === 'true',
         hold: hold === 'true',
         timestamp

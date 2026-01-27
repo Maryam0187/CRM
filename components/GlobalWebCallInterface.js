@@ -1195,20 +1195,44 @@ export default function GlobalWebCallInterface() {
             
           case 'join':
             // Participant joined conference
-            // IMPORTANT: For customer, conference join happens during early media (phone ringing)
-            // Customer "connected" status should only be set when callStatus is 'in-progress' with AnswerTime
-            const role = determineRole(callSid, participantRole);
-            console.log('👤 [PARTICIPANT JOIN]', { role, callSid: callSid?.substring(0, 20), participantRole });
+            // Backend now sends customerCallSid and agentCallSid for matching
+            const { customerCallSid: eventCustomerSid, agentCallSid: eventAgentSid } = conferenceEventData;
+            
+            // Update known SIDs if provided
+            if (eventCustomerSid || eventAgentSid) {
+              setKnownSids(prev => ({
+                customerCallSid: eventCustomerSid || prev.customerCallSid,
+                agentCallSid: eventAgentSid || prev.agentCallSid
+              }));
+            }
+            
+            // Determine role using provided SIDs
+            let role = participantRole;
+            if (!role || role === 'unknown') {
+              if (callSid && eventCustomerSid && callSid === eventCustomerSid) role = 'customer';
+              else if (callSid && eventAgentSid && callSid === eventAgentSid) role = 'agent';
+              else if (callSid && callSid === currentCallSid) role = 'customer';
+              else if (callSid && callSid === knownSids.customerCallSid) role = 'customer';
+              else if (callSid && callSid === knownSids.agentCallSid) role = 'agent';
+            }
+            
+            console.log('👤 [PARTICIPANT JOIN]', { 
+              role, 
+              callSid: callSid?.substring(0, 20), 
+              participantRole,
+              eventCustomerSid: eventCustomerSid?.substring(0, 20),
+              eventAgentSid: eventAgentSid?.substring(0, 20)
+            });
             
             setParticipants(prev => {
-              const existing = prev.find(p => p.callSid === callSid || p.role === role);
+              const existing = prev.find(p => p.callSid === callSid || (role !== 'unknown' && p.role === role));
               
               // For customer: join event = ringing (early media), not connected yet
               // For agent: join event = connected (WebRTC established)
               const newStatus = role === 'customer' ? 'ringing' : 'connected';
               
               if (existing) {
-                return prev.map(p => (p.callSid === callSid || p.role === role)
+                return prev.map(p => (p.callSid === callSid || (role !== 'unknown' && p.role === role))
                   ? { 
                       ...p, 
                       callSid: callSid || p.callSid, 
@@ -1222,7 +1246,7 @@ export default function GlobalWebCallInterface() {
               }
               return [...prev, {
                 callSid,
-                role,
+                role: role || 'unknown',
                 status: newStatus,
                 muted: muted === true,
                 hold: hold === true
