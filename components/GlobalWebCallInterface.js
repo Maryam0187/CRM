@@ -1265,9 +1265,10 @@ export default function GlobalWebCallInterface() {
             setParticipants(prev => {
               const existing = prev.find(p => p.callSid === callSid || (role !== 'unknown' && p.role === role));
               
-              // For customer: join event = ringing (early media), not connected yet
+              // NEW FLOW: Customer only joins conference AFTER they answer
+              // So when we get a 'join' event for customer, they've already answered!
               // For agent: join event = connected (WebRTC established)
-              const newStatus = role === 'customer' ? 'ringing' : 'connected';
+              const newStatus = 'connected'; // Both customer and agent are connected when they join
               
               console.log('✅ [PARTICIPANTS UPDATE - JOIN]', {
                 role,

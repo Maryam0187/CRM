@@ -1,10 +1,47 @@
 import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import socketManager from '../../../../lib/socket';
+import { getClient, getWebhookUrl } from '../../../../lib/twilio';
 import { Op } from 'sequelize';
 
 // Constants
 const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
+
+// Helper: Redirect customer call to conference when they answer
+async function redirectCustomerToConference(callSid, conferenceName, agentId) {
+  try {
+    const client = getClient();
+    
+    // Conference callback URL
+    const conferenceCallbackUrl = new URL(getWebhookUrl('/api/twilio/call-status-callback'));
+    conferenceCallbackUrl.searchParams.set('agentId', String(agentId));
+    conferenceCallbackUrl.searchParams.set('conferenceName', conferenceName);
+    conferenceCallbackUrl.searchParams.set('isConference', 'true');
+    
+    // Generate TwiML to join conference
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Dial>
+    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" statusCallback="${conferenceCallbackUrl.toString()}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${conferenceName}</Conference>
+  </Dial>
+</Response>`;
+
+    // Update the call with new TwiML to join conference
+    await client.calls(callSid).update({
+      twiml: twiml
+    });
+    
+    console.log('✅ [REDIRECT TO CONFERENCE] Customer call redirected:', {
+      callSid: callSid?.substring(0, 20),
+      conferenceName
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('❌ [REDIRECT TO CONFERENCE] Failed:', error.message);
+    return false;
+  }
+}
 
 // Simple deduplication - track last processed status per callSid
 const lastProcessedStatus = new Map();
@@ -429,6 +466,27 @@ export async function POST(request) {
     if (effectiveStatus === 'answered' || (effectiveStatus === 'in-progress' && answerTime)) {
       uiStatus = 'in-progress';
       console.log('✅ [CUSTOMER ANSWERED - BACKEND]', { effectiveStatus, answerTime, uiStatus });
+      
+      // 🎯 KEY: When customer answers, redirect them to the conference!
+      // This is the new flow - customer only joins conference AFTER answering
+      if (effectiveStatus === 'answered' && agentId && derivedConferenceName) {
+        console.log('📞 [CUSTOMER ANSWERED] Redirecting to conference...');
+        const redirected = await redirectCustomerToConference(effectiveCallSid, derivedConferenceName, agentId);
+        if (redirected) {
+          // Update call log to mark customer as connected
+          const callLog = await findCallLog(derivedConferenceName, effectiveCallSid);
+          if (callLog) {
+            await updateCallLog(callLog, {
+              status: 'in-progress',
+              twilioData: {
+                ...callLog.twilioData,
+                customerAnsweredAt: new Date().toISOString(),
+                redirectedToConference: true
+              }
+            });
+          }
+        }
+      }
     } else if (effectiveStatus === 'in-progress' && !answerTime) {
       // Early media - customer phone ringing but not answered
       uiStatus = 'ringing';

@@ -60,10 +60,11 @@ export async function POST(request) {
       );
     }
 
-    // SIMPLE OUTBOUND FLOW:
-    // - Server creates the customer PSTN call via Twilio REST API.
-    // - Both customer and agent join a conference named `call-<agentId>`.
-    // - Frontend connects the agent to that conference using Twilio Voice SDK.
+    // OUTBOUND FLOW (No early media - customer joins conference only after answering):
+    // 1. Call customer with simple <Say> TwiML (holding message)
+    // 2. statusCallback listens for 'answered' event
+    // 3. On 'answered', REST API redirects call to join conference
+    // This ensures customer only joins conference AFTER they actually answer
 
     // Update agent status to busy (agent is starting an outbound attempt)
     await agent.update({ 
@@ -84,37 +85,38 @@ export async function POST(request) {
 
     const client = getClient();
 
-    // TwiML URL: customer leg joins the conference
-    const twimlUrl = new URL(getWebhookUrl('/api/twilio/voice-response'));
-    twimlUrl.searchParams.set('agentId', String(parseInt(agentId, 10)));
-    twimlUrl.searchParams.set('conferenceName', conferenceName);
+    // TwiML URL: Simple holding message (customer waits here until we redirect them)
+    // The actual redirect to conference happens in the statusCallback when 'answered'
+    const holdingTwimlUrl = new URL(getWebhookUrl('/api/twilio/customer-holding'));
+    holdingTwimlUrl.searchParams.set('agentId', String(parseInt(agentId, 10)));
+    holdingTwimlUrl.searchParams.set('conferenceName', conferenceName);
 
-    // Status callback for customer leg
+    // Status callback - THIS IS WHERE WE DETECT 'answered' AND ADD TO CONFERENCE
     const statusCallbackUrl = new URL(getWebhookUrl('/api/twilio/call-status-callback'));
     statusCallbackUrl.searchParams.set('agentId', String(parseInt(agentId, 10)));
     statusCallbackUrl.searchParams.set('direction', 'outbound-api');
     statusCallbackUrl.searchParams.set('callPurpose', String(callPurpose));
     statusCallbackUrl.searchParams.set('conferenceName', conferenceName);
+    statusCallbackUrl.searchParams.set('customerPhone', formattedNumber);
     if (customerId) statusCallbackUrl.searchParams.set('customerId', String(customerId));
     if (saleId) statusCallbackUrl.searchParams.set('saleId', String(saleId));
 
-    const timeout = parseInt(process.env.TWILIO_OUTBOUND_RING_TIMEOUT || '90', 10);
+    const timeout = parseInt(process.env.TWILIO_OUTBOUND_RING_TIMEOUT || '30', 10);
 
+    // Place call to customer with holding TwiML
     const call = await client.calls.create({
       to: formattedNumber,
       from: fromNumber,
-      url: twimlUrl.toString(),
+      url: holdingTwimlUrl.toString(),
       method: 'POST',
       timeout,
       statusCallback: statusCallbackUrl.toString(),
       statusCallbackMethod: 'POST',
-      // Outbound PSTN leg callbacks:
-      // Valid statusCallbackEvent values: initiated, ringing, answered, completed
-      // Note: 'queued' and 'in-progress' are NOT valid callback events (they are statuses)
+      // Listen for 'answered' - this is when we'll redirect to conference
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
     });
 
-    console.log('📞 [CALL INITIATE] Outbound call created:', {
+    console.log('📞 [CALL INITIATE] Outbound call created (will join conference on answer):', {
       customerCallSid: call.sid,
       conferenceName,
       agentId: parseInt(agentId, 10),
@@ -124,12 +126,11 @@ export async function POST(request) {
       saleIdParam: saleId || null
     });
 
-    // CRITICAL: Save call log IMMEDIATELY with customer_call_sid
-    // This avoids webhook race conditions - we know the customer CallSid right here
+    // Create call log immediately
     try {
       await sequelizeDb.CallLog.create({
-        callSid: call.sid,                    // Use customer CallSid as primary identifier
-        customerCallSid: call.sid,            // Also store explicitly for clarity
+        callSid: call.sid,
+        customerCallSid: call.sid,
         conferenceName: conferenceName,
         agentId: parseInt(agentId, 10),
         customerId: customerId ? parseInt(customerId, 10) : null,
@@ -137,15 +138,16 @@ export async function POST(request) {
         direction: 'outbound',
         fromNumber: fromNumber,
         toNumber: formattedNumber,
-        status: 'queued',                      // Initial status
+        status: 'queued',
         callPurpose: callPurpose || 'follow_up',
         twilioData: {
           customerCallSid: call.sid,
           conferenceName: conferenceName,
-          initiatedAt: new Date().toISOString()
+          initiatedAt: new Date().toISOString(),
+          flowType: 'answer-then-conference'  // New flow type
         }
       });
-      console.log('💾 [CALL INITIATE] Call log created immediately with customer_call_sid:', call.sid);
+      console.log('💾 [CALL INITIATE] Call log created:', call.sid);
     } catch (dbError) {
       // Log but don't fail the call if DB save fails
       console.error('❌ [CALL INITIATE] Failed to create initial call log:', dbError.message);
