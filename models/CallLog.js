@@ -57,7 +57,7 @@ module.exports = (sequelize) => {
       field: 'to_number'
     },
     status: {
-      type: DataTypes.ENUM('queued', 'ringing', 'in-progress', 'completed', 'busy', 'failed', 'no-answer', 'canceled'),
+      type: DataTypes.ENUM('initiated', 'queued', 'ringing', 'in-progress', 'completed', 'busy', 'failed', 'no-answer', 'canceled', 'voicemail'),
       allowNull: false,
       defaultValue: 'queued'
     },

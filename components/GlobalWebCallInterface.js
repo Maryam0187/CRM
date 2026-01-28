@@ -1335,10 +1335,25 @@ export default function GlobalWebCallInterface() {
           
           case 'speech-start':
           case 'speech-stop':
-            // Speech detection - useful for visual feedback
+            // Speech detection - update speaking indicator
             const speechRole = determineRole(callSid, participantRole);
             console.log(`🎤 [${eventType.toUpperCase()}]`, { role: speechRole, callSid: callSid?.substring(0, 20) });
-            // Could add speaking indicator here if needed
+            
+            setParticipants(prev => prev.map(p => {
+              const isMatch = p.callSid === callSid || p.role === speechRole;
+              if (!isMatch) return p;
+              
+              // IMPORTANT: If customer has speech-start, they DEFINITELY answered!
+              // This is more reliable than AnswerTime for conference calls
+              if (eventType === 'speech-start' && (p.role === 'customer' || speechRole === 'customer')) {
+                if (p.status !== 'connected') {
+                  console.log('✅ [CUSTOMER ANSWERED via SPEECH] Customer speaking = definitely connected');
+                }
+                return { ...p, speaking: true, status: 'connected' };
+              }
+              
+              return { ...p, speaking: eventType === 'speech-start' };
+            }));
             break;
             
           case 'start':
