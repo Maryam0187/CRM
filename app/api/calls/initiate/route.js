@@ -60,11 +60,10 @@ export async function POST(request) {
       );
     }
 
-    // OUTBOUND FLOW (No early media - customer joins conference only after answering):
-    // 1. Call customer with simple <Say> TwiML (holding message)
-    // 2. statusCallback listens for 'answered' event
-    // 3. On 'answered', REST API redirects call to join conference
-    // This ensures customer only joins conference AFTER they actually answer
+    // OUTBOUND FLOW:
+    // 1. Call customer with TwiML that joins conference
+    // 2. Agent joins same conference via Voice SDK
+    // 3. Both are connected in the conference
 
     // Update agent status to busy (agent is starting an outbound attempt)
     await agent.update({ 
@@ -85,13 +84,7 @@ export async function POST(request) {
 
     const client = getClient();
 
-    // TwiML URL: Simple holding message (customer waits here until we redirect them)
-    // The actual redirect to conference happens in the statusCallback when 'answered'
-    const holdingTwimlUrl = new URL(getWebhookUrl('/api/twilio/customer-holding'));
-    holdingTwimlUrl.searchParams.set('agentId', String(parseInt(agentId, 10)));
-    holdingTwimlUrl.searchParams.set('conferenceName', conferenceName);
-
-    // Status callback - THIS IS WHERE WE DETECT 'answered' AND ADD TO CONFERENCE
+    // Status callback for call status updates
     const statusCallbackUrl = new URL(getWebhookUrl('/api/twilio/call-status-callback'));
     statusCallbackUrl.searchParams.set('agentId', String(parseInt(agentId, 10)));
     statusCallbackUrl.searchParams.set('direction', 'outbound-api');
@@ -103,16 +96,20 @@ export async function POST(request) {
 
     const timeout = parseInt(process.env.TWILIO_OUTBOUND_RING_TIMEOUT || '30', 10);
 
-    // Place call to customer with holding TwiML
+    // TwiML URL: Customer joins conference directly
+    const twimlUrl = new URL(getWebhookUrl('/api/twilio/voice-response'));
+    twimlUrl.searchParams.set('agentId', String(parseInt(agentId, 10)));
+    twimlUrl.searchParams.set('conferenceName', conferenceName);
+
+    // Place call to customer - they join conference via TwiML
     const call = await client.calls.create({
       to: formattedNumber,
       from: fromNumber,
-      url: holdingTwimlUrl.toString(),
+      url: twimlUrl.toString(),
       method: 'POST',
       timeout,
       statusCallback: statusCallbackUrl.toString(),
       statusCallbackMethod: 'POST',
-      // Listen for 'answered' - this is when we'll redirect to conference
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
     });
 

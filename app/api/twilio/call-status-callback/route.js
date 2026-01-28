@@ -9,6 +9,8 @@ const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled
 
 // Helper: Redirect customer call to conference when they answer
 async function redirectCustomerToConference(callSid, conferenceName, agentId) {
+  console.log('🔄 [REDIRECT START]', { callSid, conferenceName, agentId });
+  
   try {
     const client = getClient();
     
@@ -26,19 +28,32 @@ async function redirectCustomerToConference(callSid, conferenceName, agentId) {
   </Dial>
 </Response>`;
 
+    console.log('📝 [REDIRECT TWIML]', { 
+      callSid: callSid?.substring(0, 20),
+      conferenceName,
+      twimlLength: twiml.length 
+    });
+
     // Update the call with new TwiML to join conference
-    await client.calls(callSid).update({
+    const updatedCall = await client.calls(callSid).update({
       twiml: twiml
     });
     
     console.log('✅ [REDIRECT TO CONFERENCE] Customer call redirected:', {
       callSid: callSid?.substring(0, 20),
-      conferenceName
+      conferenceName,
+      updatedCallStatus: updatedCall.status
     });
     
     return true;
   } catch (error) {
-    console.error('❌ [REDIRECT TO CONFERENCE] Failed:', error.message);
+    console.error('❌ [REDIRECT TO CONFERENCE] Failed:', {
+      callSid: callSid?.substring(0, 20),
+      conferenceName,
+      error: error.message,
+      code: error.code,
+      status: error.status
+    });
     return false;
   }
 }
@@ -403,6 +418,8 @@ export async function POST(request) {
     const saleIdFromUrl = url.searchParams.get('saleId');
     const callPurposeFromUrl = url.searchParams.get('callPurpose');
     const directionFromUrl = url.searchParams.get('direction');
+    const isAmdCallback = url.searchParams.get('isAmdCallback') === 'true';
+    const conferenceNameFromUrl = url.searchParams.get('conferenceName');
 
     const formData = await request.formData();
     
@@ -414,6 +431,110 @@ export async function POST(request) {
     const dialCallSid = formData.get('DialCallSid');
     const callSid = formData.get('CallSid');
     const callStatus = formData.get('CallStatus');
+    const answerTimeRaw = formData.get('AnswerTime');
+    
+    // AMD (Answering Machine Detection) fields
+    const answeredBy = formData.get('AnsweredBy');  // 'human', 'machine_start', 'machine_end_beep', etc.
+    const machineDetectionDuration = formData.get('MachineDetectionDuration');
+    
+    // 🔍 DEBUG: Log ALL incoming callback data
+    console.log('🔔 [CALLBACK RECEIVED]', {
+      callSid: callSid?.substring(0, 20),
+      callStatus,
+      answerTime: answerTimeRaw || 'NONE',
+      answeredBy: answeredBy || 'NONE',
+      isAmdCallback,
+      conferenceEvent,
+      conferenceSid: conferenceSid?.substring(0, 20),
+      agentIdFromUrl,
+      conferenceNameFromUrl,
+      direction: directionFromUrl,
+      from: formData.get('From'),
+      to: formData.get('To')
+    });
+    
+    // 🎯 Handle AMD (Answering Machine Detection) Callback
+    // This is the MOST RELIABLE way to know when a human answers
+    if (isAmdCallback && answeredBy) {
+      const agentId = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
+      const derivedConferenceName = conferenceNameFromUrl || (agentId ? `call-${agentId}` : null);
+      
+      console.log('🤖 [AMD CALLBACK]', {
+        callSid: callSid?.substring(0, 20),
+        answeredBy,
+        machineDetectionDuration,
+        agentId,
+        conferenceName: derivedConferenceName
+      });
+      
+      if (answeredBy === 'human' && agentId && derivedConferenceName) {
+        // 🎉 HUMAN ANSWERED! Redirect to conference
+        console.log('✅ [HUMAN ANSWERED] Redirecting to conference...');
+        
+        const redirected = await redirectCustomerToConference(callSid, derivedConferenceName, agentId);
+        
+        if (redirected) {
+          // Update call log
+          const callLog = await findCallLog(derivedConferenceName, callSid);
+          if (callLog) {
+            await updateCallLog(callLog, {
+              status: 'in-progress',
+              twilioData: {
+                ...callLog.twilioData,
+                customerAnsweredAt: new Date().toISOString(),
+                answeredBy: 'human',
+                redirectedToConference: true
+              }
+            });
+          }
+          
+          // Broadcast to frontend
+          const statusData = {
+            callSid,
+            status: 'in-progress',
+            uiStatus: 'in-progress',
+            answeredBy: 'human',
+            conferenceName: derivedConferenceName,
+            agentId
+          };
+          broadcastCallStatus(derivedConferenceName, statusData, agentId);
+        }
+        
+        return NextResponse.json({ success: true, message: 'Human answered, redirecting to conference' });
+        
+      } else if (answeredBy?.startsWith('machine')) {
+        // Voicemail/Machine detected
+        console.log('📠 [MACHINE DETECTED]', { answeredBy, callSid: callSid?.substring(0, 20) });
+        
+        // Update call log
+        const callLog = await findCallLog(derivedConferenceName, callSid);
+        if (callLog) {
+          await updateCallLog(callLog, {
+            status: 'voicemail',
+            twilioData: {
+              ...callLog.twilioData,
+              answeredBy,
+              machineDetectionDuration
+            }
+          });
+        }
+        
+        // Broadcast voicemail status to frontend
+        const statusData = {
+          callSid,
+          status: 'voicemail',
+          uiStatus: 'voicemail',
+          answeredBy,
+          conferenceName: derivedConferenceName,
+          agentId
+        };
+        broadcastCallStatus(derivedConferenceName, statusData, agentId);
+        
+        return NextResponse.json({ success: true, message: 'Machine detected' });
+      }
+      
+      return NextResponse.json({ success: true, message: 'AMD callback processed' });
+    }
     
     const isConferenceCallback = !!conferenceEvent && !!conferenceSid;
     const isDialCallback = !!dialCallStatus && !!dialCallSid;
@@ -435,7 +556,7 @@ export async function POST(request) {
     const to = formData.get('To');
     const duration = formData.get('CallDuration');
     const answerTime = formData.get('AnswerTime');
-    const answeredBy = formData.get('AnsweredBy');
+    // Note: answeredBy is already declared above for AMD callback handling
     
     // Get effective CallSid (for Dial callbacks, use DialCallSid)
     const effectiveCallSid = isDialCallback ? dialCallSid : callSid;
@@ -459,20 +580,35 @@ export async function POST(request) {
     const agentId = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
     const derivedConferenceName = agentId ? `call-${agentId}` : null;
     
-    // Determine UI status
-    // - Show "ringing" until customer answers (has AnswerTime or status is explicitly 'answered')
-    // - Show "in-progress" when customer has actually answered
+    // Determine UI status and handle conference redirect
+    // Customer has answered if: status is 'answered' OR status is 'in-progress' WITH AnswerTime
+    const customerHasAnswered = effectiveStatus === 'answered' || (effectiveStatus === 'in-progress' && answerTime);
+    
     let uiStatus = effectiveStatus;
-    if (effectiveStatus === 'answered' || (effectiveStatus === 'in-progress' && answerTime)) {
+    if (customerHasAnswered) {
       uiStatus = 'in-progress';
-      console.log('✅ [CUSTOMER ANSWERED - BACKEND]', { effectiveStatus, answerTime, uiStatus });
+      console.log('✅ [CUSTOMER ANSWERED - BACKEND]', { 
+        effectiveStatus, 
+        answerTime, 
+        uiStatus,
+        callSid: effectiveCallSid?.substring(0, 20),
+        agentId,
+        conferenceName: derivedConferenceName
+      });
       
       // 🎯 KEY: When customer answers, redirect them to the conference!
       // This is the new flow - customer only joins conference AFTER answering
-      if (effectiveStatus === 'answered' && agentId && derivedConferenceName) {
-        console.log('📞 [CUSTOMER ANSWERED] Redirecting to conference...');
+      if (agentId && derivedConferenceName) {
+        console.log('📞 [REDIRECTING TO CONFERENCE]', {
+          callSid: effectiveCallSid,
+          conferenceName: derivedConferenceName,
+          agentId
+        });
+        
         const redirected = await redirectCustomerToConference(effectiveCallSid, derivedConferenceName, agentId);
+        
         if (redirected) {
+          console.log('✅ [REDIRECT SUCCESS] Customer will join conference');
           // Update call log to mark customer as connected
           const callLog = await findCallLog(derivedConferenceName, effectiveCallSid);
           if (callLog) {
@@ -485,7 +621,11 @@ export async function POST(request) {
               }
             });
           }
+        } else {
+          console.error('❌ [REDIRECT FAILED] Customer could not be redirected to conference');
         }
+      } else {
+        console.warn('⚠️ [NO REDIRECT] Missing agentId or conferenceName', { agentId, derivedConferenceName });
       }
     } else if (effectiveStatus === 'in-progress' && !answerTime) {
       // Early media - customer phone ringing but not answered
