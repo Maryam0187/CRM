@@ -109,10 +109,9 @@ export async function POST(request) {
       statusCallback: statusCallbackUrl.toString(),
       statusCallbackMethod: 'POST',
       // Outbound PSTN leg callbacks:
-      // - Some carriers/accounts report the post-answer transition as `CallStatus=in-progress` (not `answered`).
-      // - We therefore subscribe to both `answered` and `in-progress`, but the backend still gates UI state
-      //   to avoid "joined/speaking while ringing".
-      statusCallbackEvent: ['initiated', 'queued', 'ringing', 'answered', 'in-progress', 'completed']
+      // Valid statusCallbackEvent values: initiated, ringing, answered, completed
+      // Note: 'queued' and 'in-progress' are NOT valid callback events (they are statuses)
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
     });
 
     console.log('📞 [CALL INITIATE] Outbound call created:', {
