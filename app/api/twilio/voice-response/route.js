@@ -167,6 +167,36 @@ async function handleVoiceResponse(request) {
             } catch (socketErr) {
               console.warn('⚠️ Could not broadcast agent SID via socket:', socketErr);
             }
+            
+            // For agent legs (Voice SDK), return TwiML to join conference directly
+            // No Dial verb needed - agent is already connected via WebRTC
+            const safeConfName = confName.replace(/[<>&"']/g, '');
+            const isInboundConf = safeConfName.startsWith('inbound-');
+            const confCallbackUrl = getWebhookUrl(
+              isInboundConf
+                ? '/api/twilio/inbound/call-status-callback'
+                : '/api/twilio/call-status-callback'
+            );
+            
+            const agentTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Conference 
+    startConferenceOnEnter="true" 
+    endConferenceOnExit="true" 
+    maxParticipants="10" 
+    statusCallback="${confCallbackUrl}" 
+    statusCallbackMethod="POST" 
+    statusCallbackEvent="start end join leave mute hold speaker"
+  >${safeConfName}</Conference>
+</Response>`;
+            
+            console.log('📞 [AGENT LEG] Returning TwiML for agent to join conference directly');
+            return new NextResponse(agentTwiml, {
+              headers: { 
+                'Content-Type': 'text/xml',
+                'Cache-Control': 'no-cache'
+              }
+            });
           }
         }
         
@@ -246,7 +276,7 @@ async function handleVoiceResponse(request) {
         // startConferenceOnEnter="true" - Start conference when first participant enters
         // Since customer only enters after answering (due to answerOnBridge="false"),
         // conference will start when customer answers, not during ringing
-        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnBridge="false" hangupOnStar="false">`;
+        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnBridge="true" hangupOnStar="false">`;
         twiml += `\n    <Conference 
         startConferenceOnEnter="true" 
         endConferenceOnExit="true" 
