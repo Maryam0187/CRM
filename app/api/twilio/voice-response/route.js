@@ -242,11 +242,13 @@ async function handleVoiceResponse(request) {
         );
 
         // answerOnBridge="false" - Don't answer call until customer actually picks up
-        // startConferenceOnEnter="false" - Don't start conference until both participants are ready
-        // This prevents agent from hearing customer audio (ringback/ringing) before customer answers
+        // This prevents customer leg from entering conference during ringing phase
+        // startConferenceOnEnter="true" - Start conference when first participant enters
+        // Since customer only enters after answering (due to answerOnBridge="false"),
+        // conference will start when customer answers, not during ringing
         twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnBridge="false" hangupOnStar="false">`;
         twiml += `\n    <Conference 
-        startConferenceOnEnter="false" 
+        startConferenceOnEnter="true" 
         endConferenceOnExit="true" 
         maxParticipants="10" 
         statusCallback="${conferenceCallbackUrl}" 
