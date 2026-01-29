@@ -168,8 +168,8 @@ async function handleVoiceResponse(request) {
               console.warn('⚠️ Could not broadcast agent SID via socket:', socketErr);
             }
             
-            // For agent legs (Voice SDK), return TwiML to join conference directly
-            // No Dial verb needed - agent is already connected via WebRTC
+            // For agent legs (Voice SDK), return TwiML to join conference
+            // Voice SDK requires Dial wrapper even for direct conference connections
             const safeConfName = confName.replace(/[<>&"']/g, '');
             const isInboundConf = safeConfName.startsWith('inbound-');
             const confCallbackUrl = getWebhookUrl(
@@ -178,19 +178,23 @@ async function handleVoiceResponse(request) {
                 : '/api/twilio/call-status-callback'
             );
             
+            // Agent leg: Use Dial with Conference (required for Voice SDK)
+            // answerOnBridge not needed here since agent is already connected via WebRTC
             const agentTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Conference 
-    startConferenceOnEnter="true" 
-    endConferenceOnExit="true" 
-    maxParticipants="10" 
-    statusCallback="${confCallbackUrl}" 
-    statusCallbackMethod="POST" 
-    statusCallbackEvent="start end join leave mute hold speaker"
-  >${safeConfName}</Conference>
+  <Dial record="false" timeout="30" timeLimit="3600" hangupOnStar="false">
+    <Conference 
+      startConferenceOnEnter="false" 
+      endConferenceOnExit="true" 
+      maxParticipants="10" 
+      statusCallback="${confCallbackUrl}" 
+      statusCallbackMethod="POST" 
+      statusCallbackEvent="start end join leave mute hold speaker"
+    >${safeConfName}</Conference>
+  </Dial>
 </Response>`;
             
-            console.log('📞 [AGENT LEG] Returning TwiML for agent to join conference directly');
+            console.log('📞 [AGENT LEG] Returning TwiML for agent to join conference');
             return new NextResponse(agentTwiml, {
               headers: { 
                 'Content-Type': 'text/xml',
