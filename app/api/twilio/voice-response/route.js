@@ -69,19 +69,24 @@ async function handleVoiceResponse(request) {
           if (m) agentId = m[1];
         }
 
-        // If agentId is still missing, try to infer it from a conference name like `call-<agentId>`.
+        // If agentId is still missing, try to infer it from a conference name like `call-<agentId><timestamp>`.
         // This prevents falling into the "Thank you..." fallback when Twilio hits this webhook
         // without our query params (or when proxies strip them).
+        // Note: With new format call-<agentId><timestamp>, we can't extract agentId from conference name alone,
+        // so we rely on query params. This is just a fallback for old format compatibility.
         if (!agentId) {
           const confRaw = conferenceNameFromUrl || formData.get('conferenceName') || formData.get('conference') || '';
           const toRaw = formData.get('To') || '';
           const candidates = [String(confRaw), String(toRaw)].filter(Boolean);
           for (const c of candidates) {
+            // Match old format: call-<agentId> (for backward compatibility)
             const m = c.match(/^call-(\d+)$/);
             if (m) {
               agentId = m[1];
               break;
             }
+            // Note: New format call-<agentId><timestamp> requires agentId from query params
+            // We can't extract agentId from conference name alone in new format
           }
         }
         
@@ -281,9 +286,8 @@ async function handleVoiceResponse(request) {
         // startConferenceOnEnter="true" - Start conference when first participant enters
         // Since customer only enters after answering (due to answerOnBridge="false"),
         // conference will start when customer answers, not during ringing
-        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnBridge="false" answerOnMedia="false" hangupOnStar="false">`;
+        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnBridge="false"  hangupOnStar="false">`;
         twiml += `\n    <Conference 
-        beep="false"
         startConferenceOnEnter="true" 
         endConferenceOnExit="true" 
         maxParticipants="10" 

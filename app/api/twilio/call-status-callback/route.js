@@ -9,6 +9,14 @@ const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled
 // Simple deduplication - track last processed status per callSid
 const lastProcessedStatus = new Map();
 
+// Track which participants have joined conferences (to filter speech events)
+// Format: Map<conferenceName, Set<participantCallSid>>
+const joinedParticipants = new Map();
+
+// Track if first speech-start event has been processed for conference (to ignore initial connection noise)
+// Format: Map<conferenceName, boolean>
+const firstSpeechStartProcessed = new Map();
+
 // Helper: Normalize Twilio direction to database enum values
 function normalizeDirection(twilioDirection) {
   if (!twilioDirection) return 'outbound';
@@ -201,6 +209,10 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     case 'end':
+      // Clean up tracking for this conference
+      joinedParticipants.delete(conferenceName);
+      firstSpeechStartProcessed.delete(conferenceName);
+      
       socketManager.sendConferenceEvent(conferenceName, {
         event: 'end',
         conferenceSid,
@@ -226,6 +238,12 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
         }
       } catch (err) { /* ignore */ }
       
+      // Track that this participant has joined
+      if (!joinedParticipants.has(conferenceName)) {
+        joinedParticipants.set(conferenceName, new Set());
+      }
+      joinedParticipants.get(conferenceName).add(participantId);
+      
       socketManager.sendConferenceEvent(conferenceName, {
         event: 'join',
         conferenceSid,
@@ -241,6 +259,15 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     case 'leave':
+      // Remove participant from joined set
+      if (joinedParticipants.has(conferenceName)) {
+        joinedParticipants.get(conferenceName).delete(participantId);
+        // Clean up empty sets
+        if (joinedParticipants.get(conferenceName).size === 0) {
+          joinedParticipants.delete(conferenceName);
+        }
+      }
+      
       socketManager.sendConferenceEvent(conferenceName, {
         event: 'leave',
         conferenceSid,
@@ -279,6 +306,36 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
     
     case 'speech-start':
     case 'speech-stop':
+      // Speech detection events - only send if participant has actually joined the conference
+      // This prevents speech events during ringing phase (before customer answers)
+      const hasJoined = joinedParticipants.has(conferenceName) && 
+                        joinedParticipants.get(conferenceName).has(participantId);
+      
+      if (!hasJoined) {
+        console.log('⏭️ [SPEECH EVENT FILTERED] Participant not in conference yet:', {
+          event,
+          participantId: participantId?.substring(0, 20),
+          role,
+          conferenceName
+        });
+        // Don't send speech event if participant hasn't joined
+        break;
+      }
+      
+      // Ignore first speech-start event from ANY participant when conference starts (initial connection noise)
+      if (event === 'speech-start') {
+        if (!firstSpeechStartProcessed.has(conferenceName) || !firstSpeechStartProcessed.get(conferenceName)) {
+          // First speech-start event for this conference (from any participant) - ignore it
+          firstSpeechStartProcessed.set(conferenceName, true);
+          console.log('⏭️ [SPEECH-START IGNORED] Ignoring first speech-start event of conference (connection noise):', {
+            participantId: participantId?.substring(0, 20),
+            role,
+            conferenceName
+          });
+          break; // Don't send this event
+        }
+      }
+      
       // Speech detection events - include participant role
       socketManager.sendConferenceEvent(conferenceName, {
         event: event,

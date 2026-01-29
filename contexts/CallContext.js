@@ -215,8 +215,9 @@ export function CallProvider({ children }) {
     try {
       // NEW FLOW: Agent connects first, then customer is dialed
       // Step 1: Set conference name to trigger agent connection
-      const confName = `call-${agentId}`;
-      const pendingCallSid = `pending-${Date.now()}`;
+      const timestamp = Date.now();
+      const confName = `call-${agentId}${timestamp}`;
+      const pendingCallSid = `pending-${timestamp}`;
       
       // Store dial parameters for later use
       const dialParams = {
