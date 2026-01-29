@@ -1629,7 +1629,7 @@ export default function GlobalWebCallInterface() {
       };
       
       // Play ringtone immediately
-      // playRingtone();
+      playRingtone();
       
       // Then repeat: 400ms sound, 200ms silence, 400ms sound, 2000ms silence
       ringingInterval = setInterval(() => {
