@@ -245,20 +245,9 @@ async function handleVoiceResponse(request) {
           throw new Error(`Invalid agentId: ${agentId}`);
         }
         
-        // Get agent information
-        const agent = await sequelizeDb.User.findByPk(parsedAgentId, {
-          attributes: ['id', 'firstName', 'lastName', 'phone']
-        });
-        
-        if (!agent) {
-          throw new Error(`Agent ${parsedAgentId} not found in database`);
-        }
-        
-        console.log(`📞 Agent lookup result:`, {
-          found: !!agent,
-          agentId: agent?.id,
-          name: agent ? `${agent.firstName} ${agent.lastName}` : 'N/A'
-        });
+        // Note: Agent lookup removed - not needed for TwiML generation
+        // Conference name is built from agentId only, no agent data is used in TwiML
+        console.log(`📞 Voice response for agent ID: ${parsedAgentId}`);
         
         // SIMPLE FLOW:
         // Always join a conference.
@@ -297,16 +286,8 @@ async function handleVoiceResponse(request) {
         >${safeConferenceName}</Conference>`;
         twiml += `\n  </Dial>`;
         
-        // If agent has phone, we could call them separately to join the conference
-        // But with Voice SDK, agent joins via browser, so this is optional
-        if (agent && agent.phone) {
-          const agentPhone = validatePhoneNumber(agent.phone);
-          if (agentPhone) {
-            console.log(`📞 Agent phone available: ${agentPhone} - can be called separately if needed`);
-          }
-        } else {
-          console.log(`📞 Agent ${parsedAgentId} will join via Voice SDK to conference: ${safeConferenceName}`);
-        }
+        // Agent joins via Voice SDK to conference
+        console.log(`📞 Agent ${parsedAgentId} will join via Voice SDK to conference: ${safeConferenceName}`);
         // No Hangup here - let the call continue in the conference
       } catch (error) {
         console.error('❌ Error in voice response:', error);
