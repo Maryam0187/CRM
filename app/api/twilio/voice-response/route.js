@@ -280,7 +280,7 @@ async function handleVoiceResponse(request) {
         // startConferenceOnEnter="true" - Start conference when first participant enters
         // Since customer only enters after answering (due to answerOnBridge="false"),
         // conference will start when customer answers, not during ringing
-        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnBridge="true" hangupOnStar="false">`;
+        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnBridge="false" hangupOnStar="false">`;
         twiml += `\n    <Conference 
         startConferenceOnEnter="true" 
         endConferenceOnExit="true" 
