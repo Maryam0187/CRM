@@ -241,9 +241,12 @@ async function handleVoiceResponse(request) {
             : '/api/twilio/call-status-callback'
         );
 
-        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnBridge="true" hangupOnStar="false">`;
+        // answerOnBridge="false" - Don't answer call until customer actually picks up
+        // startConferenceOnEnter="false" - Don't start conference until both participants are ready
+        // This prevents agent from hearing customer audio (ringback/ringing) before customer answers
+        twiml += `\n  <Dial record="false" timeout="30" timeLimit="3600" answerOnBridge="false" hangupOnStar="false">`;
         twiml += `\n    <Conference 
-        startConferenceOnEnter="true" 
+        startConferenceOnEnter="false" 
         endConferenceOnExit="true" 
         maxParticipants="10" 
         statusCallback="${conferenceCallbackUrl}" 
