@@ -87,7 +87,8 @@ export function CallProvider({ children }) {
       customerId: callData.customerId,
       saleId: callData.saleId,
       phoneNumber: callData.phoneNumber,
-      customerName: callData.customerName
+      customerName: callData.customerName,
+      dialParams: callData.dialParams // Preserve dialParams if provided
     });
     setShowWebInterface(true);
     setError(null);
@@ -212,45 +213,45 @@ export function CallProvider({ children }) {
     setIsCalling(true);
     
     try {
-      const response = await apiClient.post('/api/calls/initiate', {
+      // NEW FLOW: Agent connects first, then customer is dialed
+      // Step 1: Set conference name to trigger agent connection
+      const confName = `call-${agentId}`;
+      const pendingCallSid = `pending-${Date.now()}`;
+      
+      // Store dial parameters for later use
+      const dialParams = {
         customerId,
         saleId,
         agentId,
         phoneNumber,
+        conferenceName: confName,
         callPurpose,
         customMessage: `Hello ${customerName || 'there'}, this is a call from our CRM system.`
+      };
+      
+      // Start call with conference name (agent will auto-connect)
+      // dialParams will be stored in callMetadata for GlobalWebCallInterface to use
+      startCall({
+        callSid: pendingCallSid,
+        conferenceName: confName,
+        customerId,
+        saleId,
+        phoneNumber,
+        customerName,
+        dialParams // Pass dialParams to startCall
       });
       
-      if (!response) {
-        throw new Error('No response from server');
-      }
-      
-      const result = await response.json();
-      
-      if (result?.success) {
-        const dialTo = result.data?.to || phoneNumber;
-        const callSid = result.data?.callSid || `pending-${Date.now()}`;
-        const confName = result.data?.conferenceName || `call-${agentId}`;
-        
-        startCall({
-          callSid,
-          // Outbound: agent connects to conference (call-<agentId>)
+      // Return immediately - customer will be dialed after agent connects
+      // The GlobalWebCallInterface will handle dialing customer after agent connects
+      if (onCallInitiated) {
+        onCallInitiated({
+          callSid: pendingCallSid,
           conferenceName: confName,
-          customerId,
-          saleId,
-          phoneNumber: dialTo,
-          customerName
+          to: phoneNumber,
+          dialParams // Store for later dialing
         });
-        
-        if (onCallInitiated) {
-          onCallInitiated(result.data);
-        }
-      } else {
-        const errorMsg = result?.message || result?.error || 'Failed to initiate call';
-        setError(errorMsg);
-        setIsCalling(false);
-        if (onError) onError(errorMsg);
       }
+      
     } catch (err) {
       console.error('Error initiating call:', err);
       const errorMsg = err?.message || 'An unexpected error occurred. Please try again.';

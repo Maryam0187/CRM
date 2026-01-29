@@ -621,9 +621,15 @@ export default function GlobalWebCallInterface() {
               // Check if this is an inbound call
               const isInboundCall = conferenceName && conferenceName.startsWith('inbound-');
               
+              // NEW FLOW: Dial customer AFTER agent connects (for outbound calls only)
+              if (!isInboundCall && callMetadata?.dialParams && currentCallSid?.startsWith('pending-')) {
+                console.log('📞 Agent connected - now dialing customer...');
+                dialCustomerAfterAgentConnect(callMetadata.dialParams);
+              }
+              
               // Check if call has ended on the server (only for outbound calls)
               // For inbound calls, don't check status here as it might not be set yet
-              if (!isInboundCall && currentCallSid) {
+              if (!isInboundCall && currentCallSid && !currentCallSid.startsWith('pending-')) {
                 const actualStatusData = getCallStatus(currentCallSid);
                 const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
                 const actualStatusForUi = actualStatusData?.uiStatus || actualStatusData?.status;
@@ -731,6 +737,38 @@ export default function GlobalWebCallInterface() {
       console.error('❌ Error joining conference:', err);
       setError(err.message || 'Failed to join conference');
       setIsConnecting(false);
+    }
+  };
+
+  // Dial customer after agent connects
+  const dialCustomerAfterAgentConnect = async (dialParams) => {
+    try {
+      console.log('📞 [DIAL CUSTOMER] Dialing customer after agent connected:', dialParams);
+      
+      const response = await apiClient.post('/api/calls/dial-customer', dialParams);
+      
+      if (!response) {
+        throw new Error('No response from server');
+      }
+      
+      const result = await response.json();
+      
+      if (result?.success) {
+        const callSid = result.data?.callSid;
+        console.log('✅ [DIAL CUSTOMER] Customer call initiated:', callSid);
+        
+        // Update currentCallSid with real call SID (replacing pending-*)
+        if (callSid && currentCallSid?.startsWith('pending-')) {
+          setCurrentCallSid(callSid);
+        }
+      } else {
+        const errorMsg = result?.message || result?.error || 'Failed to dial customer';
+        console.error('❌ [DIAL CUSTOMER] Error:', errorMsg);
+        setError(errorMsg);
+      }
+    } catch (err) {
+      console.error('❌ [DIAL CUSTOMER] Exception:', err);
+      setError(err?.message || 'Failed to dial customer');
     }
   };
 
