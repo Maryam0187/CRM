@@ -113,15 +113,7 @@ export async function POST(request) {
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
     });
 
-    console.log('📞 [CALL INITIATE] Outbound call created (will join conference on answer):', {
-      customerCallSid: call.sid,
-      conferenceName,
-      agentId: parseInt(agentId, 10),
-      toNumber: formattedNumber,
-      fromNumber,
-      customerIdParam: customerId || null,
-      saleIdParam: saleId || null
-    });
+    console.log('📞 [CALL INITIATE]', { callSid: call.sid, conferenceName, to: formattedNumber });
 
     // Create call log immediately
     try {
@@ -140,11 +132,9 @@ export async function POST(request) {
         twilioData: {
           customerCallSid: call.sid,
           conferenceName: conferenceName,
-          initiatedAt: new Date().toISOString(),
-          flowType: 'answer-then-conference'  // New flow type
+          initiatedAt: new Date().toISOString()
         }
       });
-      console.log('💾 [CALL INITIATE] Call log created:', call.sid);
     } catch (dbError) {
       // Log but don't fail the call if DB save fails
       console.error('❌ [CALL INITIATE] Failed to create initial call log:', dbError.message);

@@ -98,18 +98,6 @@ export default function GlobalWebCallInterface() {
   // status: 'waiting' | 'ringing' | 'connected' | 'left'
   const [participants, setParticipants] = useState([]);
   
-  // Debug: Log participants state changes
-  useEffect(() => {
-    console.log('👥 [PARTICIPANTS STATE CHANGED]', {
-      count: participants.length,
-      participants: participants.map(p => ({
-        role: p.role,
-        status: p.status,
-        callSid: p.callSid?.substring(0, 15) + '...'
-      }))
-    });
-  }, [participants]);
-  
   // Derived participant info
   const customerParticipant = participants.find(p => p.role === 'customer');
   const agentParticipant = participants.find(p => p.role === 'agent');
@@ -134,6 +122,16 @@ export default function GlobalWebCallInterface() {
   })();
 
   const customerAnswered = displayCallStatus === 'in-progress';
+  
+  // Start timer when customer connects (they answered)
+  useEffect(() => {
+    if (customerConnected && callStatus !== 'in-progress') {
+      console.log('⏱️ [TIMER START] Customer connected, starting timer');
+      startTimer();
+      // Also update the call status context to in-progress
+      updateCallStatus('in-progress');
+    }
+  }, [customerConnected, callStatus, startTimer, updateCallStatus]);
   
   // Twilio SDK state
   const [device, setDevice] = useState(null);
@@ -1793,7 +1791,15 @@ export default function GlobalWebCallInterface() {
                 <div className="space-y-2">
                   {/* Agent Status - use participant status or connection state */}
                   <div className="flex items-center justify-between text-xs text-gray-700">
-                    <div className="truncate">
+                    <div className="flex items-center gap-1.5 truncate">
+                      {/* Speaking indicator for agent */}
+                      {agentParticipant?.speaking && (
+                        <span className="flex items-center" title="Speaking">
+                          <svg className="w-3.5 h-3.5 text-green-500 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1 1.93c-3.94-.49-7-3.85-7-7.93h2c0 3.31 2.69 6 6 6s6-2.69 6-6h2c0 4.08-3.06 7.44-7 7.93V22h-2v-6.07z"/>
+                          </svg>
+                        </span>
+                      )}
                       <span className="font-medium">Agent:</span> <span>{user?.firstName || user?.name || 'You'}</span>
                     </div>
                     {(() => {
@@ -1815,7 +1821,15 @@ export default function GlobalWebCallInterface() {
                   
                   {/* Customer Status - use participant status */}
                   <div className="flex items-center justify-between text-xs text-gray-700">
-                    <div className="truncate">
+                    <div className="flex items-center gap-1.5 truncate">
+                      {/* Speaking indicator for customer */}
+                      {customerParticipant?.speaking && (
+                        <span className="flex items-center" title="Speaking">
+                          <svg className="w-3.5 h-3.5 text-green-500 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1 1.93c-3.94-.49-7-3.85-7-7.93h2c0 3.31 2.69 6 6s6-2.69 6-6h2c0 4.08-3.06 7.44-7 7.93V22h-2v-6.07z"/>
+                          </svg>
+                        </span>
+                      )}
                       <span className="font-medium">Customer:</span> <span>{callMetadata?.customerName || callMetadata?.phoneNumber || 'Customer'}</span>
                     </div>
                     {(() => {

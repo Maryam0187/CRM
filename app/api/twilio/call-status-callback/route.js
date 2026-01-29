@@ -1,62 +1,10 @@
 import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import socketManager from '../../../../lib/socket';
-import { getClient, getWebhookUrl } from '../../../../lib/twilio';
 import { Op } from 'sequelize';
 
 // Constants
 const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
-
-// Helper: Redirect customer call to conference when they answer
-async function redirectCustomerToConference(callSid, conferenceName, agentId) {
-  console.log('🔄 [REDIRECT START]', { callSid, conferenceName, agentId });
-  
-  try {
-    const client = getClient();
-    
-    // Conference callback URL
-    const conferenceCallbackUrl = new URL(getWebhookUrl('/api/twilio/call-status-callback'));
-    conferenceCallbackUrl.searchParams.set('agentId', String(agentId));
-    conferenceCallbackUrl.searchParams.set('conferenceName', conferenceName);
-    conferenceCallbackUrl.searchParams.set('isConference', 'true');
-    
-    // Generate TwiML to join conference
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Dial>
-    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false" statusCallback="${conferenceCallbackUrl.toString()}" statusCallbackMethod="POST" statusCallbackEvent="start end join leave mute hold speaker">${conferenceName}</Conference>
-  </Dial>
-</Response>`;
-
-    console.log('📝 [REDIRECT TWIML]', { 
-      callSid: callSid?.substring(0, 20),
-      conferenceName,
-      twimlLength: twiml.length 
-    });
-
-    // Update the call with new TwiML to join conference
-    const updatedCall = await client.calls(callSid).update({
-      twiml: twiml
-    });
-    
-    console.log('✅ [REDIRECT TO CONFERENCE] Customer call redirected:', {
-      callSid: callSid?.substring(0, 20),
-      conferenceName,
-      updatedCallStatus: updatedCall.status
-    });
-    
-    return true;
-  } catch (error) {
-    console.error('❌ [REDIRECT TO CONFERENCE] Failed:', {
-      callSid: callSid?.substring(0, 20),
-      conferenceName,
-      error: error.message,
-      code: error.code,
-      status: error.status
-    });
-    return false;
-  }
-}
 
 // Simple deduplication - track last processed status per callSid
 const lastProcessedStatus = new Map();
@@ -225,53 +173,18 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
     ?.replace(/^(conference-|participant-)/, '')
     ?.replace(/\s+/g, '-') || 'unknown';
   
-  console.log('📞 [CONFERENCE CALLBACK]', { 
-    event, 
-    conferenceName, 
-    participantId: participantId?.substring(0, 20) + '...', 
-    rawFrom: rawFrom?.substring(0, 25) 
-  });
-  
-  // Query DB to log stored SIDs for debugging
-  let dbDebugInfo = null;
-  try {
-    const debugLog = await sequelizeDb.CallLog.findOne({
-      where: { conferenceName },
-      attributes: ['customerCallSid', 'agentCallSid'],
-      order: [['created_at', 'DESC']]
-    });
-    if (debugLog) {
-      dbDebugInfo = {
-        customerCallSid: debugLog.customerCallSid?.substring(0, 20),
-        agentCallSid: debugLog.agentCallSid?.substring(0, 20)
-      };
-    }
-  } catch (e) { /* ignore */ }
-  
   const role = await resolveParticipantRole({ conferenceName, participantId, rawFrom });
-  console.log('📞 [PARTICIPANT ROLE RESOLVED]', { 
-    event, 
-    role, 
-    participantId: participantId?.substring(0, 20), 
-    rawFrom: rawFrom?.substring(0, 25),
-    dbSids: dbDebugInfo,
-    matchesCustomer: dbDebugInfo?.customerCallSid && participantId?.startsWith(dbDebugInfo.customerCallSid.replace('...', '')),
-    matchesAgent: dbDebugInfo?.agentCallSid && participantId?.startsWith(dbDebugInfo.agentCallSid.replace('...', ''))
-  });
   
   switch (event) {
     case 'start':
-      console.log('🎉 Conference started:', conferenceName);
-      
-      // CRITICAL: Save conference_sid to call log on conference start
+      // Save conference_sid to call log on conference start
       try {
         const callLog = await findCallLog(conferenceName, null);
         if (callLog && !callLog.conferenceSid) {
           await updateCallLog(callLog, { conferenceSid: conferenceSid });
-          console.log('💾 [CONFERENCE START] Conference SID saved:', conferenceSid);
         }
       } catch (err) {
-        console.error('❌ Failed to save conference SID:', err.message);
+        // Ignore
       }
       
       socketManager.sendConferenceEvent(conferenceName, {
@@ -288,7 +201,6 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     case 'end':
-      console.log('🏁 Conference ended:', conferenceName);
       socketManager.sendConferenceEvent(conferenceName, {
         event: 'end',
         conferenceSid,
@@ -303,7 +215,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     case 'join':
-      // Get known SIDs from database for better role matching on frontend
+      // Get known SIDs from database for role matching
       let customerSidForJoin = null;
       let agentSidForJoin = null;
       try {
@@ -312,19 +224,7 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
           customerSidForJoin = callLogForJoin.customerCallSid;
           agentSidForJoin = callLogForJoin.agentCallSid;
         }
-      } catch (err) {
-        console.warn('⚠️ Could not fetch SIDs for join event:', err.message);
-      }
-      
-      console.log('👤 Participant joined:', { 
-        conferenceName, 
-        role, 
-        participantId: participantId?.substring(0, 20),
-        customerSid: customerSidForJoin?.substring(0, 20),
-        agentSid: agentSidForJoin?.substring(0, 20),
-        isCustomerMatch: participantId === customerSidForJoin,
-        isAgentMatch: participantId === agentSidForJoin
-      });
+      } catch (err) { /* ignore */ }
       
       socketManager.sendConferenceEvent(conferenceName, {
         event: 'join',
@@ -332,7 +232,6 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
         conferenceName,
         callSid: participantId,
         participantRole: role,
-        // Include known SIDs so frontend can match
         customerCallSid: customerSidForJoin,
         agentCallSid: agentSidForJoin,
         muted: muted === 'true',
@@ -342,7 +241,6 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
       break;
       
     case 'leave':
-      console.log('👋 Participant left:', { conferenceName, role });
       socketManager.sendConferenceEvent(conferenceName, {
         event: 'leave',
         conferenceSid,
@@ -418,8 +316,6 @@ export async function POST(request) {
     const saleIdFromUrl = url.searchParams.get('saleId');
     const callPurposeFromUrl = url.searchParams.get('callPurpose');
     const directionFromUrl = url.searchParams.get('direction');
-    const isAmdCallback = url.searchParams.get('isAmdCallback') === 'true';
-    const conferenceNameFromUrl = url.searchParams.get('conferenceName');
 
     const formData = await request.formData();
     
@@ -431,109 +327,28 @@ export async function POST(request) {
     const dialCallSid = formData.get('DialCallSid');
     const callSid = formData.get('CallSid');
     const callStatus = formData.get('CallStatus');
-    const answerTimeRaw = formData.get('AnswerTime');
+    const answeredBy = formData.get('AnsweredBy');
     
-    // AMD (Answering Machine Detection) fields
-    const answeredBy = formData.get('AnsweredBy');  // 'human', 'machine_start', 'machine_end_beep', etc.
-    const machineDetectionDuration = formData.get('MachineDetectionDuration');
     
-    // 🔍 DEBUG: Log ALL incoming callback data
-    console.log('🔔 [CALLBACK RECEIVED]', {
-      callSid: callSid?.substring(0, 20),
-      callStatus,
-      answerTime: answerTimeRaw || 'NONE',
-      answeredBy: answeredBy || 'NONE',
-      isAmdCallback,
-      conferenceEvent,
-      conferenceSid: conferenceSid?.substring(0, 20),
-      agentIdFromUrl,
-      conferenceNameFromUrl,
-      direction: directionFromUrl,
-      from: formData.get('From'),
-      to: formData.get('To')
-    });
-    
-    // 🎯 Handle AMD (Answering Machine Detection) Callback
-    // This is the MOST RELIABLE way to know when a human answers
-    if (isAmdCallback && answeredBy) {
+    // Handle voicemail detection
+    if (answeredBy?.startsWith('machine')) {
       const agentId = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
-      const derivedConferenceName = conferenceNameFromUrl || (agentId ? `call-${agentId}` : null);
+      const derivedConferenceName = agentId ? `call-${agentId}` : null;
       
-      console.log('🤖 [AMD CALLBACK]', {
-        callSid: callSid?.substring(0, 20),
-        answeredBy,
-        machineDetectionDuration,
-        agentId,
-        conferenceName: derivedConferenceName
-      });
-      
-      if (answeredBy === 'human' && agentId && derivedConferenceName) {
-        // 🎉 HUMAN ANSWERED! Redirect to conference
-        console.log('✅ [HUMAN ANSWERED] Redirecting to conference...');
-        
-        const redirected = await redirectCustomerToConference(callSid, derivedConferenceName, agentId);
-        
-        if (redirected) {
-          // Update call log
-          const callLog = await findCallLog(derivedConferenceName, callSid);
-          if (callLog) {
-            await updateCallLog(callLog, {
-              status: 'in-progress',
-              twilioData: {
-                ...callLog.twilioData,
-                customerAnsweredAt: new Date().toISOString(),
-                answeredBy: 'human',
-                redirectedToConference: true
-              }
-            });
-          }
-          
-          // Broadcast to frontend
-          const statusData = {
-            callSid,
-            status: 'in-progress',
-            uiStatus: 'in-progress',
-            answeredBy: 'human',
-            conferenceName: derivedConferenceName,
-            agentId
-          };
-          broadcastCallStatus(derivedConferenceName, statusData, agentId);
-        }
-        
-        return NextResponse.json({ success: true, message: 'Human answered, redirecting to conference' });
-        
-      } else if (answeredBy?.startsWith('machine')) {
-        // Voicemail/Machine detected
-        console.log('📠 [MACHINE DETECTED]', { answeredBy, callSid: callSid?.substring(0, 20) });
-        
-        // Update call log
-        const callLog = await findCallLog(derivedConferenceName, callSid);
-        if (callLog) {
-          await updateCallLog(callLog, {
-            status: 'voicemail',
-            twilioData: {
-              ...callLog.twilioData,
-              answeredBy,
-              machineDetectionDuration
-            }
-          });
-        }
-        
-        // Broadcast voicemail status to frontend
-        const statusData = {
-          callSid,
-          status: 'voicemail',
-          uiStatus: 'voicemail',
-          answeredBy,
-          conferenceName: derivedConferenceName,
-          agentId
-        };
-        broadcastCallStatus(derivedConferenceName, statusData, agentId);
-        
-        return NextResponse.json({ success: true, message: 'Machine detected' });
+      const callLog = await findCallLog(derivedConferenceName, callSid);
+      if (callLog) {
+        await updateCallLog(callLog, { status: 'voicemail' });
       }
       
-      return NextResponse.json({ success: true, message: 'AMD callback processed' });
+      const statusData = {
+        callSid,
+        status: 'voicemail',
+        uiStatus: 'voicemail',
+        conferenceName: derivedConferenceName,
+        agentId
+      };
+      broadcastCallStatus(derivedConferenceName, statusData, agentId);
+      return NextResponse.json({ success: true, message: 'Voicemail detected' });
     }
     
     const isConferenceCallback = !!conferenceEvent && !!conferenceSid;
@@ -580,68 +395,19 @@ export async function POST(request) {
     const agentId = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
     const derivedConferenceName = agentId ? `call-${agentId}` : null;
     
-    // Determine UI status and handle conference redirect
+    // Determine UI status
     // Customer has answered if: status is 'answered' OR status is 'in-progress' WITH AnswerTime
     const customerHasAnswered = effectiveStatus === 'answered' || (effectiveStatus === 'in-progress' && answerTime);
     
     let uiStatus = effectiveStatus;
     if (customerHasAnswered) {
       uiStatus = 'in-progress';
-      console.log('✅ [CUSTOMER ANSWERED - BACKEND]', { 
-        effectiveStatus, 
-        answerTime, 
-        uiStatus,
-        callSid: effectiveCallSid?.substring(0, 20),
-        agentId,
-        conferenceName: derivedConferenceName
-      });
-      
-      // 🎯 KEY: When customer answers, redirect them to the conference!
-      // This is the new flow - customer only joins conference AFTER answering
-      if (agentId && derivedConferenceName) {
-        console.log('📞 [REDIRECTING TO CONFERENCE]', {
-          callSid: effectiveCallSid,
-          conferenceName: derivedConferenceName,
-          agentId
-        });
-        
-        const redirected = await redirectCustomerToConference(effectiveCallSid, derivedConferenceName, agentId);
-        
-        if (redirected) {
-          console.log('✅ [REDIRECT SUCCESS] Customer will join conference');
-          // Update call log to mark customer as connected
-          const callLog = await findCallLog(derivedConferenceName, effectiveCallSid);
-          if (callLog) {
-            await updateCallLog(callLog, {
-              status: 'in-progress',
-              twilioData: {
-                ...callLog.twilioData,
-                customerAnsweredAt: new Date().toISOString(),
-                redirectedToConference: true
-              }
-            });
-          }
-        } else {
-          console.error('❌ [REDIRECT FAILED] Customer could not be redirected to conference');
-        }
-      } else {
-        console.warn('⚠️ [NO REDIRECT] Missing agentId or conferenceName', { agentId, derivedConferenceName });
-      }
     } else if (effectiveStatus === 'in-progress' && !answerTime) {
-      // Early media - customer phone ringing but not answered
+      // Early media - customer phone ringing but not answered yet
       uiStatus = 'ringing';
-      console.log('📱 [EARLY MEDIA - RINGING]', { effectiveStatus, answerTime: 'NONE', uiStatus });
     } else if (effectiveStatus === 'initiated' || effectiveStatus === 'queued') {
       uiStatus = 'queued';
     }
-    
-    console.log('📞 [CALL STATUS]', {
-      callSid: effectiveCallSid?.substring(0, 15) + '...',
-      status: effectiveStatus,
-      uiStatus,
-      direction,
-      conferenceName: derivedConferenceName
-    });
     
     // Build status data for frontend
     const statusData = {
@@ -690,8 +456,6 @@ export async function POST(request) {
           }
         });
         
-        console.log('💾 [CALL END] Call log updated:', { callSid: effectiveCallSid, status: finalStatus });
-        
         // Update related records
         if (duration && parseInt(duration) > 0) {
           if (callLog.customerId) {
@@ -723,9 +487,8 @@ export async function POST(request) {
               answeredBy
             }
           });
-          console.log('💾 [CALL END] New call log created:', effectiveCallSid);
         } catch (dbErr) {
-          console.error('❌ Failed to create call log:', dbErr.message);
+          // Ignore DB errors
         }
       }
       
