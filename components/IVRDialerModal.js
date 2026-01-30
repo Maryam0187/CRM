@@ -35,6 +35,7 @@ export default function IVRDialerModal({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [helplineToDelete, setHelplineToDelete] = useState(null);
   const inputRef = useRef(null);
+  const newHelplineNumberInputRef = useRef(null);
   const { showSuccess, showError, showWarning, showInfo } = useToast();
   const audioContextRef = useRef(null);
 
@@ -121,9 +122,15 @@ export default function IVRDialerModal({
   }, [isOpen]);
 
   // Prevent paste in main input field (dial mode only)
+  // But allow paste in the "add new number" input field
   useEffect(() => {
     const handlePaste = (e) => {
-      if (mode === 'dial' && inputRef.current && inputRef.current.contains(e.target)) {
+      // Allow paste in the "add new number" input field
+      if (newHelplineNumberInputRef.current && (newHelplineNumberInputRef.current === e.target || newHelplineNumberInputRef.current.contains(e.target))) {
+        return; // Allow paste to proceed normally
+      }
+      // Prevent paste in main input field (dial mode only)
+      if (mode === 'dial' && inputRef.current && (inputRef.current === e.target || inputRef.current.contains(e.target))) {
         e.preventDefault();
         return false;
       }
@@ -654,6 +661,7 @@ export default function IVRDialerModal({
                       Phone Number
                     </label>
                     <input
+                      ref={newHelplineNumberInputRef}
                       type="tel"
                       value={newHelplineNumber}
                       onChange={(e) => {
@@ -661,9 +669,32 @@ export default function IVRDialerModal({
                         const value = e.target.value.replace(/[^\d+\-() *]/g, '');
                         setNewHelplineNumber(value);
                       }}
+                      onPaste={(e) => {
+                        // Explicitly allow paste and process the pasted content
+                        e.preventDefault();
+                        e.stopPropagation(); // Stop event from bubbling to document handler
+                        const pastedText = (e.clipboardData || window.clipboardData).getData('text');
+                        // Clean the pasted text to allow only valid phone number characters
+                        const cleanedValue = pastedText.replace(/[^\d+\-() *]/g, '');
+                        setNewHelplineNumber(cleanedValue);
+                      }}
+                      onCut={(e) => {
+                        // Allow cut operation - let it proceed normally
+                        e.stopPropagation(); // Stop event from bubbling to document handler
+                        // The default cut behavior will work, we just need to not prevent it
+                      }}
+                      onCopy={(e) => {
+                        // Allow copy operation - let it proceed normally
+                        e.stopPropagation(); // Stop event from bubbling to document handler
+                        // The default copy behavior will work, we just need to not prevent it
+                      }}
                       onKeyDown={(e) => {
+                        // Allow standard editing shortcuts (cut, copy, paste, select all, undo, redo)
+                        if ((e.ctrlKey || e.metaKey) && ['x', 'c', 'v', 'a', 'z', 'y'].includes(e.key.toLowerCase())) {
+                          return; // Allow Ctrl/Cmd + X, C, V, A, Z, Y
+                        }
                         // Allow backspace, delete, tab, escape, enter, and arrow keys
-                        if (['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+                        if (['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) {
                           return;
                         }
                         // Allow digits, +, -, spaces, parentheses, and *
