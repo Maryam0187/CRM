@@ -7,6 +7,8 @@ import { useRouter } from 'next/navigation';
 import { isAdmin } from '../lib/auth';
 import NotificationBell from './NotificationBell';
 import { useSocket } from '../contexts/SocketContext';
+import { useCall } from '../contexts/CallContext';
+import IVRDialer, { openIVRDialer } from './IVRDialer';
 
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -116,6 +118,17 @@ export default function Navbar() {
                 </Link>
               ) : (
                 <>
+                  {/* IVR Dialer Button */}
+                  <button
+                    onClick={() => openIVRDialer()}
+                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center gap-2"
+                    title="Open IVR Dialer"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+                    </svg>
+                    <span className="hidden lg:inline">IVR Dialer</span>
+                  </button>
                   
                   {/* Notification Bell */}
                   <NotificationBell />
@@ -222,6 +235,21 @@ export default function Navbar() {
                 Customers
               </Link>
             )}
+            {/* IVR Dialer Button - Mobile */}
+            {isAuthenticated && (
+              <button
+                onClick={() => {
+                  openIVRDialer();
+                  setIsMenuOpen(false);
+                }}
+                className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200 flex items-center gap-2 w-full text-left"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+                </svg>
+                IVR Dialer
+              </button>
+            )}
             {isAuthenticated && isAdmin(user) && (
               <>
                 <Link
@@ -296,6 +324,9 @@ export default function Navbar() {
           </div>
         </div>
       )}
+
+      {/* IVR Dialer - Self-contained component */}
+      {isAuthenticated && <IVRDialer />}
     </nav>
   );
 }
