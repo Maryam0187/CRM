@@ -14,7 +14,7 @@ export function openIVRDialer() {
 export default function IVRDialer() {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const { showWebInterface } = useCall();
+  const { showWebInterface } = useCall(); // Only for positioning, not call management
 
   // Register this instance to receive open events
   useEffect(() => {
@@ -40,13 +40,14 @@ export default function IVRDialer() {
   };
 
   const handleSendDigits = (digits, callId) => {
-    // TODO: Implement send digits
+    // TODO: Implement send digits for IVR
     console.log('Send digits:', digits, callId);
   };
 
-  const handleMakeCall = (phoneNumber) => {
-    // TODO: Implement make call
-    console.log('Make call:', phoneNumber);
+  const handleMakeCall = async (phoneNumber) => {
+    // TODO: Implement call functionality
+    console.log('Make call to:', phoneNumber);
+    alert('Call functionality will be implemented later');
   };
 
   return (

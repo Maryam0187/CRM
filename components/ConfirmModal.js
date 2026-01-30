@@ -26,7 +26,7 @@ export default function ConfirmModal({
 
   return (
     <div 
-      className="fixed inset-0 flex items-center justify-center z-50 p-4" 
+      className="fixed inset-0 flex items-center justify-center z-[10002] p-4" 
       style={{ background: 'rgba(0,0,0,0.5)' }}
       onClick={handleCancel}
     >

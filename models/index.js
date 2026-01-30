@@ -73,6 +73,7 @@ const UserSession = require('./UserSession')(sequelize);
 const ChequeElectronic = require('./ChequeElectronic')(sequelize);
 const ChequeMail = require('./ChequeMail')(sequelize);
 const PaymentEmail = require('./PaymentEmail')(sequelize);
+const Helpline = require('./Helpline')(sequelize);
 
 // Define associations
 Object.keys(sequelize.models).forEach(modelName => {
@@ -141,6 +142,7 @@ module.exports = {
   ChequeElectronic,
   ChequeMail,
   PaymentEmail,
+  Helpline,
   testConnection,
   syncDatabase
 };

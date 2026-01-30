@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import apiClient from '../lib/apiClient';
+import { useToast } from '../contexts/ToastContext';
+import ConfirmModal from './ConfirmModal';
 
 export default function IVRDialerModal({ 
   isOpen, 
@@ -28,7 +31,30 @@ export default function IVRDialerModal({
   const [loading, setLoading] = useState(false);
   const [editingLabel, setEditingLabel] = useState(null);
   const [newLabel, setNewLabel] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [helplineToDelete, setHelplineToDelete] = useState(null);
   const inputRef = useRef(null);
+  const { showSuccess, showError, showWarning, showInfo } = useToast();
+
+  // Fetch saved helplines
+  const fetchHelplines = async () => {
+    try {
+      const response = await apiClient.get('/api/helplines');
+      const data = await response.json();
+      if (data?.success) {
+        setSavedHelplines(data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching helplines:', error);
+    }
+  };
+
+  // Fetch helplines when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      fetchHelplines();
+    }
+  }, [isOpen]);
 
   // Reset when modal closes
   useEffect(() => {
@@ -155,25 +181,114 @@ export default function IVRDialerModal({
     }
   };
 
-  const handleSaveHelpline = () => {
+  const handleSaveHelpline = async () => {
     if (!newHelplineNumber.trim()) {
-      alert('Please enter a phone number');
+      showWarning('Please enter a phone number');
       return;
     }
     if (!newHelplineLabel.trim()) {
-      alert('Please enter a name/label');
+      showWarning('Please enter a name/label');
       return;
     }
-    // TODO: Implement save to database
-    console.log('Saving helpline:', { number: newHelplineNumber, label: newHelplineLabel });
-    setNewHelplineNumber('');
-    setNewHelplineLabel('');
-    setShowAddNewSection(false); // Close the section after saving
-    // TODO: Reload saved helplines
+
+    setLoading(true);
+    try {
+      const response = await apiClient.post('/api/helplines', {
+        phoneNumber: newHelplineNumber.trim(),
+        label: newHelplineLabel.trim()
+      });
+
+      const data = await response.json();
+
+      if (data?.success) {
+        // Reload helplines
+        await fetchHelplines();
+        setNewHelplineNumber('');
+        setNewHelplineLabel('');
+        setShowAddNewSection(false);
+        showSuccess('Helpline saved successfully');
+      } else {
+        showError('Failed to save helpline: ' + (data?.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error saving helpline:', error);
+      showError('Failed to save helpline: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleQuickDial = (helpline) => {
     setPhoneNumber(helpline.phoneNumber);
+    // Switch to dial mode if not already
+    if (mode !== 'dial') {
+      // Note: mode is controlled by parent, but we can at least set the number
+    }
+  };
+
+  const handleUpdateLabel = async (helplineId, newLabelValue) => {
+    if (!newLabelValue.trim()) {
+      showWarning('Label cannot be empty');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await apiClient.put(`/api/helplines/${helplineId}`, {
+        label: newLabelValue.trim()
+      });
+
+      const data = await response.json();
+
+      if (data?.success) {
+        await fetchHelplines();
+        setEditingLabel(null);
+        setNewLabel('');
+        showSuccess('Label updated successfully');
+      } else {
+        showError('Failed to update label: ' + (data?.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error updating label:', error);
+      showError('Failed to update label: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteClick = (helplineId) => {
+    setHelplineToDelete(helplineId);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!helplineToDelete) return;
+
+    setLoading(true);
+    setShowDeleteConfirm(false);
+    
+    try {
+      const response = await apiClient.delete(`/api/helplines/${helplineToDelete}`);
+      const data = await response.json();
+
+      if (data?.success) {
+        await fetchHelplines();
+        showSuccess('Helpline deleted successfully');
+      } else {
+        showError('Failed to delete helpline: ' + (data?.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error deleting helpline:', error);
+      showError('Failed to delete helpline: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+      setHelplineToDelete(null);
+    }
+  };
+
+  const handleDeleteCancel = () => {
+    setShowDeleteConfirm(false);
+    setHelplineToDelete(null);
   };
 
   const handlePaste = (e) => {
@@ -242,7 +357,7 @@ export default function IVRDialerModal({
         {/* Body - Two Panel Layout */}
         <div className="flex" style={{ maxHeight: 'calc(100vh - 10rem)' }}>
           {/* Left Panel - Keypad Dialer */}
-          <div className="flex-1 p-6 border-r border-gray-200">
+          <div className="flex-1 p-6 border-r border-gray-200 flex flex-col" style={{ minHeight: '500px', height: '500px' }}>
             {/* Phone Number Display - DIAL MODE */}
             {mode === 'dial' && (
               <>
@@ -406,7 +521,7 @@ export default function IVRDialerModal({
           </div>
 
           {/* Right Panel - Saved Helplines */}
-          <div className="w-80 border-l border-gray-200 flex flex-col">
+          <div className="w-80 border-l border-gray-200 flex flex-col" style={{ minHeight: '500px', height: '500px' }}>
             {/* Add New Helpline Section - Toggle Button */}
             <div className="p-4 border-b border-gray-200 bg-gray-50">
               {!showAddNewSection ? (
@@ -494,7 +609,9 @@ export default function IVRDialerModal({
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4">
+            <div 
+              className={`overflow-y-auto p-4 ${showAddNewSection ? 'max-h-[200px]' : 'flex-1'}`}
+            >
               <h4 className="text-sm font-semibold text-gray-700 mb-3">Saved Helplines</h4>
               {savedHelplines.length === 0 ? (
                 <div className="text-center py-8">
@@ -519,9 +636,7 @@ export default function IVRDialerModal({
                             onChange={(e) => setNewLabel(e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
-                                // TODO: Save label
-                                setEditingLabel(null);
-                                setNewLabel('');
+                                handleUpdateLabel(helpline.id, newLabel);
                               } else if (e.key === 'Escape') {
                                 setEditingLabel(null);
                                 setNewLabel('');
@@ -532,9 +647,7 @@ export default function IVRDialerModal({
                           />
                           <button
                             onClick={() => {
-                              // TODO: Save label
-                              setEditingLabel(null);
-                              setNewLabel('');
+                              handleUpdateLabel(helpline.id, newLabel);
                             }}
                             className="p-1 text-green-600 hover:bg-green-50 rounded"
                           >
@@ -589,10 +702,7 @@ export default function IVRDialerModal({
                               </svg>
                             </button>
                             <button
-                              onClick={() => {
-                                // TODO: Delete helpline
-                                console.log('Delete:', helpline.id);
-                              }}
+                              onClick={() => handleDeleteClick(helpline.id)}
                               className="px-2 py-1.5 text-red-600 hover:bg-red-50 rounded text-xs"
                               title="Delete"
                             >
@@ -611,6 +721,24 @@ export default function IVRDialerModal({
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        onClose={handleDeleteCancel}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Helpline"
+        message={`Are you sure you want to delete "${savedHelplines.find(h => h.id === helplineToDelete)?.label || 'this helpline'}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        confirmButtonClass="bg-red-600 hover:bg-red-700"
+        isLoading={loading}
+        icon={
+          <svg className="w-12 h-12 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        }
+      />
     </>
   );
 }
