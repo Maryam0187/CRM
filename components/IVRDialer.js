@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useCall } from '../contexts/CallContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 import IVRDialerModal from './IVRDialerModal';
 import apiClient from '../lib/apiClient';
 import { Device } from '@twilio/voice-sdk';
@@ -19,6 +20,7 @@ export default function IVRDialer() {
   const [isMinimized, setIsMinimized] = useState(false);
   const { showWebInterface } = useCall(); // Only for positioning, not call management
   const { user } = useAuth();
+  const { getCallStatus } = useSocket(); // For real-time status updates
 
   // IVR Call State Management
   const [ivrCallState, setIvrCallState] = useState({
@@ -43,6 +45,7 @@ export default function IVRDialer() {
   const ivrActiveConnection = useRef(null);
   const ivrLocalMediaStream = useRef(null);
   const isIvrCleaningUp = useRef(false);
+  const isIvrDeviceSettingUp = useRef(false);
 
   // Register this instance to receive open events
   useEffect(() => {
@@ -82,7 +85,7 @@ export default function IVRDialer() {
     }
   }, []);
 
-  // Cleanup timer and device on unmount
+      // Cleanup timer and device on unmount
   useEffect(() => {
     return () => {
       if (timerIntervalRef.current) {
@@ -98,12 +101,7 @@ export default function IVRDialer() {
               ivrActiveConnection.current.disconnect();
               ivrActiveConnection.current = null;
             }
-            if (ivrDevice && typeof ivrDevice.unregister === 'function') {
-              ivrDevice.unregister();
-            }
-            if (ivrDevice && typeof ivrDevice.destroy === 'function') {
-              ivrDevice.destroy();
-            }
+            safelyCleanupDevice(ivrDevice);
           } catch (e) {
             console.warn('⚠️ [IVR] Error during device cleanup (ignored):', e.message);
           }
@@ -113,7 +111,7 @@ export default function IVRDialer() {
         }, 300);
       }
     };
-  }, [ivrDevice]);
+  }, [ivrDevice, safelyCleanupDevice]);
 
   // Start timer when call status becomes 'in-progress'
   useEffect(() => {
@@ -219,6 +217,43 @@ export default function IVRDialer() {
     } catch (err) {
       console.error('❌ [IVR] Error getting call streams:', err);
       return { local: null, remote: null };
+    }
+  }, []);
+
+  // Helper function to safely cleanup device
+  const safelyCleanupDevice = useCallback((device) => {
+    if (!device) return;
+
+    try {
+      const deviceState = device.state || device._state;
+      
+      // Only unregister if device is registered
+      if (deviceState === 'registered') {
+        if (typeof device.unregister === 'function') {
+          device.unregister().catch(err => {
+            // Ignore errors if device is already unregistered or destroyed
+            if (!err.message?.includes('destroyed') && !err.message?.includes('unregistered')) {
+              console.warn('⚠️ [IVR] Error unregistering device:', err);
+            }
+          });
+        }
+      } else {
+        console.log('📞 [IVR] Skipping unregister - device state:', deviceState);
+      }
+
+      // Always try to destroy, but handle errors gracefully
+      if (typeof device.destroy === 'function') {
+        try {
+          device.destroy();
+        } catch (destroyErr) {
+          // Ignore errors if device is already destroyed
+          if (!destroyErr.message?.includes('destroyed')) {
+            console.warn('⚠️ [IVR] Error destroying device:', destroyErr);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ [IVR] Error during device cleanup:', e);
     }
   }, []);
 
@@ -509,16 +544,17 @@ export default function IVRDialer() {
             ivrActiveConnection.current.disconnect();
             ivrActiveConnection.current = null;
           }
-          ivrDevice.unregister();
-          ivrDevice.destroy();
+          safelyCleanupDevice(ivrDevice);
           setIvrDevice(null);
           setIvrCallState(prev => ({
             ...prev,
             isConnected: false,
             isConnecting: false
           }));
+          isIvrDeviceSettingUp.current = false;
         } catch (e) {
           console.error('❌ [IVR] Error cleaning up device:', e);
+          isIvrDeviceSettingUp.current = false;
         }
       }
       return;
@@ -555,21 +591,45 @@ export default function IVRDialer() {
       if (!ivrCallState.isConnected && !ivrActiveConnection.current) {
         try {
           const deviceState = ivrDevice.state || ivrDevice._state;
-          if (deviceState && deviceState !== 'registered') {
+          // Only register if device is unregistered or destroyed
+          // Don't register if already registered or currently registering
+          if (deviceState === 'unregistered' || deviceState === 'destroyed' || !deviceState) {
+            console.log('📞 [IVR] Registering device (state:', deviceState, ')');
             ivrDevice.register().catch(err => {
-              console.warn('⚠️ [IVR] Device re-registration warning:', err);
+              // Only log if it's not a state error (which we're trying to prevent)
+              if (!err.message?.includes('InvalidStateError') && !err.message?.includes('registering')) {
+                console.warn('⚠️ [IVR] Device registration warning:', err);
+              }
             });
+          } else if (deviceState === 'registering') {
+            console.log('📞 [IVR] Device is already registering, skipping');
+          } else if (deviceState === 'registered') {
+            console.log('📞 [IVR] Device is already registered');
+          } else {
+            console.log('📞 [IVR] Device in state:', deviceState, '- skipping registration');
           }
         } catch (e) {
-          ivrDevice.register().catch(err => {
-            console.warn('⚠️ [IVR] Device re-registration warning:', err);
-          });
+          // Don't try to register again in catch block - just log the error
+          console.warn('⚠️ [IVR] Error checking device state:', e);
         }
       }
       return;
     }
 
+    // Prevent multiple simultaneous device setups
+    if (isIvrDeviceSettingUp.current) {
+      console.log('📞 [IVR] Device setup already in progress, skipping');
+      return;
+    }
+
     const setupIVRDevice = async () => {
+      if (isIvrDeviceSettingUp.current) {
+        console.log('📞 [IVR] Device setup already in progress, skipping');
+        return;
+      }
+
+      isIvrDeviceSettingUp.current = true;
+      
       try {
         console.log('📞 [IVR] Starting device setup for conference:', ivrCallState.conferenceName);
         setIvrCallState(prev => ({ ...prev, isConnecting: true, error: null }));
@@ -609,7 +669,7 @@ export default function IVRDialer() {
         };
 
         const twilioDevice = new Device(token, {
-          logLevel: 1,
+          logLevel: 0,
           codecPreferences: ['opus', 'pcmu'],
           allowIncomingWhileBusy: false,
           enableRTCStats: false,
@@ -684,8 +744,16 @@ export default function IVRDialer() {
           }
         });
 
-        twilioDevice.register();
+        // Check device state before registering
+        const deviceState = twilioDevice.state || twilioDevice._state;
+        if (deviceState === 'unregistered' || deviceState === 'destroyed' || !deviceState) {
+          twilioDevice.register();
+        } else {
+          console.log('📞 [IVR] Device already in state:', deviceState, '- skipping initial registration');
+        }
+        
         setIvrDevice(twilioDevice);
+        isIvrDeviceSettingUp.current = false;
 
       } catch (err) {
         console.error('❌ [IVR] Failed to set up Twilio Device:', err);
@@ -694,6 +762,7 @@ export default function IVRDialer() {
           error: err.message,
           isConnecting: false
         }));
+        isIvrDeviceSettingUp.current = false;
       }
     };
 
@@ -708,12 +777,7 @@ export default function IVRDialer() {
               ivrActiveConnection.current.disconnect();
               ivrActiveConnection.current = null;
             }
-            if (ivrDevice && typeof ivrDevice.unregister === 'function') {
-              ivrDevice.unregister();
-            }
-            if (ivrDevice && typeof ivrDevice.destroy === 'function') {
-              ivrDevice.destroy();
-            }
+            safelyCleanupDevice(ivrDevice);
           } catch (e) {
             console.warn('⚠️ [IVR] Error during device cleanup (ignored):', e.message);
           }
@@ -725,10 +789,196 @@ export default function IVRDialer() {
           }));
           ivrLocalMediaStream.current = null;
           isIvrCleaningUp.current = false;
+          isIvrDeviceSettingUp.current = false;
         }, 300);
       }
     };
   }, [ivrCallState.conferenceName, user, fetchIVRToken, ivrDevice, ivrCallState.isConnected, joinIVRConference]);
+
+  // Socket event listeners for real-time IVR call status updates
+  useEffect(() => {
+    if (!ivrCallState.callSid && !ivrCallState.conferenceName) {
+      return; // No active IVR call to monitor
+    }
+
+    // Helper to normalize status
+    const normalizeUiStatus = (s) => {
+      const x = s ? String(s) : '';
+      if (x === 'initiated') return 'queued';
+      if (x === 'answered') return 'in-progress';
+      return x;
+    };
+
+    // Check initial status from socket context
+    const updateStatusFromSocket = () => {
+      if (ivrCallState.callSid) {
+        const statusData = getCallStatus(ivrCallState.callSid);
+        if (statusData) {
+          // Check if this is an IVR call
+          const isIvrCall = statusData.twilioData?.isIvrCall || 
+                           statusData.callPurpose === 'ivr_dialer' ||
+                           (statusData.conferenceName && statusData.conferenceName.startsWith('ivr-call-'));
+          
+          if (isIvrCall) {
+            const statusForUiRaw = statusData.uiStatus || statusData.status;
+            const statusForUi = normalizeUiStatus(statusForUiRaw);
+            
+            console.log('📞 [IVR] Initial status from socket:', {
+              callSid: ivrCallState.callSid,
+              status: statusForUi,
+              rawStatus: statusForUiRaw
+            });
+
+            setIvrCallState(prev => {
+              // Prevent downgrades
+              const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+              const order = { queued: 1, ringing: 2, 'in-progress': 3 };
+              const currentUi = normalizeUiStatus(prev.callStatus);
+              const currentOrder = order[currentUi] || 0;
+              const nextOrder = order[statusForUi] || 0;
+
+              const shouldApply =
+                endedStatuses.includes(statusForUi) ||
+                (!endedStatuses.includes(currentUi) && nextOrder >= currentOrder);
+
+              if (shouldApply && prev.callStatus !== statusForUi) {
+                return {
+                  ...prev,
+                  callStatus: statusForUi
+                };
+              }
+              return prev;
+            });
+          }
+        }
+      }
+    };
+
+    // Check initial status
+    updateStatusFromSocket();
+
+    // Listen for real-time call status updates
+    const handleCallStatusUpdate = (event) => {
+      const { callStatusData } = event.detail;
+      
+      // Only process updates for this IVR call
+      const matchesCallSid = callStatusData?.callSid === ivrCallState.callSid;
+      const matchesConference = callStatusData?.conferenceName === ivrCallState.conferenceName;
+      
+      if (!matchesCallSid && !matchesConference) {
+        return; // Not for this call
+      }
+
+      // Verify this is an IVR call
+      const isIvrCall = callStatusData.twilioData?.isIvrCall || 
+                        callStatusData.callPurpose === 'ivr_dialer' ||
+                        (callStatusData.conferenceName && callStatusData.conferenceName.startsWith('ivr-call-'));
+      
+      if (!isIvrCall) {
+        return; // Not an IVR call, ignore
+      }
+
+      console.log('📞 [IVR] Real-time status update received:', {
+        callSid: callStatusData?.callSid?.substring(0, 20),
+        status: callStatusData?.status,
+        uiStatus: callStatusData?.uiStatus,
+        conferenceName: callStatusData?.conferenceName
+      });
+
+      // Normalize status
+      const statusForUiRaw = callStatusData.uiStatus || callStatusData.status;
+      const statusForUi = normalizeUiStatus(statusForUiRaw);
+      
+      // Prevent downgrades (e.g., don't go from 'in-progress' back to 'ringing')
+      const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
+      const order = { queued: 1, ringing: 2, 'in-progress': 3 };
+      
+      setIvrCallState(prev => {
+        const currentUi = normalizeUiStatus(prev.callStatus);
+        const currentOrder = order[currentUi] || 0;
+        const nextOrder = order[statusForUi] || 0;
+
+        const shouldApply =
+          endedStatuses.includes(statusForUi) ||
+          (!endedStatuses.includes(currentUi) && nextOrder >= currentOrder);
+
+        if (shouldApply && prev.callStatus !== statusForUi) {
+          console.log('📨 [IVR] Status update applied:', {
+            from: currentUi,
+            to: statusForUi,
+            callSid: callStatusData?.callSid?.substring(0, 20)
+          });
+
+          // If call ended, disconnect and cleanup
+          if (endedStatuses.includes(statusForUi)) {
+            console.log('🏁 [IVR] Call ended via socket update:', statusForUi);
+            
+            // Disconnect if connected
+            if (ivrActiveConnection.current) {
+              try {
+                ivrActiveConnection.current.disconnect();
+              } catch (e) {
+                console.warn('⚠️ [IVR] Error disconnecting on call end:', e);
+              }
+              ivrActiveConnection.current = null;
+            }
+
+            // Reset state after a short delay
+            setTimeout(() => {
+              resetIVRCallState();
+            }, 500);
+          }
+
+          return {
+            ...prev,
+            callStatus: statusForUi
+          };
+        } else {
+          console.log('⏭️ [IVR] Status update skipped (downgrade or duplicate):', {
+            current: currentUi,
+            received: statusForUi
+          });
+        }
+        
+        return prev;
+      });
+    };
+
+    // Listen for conference events (optional, for future use)
+    const handleConferenceEvent = (event) => {
+      const { conferenceEventData } = event.detail;
+      
+      // Only process events for this IVR conference
+      if (conferenceEventData?.conferenceName !== ivrCallState.conferenceName) {
+        return;
+      }
+
+      // Verify this is an IVR call
+      const isIvrCall = conferenceEventData.conferenceName?.startsWith('ivr-call-');
+      if (!isIvrCall) {
+        return;
+      }
+
+      console.log('🎯 [IVR] Conference event received:', {
+        event: conferenceEventData?.event,
+        conferenceName: conferenceEventData?.conferenceName,
+        participantRole: conferenceEventData?.participantRole
+      });
+
+      // Handle specific conference events if needed
+      // For now, just log them
+    };
+
+    // Register event listeners
+    window.addEventListener('callStatusUpdate', handleCallStatusUpdate);
+    window.addEventListener('conferenceEvent', handleConferenceEvent);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('callStatusUpdate', handleCallStatusUpdate);
+      window.removeEventListener('conferenceEvent', handleConferenceEvent);
+    };
+  }, [ivrCallState.callSid, ivrCallState.conferenceName, ivrCallState.callStatus, getCallStatus, resetIVRCallState]);
 
   // Handle making a call
   const handleMakeCall = async (phoneNumber) => {
