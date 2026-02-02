@@ -40,11 +40,13 @@ async function handleVoiceResponse(request) {
       url = new URL(request.url);
       agentId = url.searchParams.get('agentId');
       conferenceNameFromUrl = url.searchParams.get('conferenceName') || url.searchParams.get('conference');
+      const isIvrCallFromUrl = url.searchParams.get('isIvrCall') === 'true';
       console.log('📞 [TwiML voice-response] request received:', {
         method: request.method,
         url: request.url,
         agentIdFromUrl: agentId,
         conferenceNameFromUrl,
+        isIvrCallFromUrl,
         hasUrl: !!url
       });
     } catch (urlError) {
@@ -96,6 +98,11 @@ async function handleVoiceResponse(request) {
         const calledNumber = formData.get('To');
         const callSid = formData.get('CallSid'); // This is the CallSid for THIS leg
         
+        // Detect IVR calls - check multiple indicators
+        const isIvrCall = isIvrCallFromUrl || 
+                         (conferenceNameFromUrl && conferenceNameFromUrl.startsWith('ivr-call-')) ||
+                         (calledNumber && String(calledNumber).startsWith('ivr-call-'));
+        
         console.log('📞 [TwiML voice-response] form data parsed:', {
           agentIdFromForm,
           finalAgentId: agentId,
@@ -118,27 +125,38 @@ async function handleVoiceResponse(request) {
         
         if (isAgentLeg && callSid) {
           // This is the agent connecting via Voice SDK
-          // Extract conference name from "To" field (e.g., "call-1" or "inbound-xxx")
-          const confName = calledNumber && (String(calledNumber).startsWith('call-') || String(calledNumber).startsWith('inbound-'))
+          // Extract conference name from "To" field (e.g., "call-1", "inbound-xxx", or "ivr-call-xxx")
+          const confName = calledNumber && (
+            String(calledNumber).startsWith('call-') || 
+            String(calledNumber).startsWith('inbound-') ||
+            String(calledNumber).startsWith('ivr-call-')
+          )
             ? String(calledNumber).trim()
-            : (conferenceNameFromUrl || (agentId ? `call-${agentId}` : null));
+            : (conferenceNameFromUrl || (agentId && !isIvrCall ? `call-${agentId}` : null));
           
-          if (confName) {
+          // For IVR calls, use the provided conference name
+          const finalConfName = isIvrCall && conferenceNameFromUrl 
+            ? conferenceNameFromUrl 
+            : confName;
+          
+          if (finalConfName) {
             console.log('🔑 [AGENT LEG DETECTED] Capturing agent CallSid on backend:', {
               agentCallSid: callSid,
-              conferenceName: confName,
+              conferenceName: finalConfName,
               from: callerNumber,
               to: calledNumber,
-              agentId: agentId
+              agentId: agentId,
+              isIvrCall: isIvrCall
             });
             
             // CRITICAL: Save agent_call_sid to the call log immediately
             // This happens BEFORE conference join, so we have the agent CallSid early
+            // For IVR calls, we still save the agent SID but don't update agent status
             let customerSid = null;
             try {
               // Find the call log by conference name
               const callLog = await sequelizeDb.CallLog.findOne({
-                where: { conferenceName: confName },
+                where: { conferenceName: finalConfName },
                 order: [['created_at', 'DESC']]
               });
               
@@ -149,7 +167,8 @@ async function handleVoiceResponse(request) {
                   callLogId: callLog.id,
                   agentCallSid: callSid,
                   customerCallSid: customerSid,
-                  conferenceName: confName
+                  conferenceName: finalConfName,
+                  isIvrCall: isIvrCall
                 });
               } else {
                 console.log('⚠️ [AGENT SID] No call log found to update (call might not be initiated yet)');
@@ -160,13 +179,14 @@ async function handleVoiceResponse(request) {
             
             // Broadcast to frontend via socket so UI can update immediately
             try {
-              socketManager.sendConferenceEvent(confName, {
+              socketManager.sendConferenceEvent(finalConfName, {
                 event: 'agent_sid_captured',
-                conferenceName: confName,
+                conferenceName: finalConfName,
                 agentCallSid: callSid,
                 customerCallSid: customerSid,
                 agentId: agentId ? parseInt(agentId, 10) : null,
                 from: callerNumber,
+                isIvrCall: isIvrCall,
                 timestamp: new Date().toISOString()
               });
             } catch (socketErr) {
@@ -175,8 +195,10 @@ async function handleVoiceResponse(request) {
             
             // For agent legs (Voice SDK), return TwiML to join conference
             // Voice SDK requires Dial wrapper even for direct conference connections
-            const safeConfName = confName.replace(/[<>&"']/g, '');
+            const safeConfName = finalConfName.replace(/[<>&"']/g, '');
             const isInboundConf = safeConfName.startsWith('inbound-');
+            const isIvrConf = safeConfName.startsWith('ivr-call-');
+            // Use standard call-status-callback for IVR calls (it will detect and handle IVR appropriately)
             const confCallbackUrl = getWebhookUrl(
               isInboundConf
                 ? '/api/twilio/inbound/call-status-callback'
@@ -256,18 +278,45 @@ async function handleVoiceResponse(request) {
         const toParamRaw = formData?.get('To') || '';
         const toParam = String(toParamRaw).trim();
 
+        // Detect IVR calls for customer leg
+        const isIvrCallForCustomer = isIvrCallFromUrl || 
+                                    (conferenceNameFromUrl && conferenceNameFromUrl.startsWith('ivr-call-')) ||
+                                    (toParam && String(toParam).startsWith('ivr-call-'));
+        
         const conferenceName =
           (conferenceNameFromUrl && String(conferenceNameFromUrl).trim()) ||
-          (toParam && (toParam.startsWith('inbound-') || toParam.startsWith('call-')) ? toParam : null) ||
-          `call-${parsedAgentId}`;
+          (toParam && (toParam.startsWith('inbound-') || toParam.startsWith('call-') || toParam.startsWith('ivr-call-')) ? toParam : null) ||
+          (isIvrCallForCustomer ? null : `call-${parsedAgentId}`);
+        
+        // For IVR calls, conference name must be provided
+        if (isIvrCallForCustomer && !conferenceName) {
+          console.error('❌ [IVR] Conference name missing for IVR call');
+          twiml += `\n  <Say voice="alice">We're sorry, we're unable to connect you at this time. Please try again later.</Say>`;
+          twiml += `\n  <Hangup/>`;
+          twiml += `\n</Response>`;
+          return new NextResponse(twiml, {
+            headers: { 'Content-Type': 'text/xml' }
+          });
+        }
 
         const safeConferenceName = conferenceName.replace(/[<>&"']/g, '');
         const isInboundConference = safeConferenceName.startsWith('inbound-');
+        const isIvrConference = safeConferenceName.startsWith('ivr-call-');
+        
+        // Use standard call-status-callback for IVR calls (it will detect and handle IVR appropriately)
         const conferenceCallbackUrl = getWebhookUrl(
           isInboundConference
             ? '/api/twilio/inbound/call-status-callback'
             : '/api/twilio/call-status-callback'
         );
+        
+        console.log('📞 [TwiML] Conference details:', {
+          conferenceName: safeConferenceName,
+          isInboundConference,
+          isIvrConference,
+          isIvrCall: isIvrCallForCustomer,
+          agentId: parsedAgentId
+        });
 
         // answerOnBridge="false" - Don't answer call until customer actually picks up
         // This prevents customer leg from entering conference during ringing phase

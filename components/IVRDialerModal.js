@@ -5,6 +5,7 @@ import apiClient from '../lib/apiClient';
 import { useToast } from '../contexts/ToastContext';
 import ConfirmModal from './ConfirmModal';
 import { formatLandline, validateLandline } from '../lib/validation';
+import IVRCallHistory from './IVRCallHistory';
 
 export default function IVRDialerModal({ 
   isOpen, 
@@ -35,6 +36,7 @@ export default function IVRDialerModal({
   const [enteredDigits, setEnteredDigits] = useState('');
   const [savedHelplines, setSavedHelplines] = useState([]);
   const [showSavedList, setShowSavedList] = useState(false); // Toggle right column visibility - closed by default
+  const [rightPanelView, setRightPanelView] = useState('helplines'); // 'helplines' or 'history'
   const [showAddNewSection, setShowAddNewSection] = useState(false); // Toggle add new section
   const [newHelplineNumber, setNewHelplineNumber] = useState('');
   const [newHelplineLabel, setNewHelplineLabel] = useState('');
@@ -736,29 +738,58 @@ export default function IVRDialerModal({
 
           {/* Second Row - Keypad and Helplines Side by Side */}
           <div className="flex flex-col flex-1" style={{ maxHeight: 'calc(100vh - 24rem)' }}>
-            {/* Toggle Button for Saved List */}
-            <div className="p-1.5 border-b border-gray-200 bg-gray-50 flex justify-center">
+            {/* Toggle Button for Options Panel */}
+            <div className="p-1.5 border-b border-gray-200 bg-gray-50 flex justify-center items-center gap-2">
               <button
                 onClick={() => {
                   const newState = !showSavedList;
                   setShowSavedList(newState);
-                  // Fetch helplines when showing the list
-                  if (newState && savedHelplines.length === 0) {
-                    fetchHelplines();
+                  if (newState) {
+                    setRightPanelView('helplines');
+                    // Fetch helplines when showing the list
+                    if (savedHelplines.length === 0) {
+                      fetchHelplines();
+                    }
                   }
                 }}
                 className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-1.5 text-xs cursor-pointer"
-                title={showSavedList ? "Show Keypad" : "Show Saved List"}
+                title={showSavedList ? "Show Keypad" : "Show Options"}
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   {showSavedList ? (
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   ) : (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                   )}
                 </svg>
-                {showSavedList ? 'Keypad' : 'Helplines'}
+                {showSavedList ? 'Keypad' : 'Options'}
               </button>
+              
+              {/* View Toggle - Only show when options panel is visible */}
+              {showSavedList && (
+                <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setRightPanelView('helplines')}
+                    className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                      rightPanelView === 'helplines'
+                        ? 'bg-blue-500 text-white shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    Helplines
+                  </button>
+                  <button
+                    onClick={() => setRightPanelView('history')}
+                    className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                      rightPanelView === 'history'
+                        ? 'bg-blue-500 text-white shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    History
+                  </button>
+                </div>
+              )}
             </div>
             
             <div className="flex flex-1" style={{ maxHeight: 'calc(100vh - 29rem)' }}>
@@ -893,10 +924,11 @@ export default function IVRDialerModal({
               </div>
               )}
 
-            {/* Right Panel - Saved Helplines - Only show when saved list is visible */}
+            {/* Right Panel - Saved Helplines or Call History - Only show when saved list is visible */}
             {showSavedList && (
               <div className="w-full flex flex-col" style={{ height: '260px' }}>
-                {/* Add New Helpline Section - Toggle Button */}
+                {/* Show Add New Helpline Section only when viewing helplines */}
+                {rightPanelView === 'helplines' && (
                 <div className="p-2 border-b border-gray-200 bg-gray-50 flex-shrink-0">
               {!showAddNewSection ? (
                 /* Add New Number Button */
@@ -1043,125 +1075,132 @@ export default function IVRDialerModal({
                 </div>
               )}
                 </div>
+                )}
 
                 <div 
                   className="overflow-y-auto p-2 flex-1"
                   style={{ minHeight: 0 }}
                 >
-                  <h4 className="text-xs font-semibold text-gray-700 mb-2">Saved Helplines</h4>
-                  {loadingHelplines ? (
-                    <div className="flex flex-col items-center justify-center py-8">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
-                      <p className="text-xs text-gray-500">Loading helplines...</p>
-                    </div>
-                  ) : savedHelplines.length === 0 ? (
-                    <div className="text-center py-4">
-                      <svg className="w-8 h-8 text-gray-400 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                      </svg>
-                      <p className="text-xs text-gray-500">No saved helplines</p>
-                      <p className="text-xs text-gray-400 mt-0.5">Add a new helpline above</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {[...savedHelplines].sort((a, b) => {
-                        // Sort by ID in descending order (newest first)
-                        const idA = a.id || 0;
-                        const idB = b.id || 0;
-                        return idB - idA;
-                      }).map((helpline) => (
-                    <div
-                      key={helpline.id || helpline.phoneNumber}
-                      className="p-2 bg-white border border-gray-200 rounded hover:bg-gray-50 transition-colors"
-                    >
-                      {editingLabel === helpline.id ? (
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            value={newLabel}
-                            onChange={(e) => setNewLabel(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                handleUpdateLabel(helpline.id, newLabel);
-                              } else if (e.key === 'Escape') {
-                                setEditingLabel(null);
-                                setNewLabel('');
-                              }
-                            }}
-                            className="flex-1 text-xs px-1.5 py-0.5 border border-gray-300 rounded"
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => {
-                              handleUpdateLabel(helpline.id, newLabel);
-                            }}
-                            className="p-0.5 text-green-600 hover:bg-green-50 rounded cursor-pointer"
-                          >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingLabel(null);
-                              setNewLabel('');
-                            }}
-                            className="p-0.5 text-gray-500 hover:bg-gray-100 rounded cursor-pointer"
-                          >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
+                  {rightPanelView === 'helplines' ? (
+                    <>
+                      <h4 className="text-xs font-semibold text-gray-700 mb-2">Saved Helplines</h4>
+                      {loadingHelplines ? (
+                        <div className="flex flex-col items-center justify-center py-8">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
+                          <p className="text-xs text-gray-500">Loading helplines...</p>
+                        </div>
+                      ) : savedHelplines.length === 0 ? (
+                        <div className="text-center py-4">
+                          <svg className="w-8 h-8 text-gray-400 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                          </svg>
+                          <p className="text-xs text-gray-500">No saved helplines</p>
+                          <p className="text-xs text-gray-400 mt-0.5">Add a new helpline above</p>
                         </div>
                       ) : (
-                        <>
-                          <div className="flex items-start justify-between mb-1">
-                            <div className="flex-1 min-w-0">
-                              <div className="text-base font-semibold text-gray-800 truncate">
-                                {helpline.label || helpline.phoneNumber}
-                              </div>
-                              <div className="text-sm text-gray-500 truncate">
-                                {helpline.phoneNumber}
-                              </div>
+                        <div className="space-y-1.5">
+                          {[...savedHelplines].sort((a, b) => {
+                            // Sort by ID in descending order (newest first)
+                            const idA = a.id || 0;
+                            const idB = b.id || 0;
+                            return idB - idA;
+                          }).map((helpline) => (
+                        <div
+                          key={helpline.id || helpline.phoneNumber}
+                          className="p-2 bg-white border border-gray-200 rounded hover:bg-gray-50 transition-colors"
+                        >
+                          {editingLabel === helpline.id ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                value={newLabel}
+                                onChange={(e) => setNewLabel(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handleUpdateLabel(helpline.id, newLabel);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingLabel(null);
+                                    setNewLabel('');
+                                  }
+                                }}
+                                className="flex-1 text-xs px-1.5 py-0.5 border border-gray-300 rounded"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => {
+                                  handleUpdateLabel(helpline.id, newLabel);
+                                }}
+                                className="p-0.5 text-green-600 hover:bg-green-50 rounded cursor-pointer"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingLabel(null);
+                                  setNewLabel('');
+                                }}
+                                className="p-0.5 text-gray-500 hover:bg-gray-100 rounded cursor-pointer"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => handleQuickDial(helpline)}
-                              className="flex-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-0.5 cursor-pointer"
-                            >
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                              </svg>
-                              Dial
-                            </button>
-                            <button
-                              onClick={() => {
-                                setEditingLabel(helpline.id);
-                                setNewLabel(helpline.label || helpline.phoneNumber);
-                              }}
-                              className="px-1 py-1 text-gray-600 hover:bg-gray-100 rounded text-xs cursor-pointer"
-                              title="Edit"
-                            >
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => handleDeleteClick(helpline.id)}
-                              className="px-1 py-1 text-red-600 hover:bg-red-50 rounded text-xs cursor-pointer"
-                              title="Delete"
-                            >
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
-                          </div>
-                        </>
+                          ) : (
+                            <>
+                              <div className="flex items-start justify-between mb-1">
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-base font-semibold text-gray-800 truncate">
+                                    {helpline.label || helpline.phoneNumber}
+                                  </div>
+                                  <div className="text-sm text-gray-500 truncate">
+                                    {helpline.phoneNumber}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => handleQuickDial(helpline)}
+                                  className="flex-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-0.5 cursor-pointer"
+                                >
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                                  </svg>
+                                  Dial
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingLabel(helpline.id);
+                                    setNewLabel(helpline.label || helpline.phoneNumber);
+                                  }}
+                                  className="px-1 py-1 text-gray-600 hover:bg-gray-100 rounded text-xs cursor-pointer"
+                                  title="Edit"
+                                >
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteClick(helpline.id)}
+                                  className="px-1 py-1 text-red-600 hover:bg-red-50 rounded text-xs cursor-pointer"
+                                  title="Delete"
+                                >
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                          ))}
+                        </div>
                       )}
-                    </div>
-                      ))}
-                    </div>
+                    </>
+                  ) : (
+                    <IVRCallHistory showInModal={true} limit={10} />
                   )}
                 </div>
               </div>

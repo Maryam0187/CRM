@@ -85,7 +85,44 @@ export default function IVRDialer() {
     }
   }, []);
 
-      // Cleanup timer and device on unmount
+  // Helper function to safely cleanup device
+  const safelyCleanupDevice = useCallback((device) => {
+    if (!device) return;
+
+    try {
+      const deviceState = device.state || device._state;
+      
+      // Only unregister if device is registered
+      if (deviceState === 'registered') {
+        if (typeof device.unregister === 'function') {
+          device.unregister().catch(err => {
+            // Ignore errors if device is already unregistered or destroyed
+            if (!err.message?.includes('destroyed') && !err.message?.includes('unregistered')) {
+              console.warn('⚠️ [IVR] Error unregistering device:', err);
+            }
+          });
+        }
+      } else {
+        console.log('📞 [IVR] Skipping unregister - device state:', deviceState);
+      }
+
+      // Always try to destroy, but handle errors gracefully
+      if (typeof device.destroy === 'function') {
+        try {
+          device.destroy();
+        } catch (destroyErr) {
+          // Ignore errors if device is already destroyed
+          if (!destroyErr.message?.includes('destroyed')) {
+            console.warn('⚠️ [IVR] Error destroying device:', destroyErr);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ [IVR] Error during device cleanup:', e);
+    }
+  }, []);
+
+  // Cleanup timer and device on unmount
   useEffect(() => {
     return () => {
       if (timerIntervalRef.current) {
@@ -217,43 +254,6 @@ export default function IVRDialer() {
     } catch (err) {
       console.error('❌ [IVR] Error getting call streams:', err);
       return { local: null, remote: null };
-    }
-  }, []);
-
-  // Helper function to safely cleanup device
-  const safelyCleanupDevice = useCallback((device) => {
-    if (!device) return;
-
-    try {
-      const deviceState = device.state || device._state;
-      
-      // Only unregister if device is registered
-      if (deviceState === 'registered') {
-        if (typeof device.unregister === 'function') {
-          device.unregister().catch(err => {
-            // Ignore errors if device is already unregistered or destroyed
-            if (!err.message?.includes('destroyed') && !err.message?.includes('unregistered')) {
-              console.warn('⚠️ [IVR] Error unregistering device:', err);
-            }
-          });
-        }
-      } else {
-        console.log('📞 [IVR] Skipping unregister - device state:', deviceState);
-      }
-
-      // Always try to destroy, but handle errors gracefully
-      if (typeof device.destroy === 'function') {
-        try {
-          device.destroy();
-        } catch (destroyErr) {
-          // Ignore errors if device is already destroyed
-          if (!destroyErr.message?.includes('destroyed')) {
-            console.warn('⚠️ [IVR] Error destroying device:', destroyErr);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('⚠️ [IVR] Error during device cleanup:', e);
     }
   }, []);
 
@@ -861,21 +861,22 @@ export default function IVRDialer() {
     const handleCallStatusUpdate = (event) => {
       const { callStatusData } = event.detail;
       
-      // Only process updates for this IVR call
-      const matchesCallSid = callStatusData?.callSid === ivrCallState.callSid;
-      const matchesConference = callStatusData?.conferenceName === ivrCallState.conferenceName;
-      
-      if (!matchesCallSid && !matchesConference) {
-        return; // Not for this call
-      }
-
-      // Verify this is an IVR call
+      // FIRST: Verify this is an IVR call - ignore CRM calls immediately
       const isIvrCall = callStatusData.twilioData?.isIvrCall || 
                         callStatusData.callPurpose === 'ivr_dialer' ||
                         (callStatusData.conferenceName && callStatusData.conferenceName.startsWith('ivr-call-'));
       
       if (!isIvrCall) {
-        return; // Not an IVR call, ignore
+        // Not an IVR call - ignore (this is a CRM call handled by GlobalWebCallInterface)
+        return;
+      }
+      
+      // SECOND: Only process updates for this specific IVR call
+      const matchesCallSid = callStatusData?.callSid === ivrCallState.callSid;
+      const matchesConference = callStatusData?.conferenceName === ivrCallState.conferenceName;
+      
+      if (!matchesCallSid && !matchesConference) {
+        return; // Not for this IVR call (could be another IVR call)
       }
 
       console.log('📞 [IVR] Real-time status update received:', {
@@ -948,15 +949,17 @@ export default function IVRDialer() {
     const handleConferenceEvent = (event) => {
       const { conferenceEventData } = event.detail;
       
-      // Only process events for this IVR conference
-      if (conferenceEventData?.conferenceName !== ivrCallState.conferenceName) {
+      // FIRST: Verify this is an IVR conference - ignore CRM conferences immediately
+      const isIvrConference = conferenceEventData?.conferenceName?.startsWith('ivr-call-') ||
+                              conferenceEventData?.isIvrCall;
+      if (!isIvrConference) {
+        // Not an IVR conference - ignore (this is a CRM conference handled by GlobalWebCallInterface)
         return;
       }
-
-      // Verify this is an IVR call
-      const isIvrCall = conferenceEventData.conferenceName?.startsWith('ivr-call-');
-      if (!isIvrCall) {
-        return;
+      
+      // SECOND: Only process events for this specific IVR conference
+      if (conferenceEventData?.conferenceName !== ivrCallState.conferenceName) {
+        return; // Not for this IVR conference (could be another IVR call)
       }
 
       console.log('🎯 [IVR] Conference event received:', {

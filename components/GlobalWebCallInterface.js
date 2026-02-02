@@ -1095,6 +1095,15 @@ export default function GlobalWebCallInterface() {
           return; // Don't process client call status updates
         }
         
+        // Ignore IVR call status updates (they're handled by IVRDialer)
+        const isIvrCall = statusData.twilioData?.isIvrCall || 
+                         statusData.callPurpose === 'ivr_dialer' ||
+                         (statusData.conferenceName && statusData.conferenceName.startsWith('ivr-call-'));
+        if (isIvrCall) {
+          console.log('📞 [GLOBAL WEB INTERFACE] Ignoring IVR call status update:', currentCallSid);
+          return; // Don't process IVR call status updates
+        }
+        
         // Use uiStatus for UI/timer (ringing until answered, then in-progress)
         const statusForUi = statusData.uiStatus || statusData.status;
         updateCallStatus(statusForUi);
@@ -1138,6 +1147,18 @@ export default function GlobalWebCallInterface() {
         const isClientCall = callStatusData.twilioData?.isClientCall;
         if (isClientCall) {
           return; // Don't process client call status updates
+        }
+        
+        // Ignore IVR call status updates (they're handled by IVRDialer)
+        const isIvrCall = callStatusData.twilioData?.isIvrCall || 
+                         callStatusData.callPurpose === 'ivr_dialer' ||
+                         (callStatusData.conferenceName && callStatusData.conferenceName.startsWith('ivr-call-'));
+        if (isIvrCall) {
+          console.log('📞 [GLOBAL WEB INTERFACE] Ignoring IVR call status update:', {
+            callSid: callStatusData?.callSid?.substring(0, 20),
+            conferenceName: callStatusData?.conferenceName
+          });
+          return; // Don't process IVR call status updates
         }
         
         // Backend sends status as-is from Twilio - frontend processes it.
@@ -1209,6 +1230,17 @@ export default function GlobalWebCallInterface() {
     // Listen for conference events (join, leave, mute, hold, etc.)
     const handleConferenceEvent = (event) => {
       const { conferenceEventData } = event.detail;
+      
+      // Ignore IVR conference events (they're handled by IVRDialer)
+      const isIvrConference = conferenceEventData?.conferenceName?.startsWith('ivr-call-') ||
+                              conferenceEventData?.isIvrCall;
+      if (isIvrConference) {
+        console.log('📞 [GLOBAL WEB INTERFACE] Ignoring IVR conference event:', {
+          conferenceName: conferenceEventData?.conferenceName,
+          event: conferenceEventData?.event
+        });
+        return; // Don't process IVR conference events
+      }
       
       // Debug: Log all received events
       console.log('🎯 [CONFERENCE EVENT RECEIVED]', {

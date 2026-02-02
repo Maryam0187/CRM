@@ -373,6 +373,8 @@ export async function POST(request) {
     const saleIdFromUrl = url.searchParams.get('saleId');
     const callPurposeFromUrl = url.searchParams.get('callPurpose');
     const directionFromUrl = url.searchParams.get('direction');
+    const isIvrCallFromUrl = url.searchParams.get('isIvrCall') === 'true';
+    const conferenceNameFromUrl = url.searchParams.get('conferenceName');
 
     const formData = await request.formData();
     
@@ -448,9 +450,18 @@ export async function POST(request) {
     }
     lastProcessedStatus.set(effectiveCallSid, statusKey);
     
-    // Derive conference name from agentId
+    // Detect IVR calls - check multiple indicators
+    const isIvrCall = isIvrCallFromUrl || 
+                     callPurposeFromUrl === 'ivr_dialer' ||
+                     directionFromUrl === 'outbound-ivr' ||
+                     (conferenceNameFromUrl && conferenceNameFromUrl.startsWith('ivr-call-')) ||
+                     (conferenceName && conferenceName.startsWith('ivr-call-'));
+    
+    // Derive conference name from agentId or use provided conference name for IVR
     const agentId = agentIdFromUrl ? parseInt(agentIdFromUrl, 10) : null;
-    const derivedConferenceName = agentId ? `call-${agentId}` : null;
+    const derivedConferenceName = isIvrCall && conferenceNameFromUrl 
+      ? conferenceNameFromUrl 
+      : (agentId ? `call-${agentId}` : null);
     
     // Determine UI status
     // Customer has answered if: status is 'answered' OR status is 'in-progress' WITH AnswerTime
@@ -478,7 +489,12 @@ export async function POST(request) {
       conferenceName: derivedConferenceName,
       agentId,
       customerId: customerIdFromUrl || null,
-      saleId: saleIdFromUrl || null
+      saleId: saleIdFromUrl || null,
+      callPurpose: callPurposeFromUrl || null,
+      twilioData: {
+        isIvrCall: isIvrCall,
+        callPurpose: callPurposeFromUrl || null
+      }
     };
     
     // Broadcast to frontend via WebSocket
@@ -549,8 +565,12 @@ export async function POST(request) {
         }
       }
       
-      // Update agent status
-      await updateAgentStatus(agentId, effectiveStatus, duration, effectiveCallSid);
+      // Update agent status - SKIP for IVR calls (they shouldn't affect agent's CRM call status)
+      if (!isIvrCall) {
+        await updateAgentStatus(agentId, effectiveStatus, duration, effectiveCallSid);
+      } else {
+        console.log('📞 [IVR CALLBACK] Skipping agent status update for IVR call:', effectiveCallSid);
+      }
       
       // Cleanup call room after delay
       setTimeout(() => {
@@ -563,9 +583,11 @@ export async function POST(request) {
         await updateCallLog(callLog, { status: effectiveStatus });
       }
       
-      // Update agent status for in-progress
-      if (effectiveStatus === 'in-progress') {
+      // Update agent status for in-progress - SKIP for IVR calls
+      if (effectiveStatus === 'in-progress' && !isIvrCall) {
         await updateAgentStatus(agentId, effectiveStatus, null, effectiveCallSid);
+      } else if (isIvrCall && effectiveStatus === 'in-progress') {
+        console.log('📞 [IVR CALLBACK] Skipping agent status update for IVR call in-progress:', effectiveCallSid);
       }
     }
 
