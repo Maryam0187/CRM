@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import apiClient from '../lib/apiClient';
 import { useToast } from '../contexts/ToastContext';
 import ConfirmModal from './ConfirmModal';
+import { formatLandline, validateLandline } from '../lib/validation';
 
 export default function IVRDialerModal({ 
   isOpen, 
@@ -34,6 +35,8 @@ export default function IVRDialerModal({
   const [newLabel, setNewLabel] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [helplineToDelete, setHelplineToDelete] = useState(null);
+  const [phoneValidation, setPhoneValidation] = useState({ isValid: true, message: '' });
+  const [newHelplineValidation, setNewHelplineValidation] = useState({ isValid: true, message: '' });
   const inputRef = useRef(null);
   const newHelplineNumberInputRef = useRef(null);
   const { showSuccess, showError, showWarning, showInfo } = useToast();
@@ -85,6 +88,40 @@ export default function IVRDialerModal({
     }
   };
 
+  // Play sound for action buttons (backspace, clear, call)
+  const playActionSound = (action) => {
+    if (!audioContextRef.current) return;
+    
+    try {
+      const audioContext = audioContextRef.current;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Different frequencies for different actions
+      const frequencies = {
+        'backspace': 400,  // Lower tone for backspace
+        'clear': 300,      // Even lower for clear
+        'call': 600        // Higher tone for call
+      };
+      
+      const frequency = frequencies[action] || 500;
+      oscillator.frequency.value = frequency;
+      oscillator.type = 'sine';
+      
+      // Slightly longer duration for action buttons
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.15);
+    } catch (error) {
+      console.error('Error playing action sound:', error);
+    }
+  };
+
   // Fetch saved helplines
   const fetchHelplines = async () => {
     setLoadingHelplines(true);
@@ -118,6 +155,7 @@ export default function IVRDialerModal({
       setEditingLabel(null);
       setNewLabel('');
       setShowAddNewSection(false);
+      setPhoneValidation({ isValid: true, message: '' });
     }
   }, [isOpen]);
 
@@ -202,35 +240,137 @@ export default function IVRDialerModal({
     );
   }
 
+  // Format phone number while preserving special characters (*, #, +, etc.)
+  const formatPhoneNumberWithSpecialChars = (value) => {
+    // Extract special characters and their positions
+    const specialChars = ['*', '#', '+'];
+    let hasSpecialChar = false;
+    let specialCharIndex = -1;
+    let specialChar = '';
+    
+    // Check if value contains special characters
+    for (let i = 0; i < value.length; i++) {
+      if (specialChars.includes(value[i])) {
+        hasSpecialChar = true;
+        specialCharIndex = i;
+        specialChar = value[i];
+        break;
+      }
+    }
+    
+    // If no special characters, format normally
+    if (!hasSpecialChar) {
+      return formatLandline(value);
+    }
+    
+    // Split into base number and extension/special part
+    const baseNumber = value.substring(0, specialCharIndex);
+    const extension = value.substring(specialCharIndex);
+    
+    // Format the base number
+    const formattedBase = formatLandline(baseNumber);
+    
+    // Combine formatted base with extension
+    return formattedBase + extension;
+  };
+
+  // Validate phone number
+  const validatePhoneNumber = (value) => {
+    if (!value || value.trim() === '') {
+      return { isValid: false, message: 'Phone number is required' };
+    }
+    
+    // Remove formatting and special characters for validation
+    const cleanNumber = value.replace(/[^\d]/g, '');
+    
+    // Check if it's a standard US number (10 digits)
+    if (cleanNumber.length === 10) {
+      return { isValid: true, message: '' };
+    }
+    
+    // Allow numbers with extensions (more than 10 digits)
+    if (cleanNumber.length > 10 && cleanNumber.length <= 15) {
+      return { isValid: true, message: '' };
+    }
+    
+    // Check minimum length
+    if (cleanNumber.length < 10) {
+      return { isValid: false, message: 'Phone number must be at least 10 digits' };
+    }
+    
+    // Check maximum length
+    if (cleanNumber.length > 15) {
+      return { isValid: false, message: 'Phone number must be less than 15 digits' };
+    }
+    
+    return { isValid: true, message: '' };
+  };
+
   const handleDigitClick = (digit) => {
     // Play sound when button is clicked
     playKeypadSound(digit);
     
     if (mode === 'dial') {
-      setPhoneNumber(prev => prev + digit);
+      const newValue = phoneNumber + digit;
+      const formatted = formatPhoneNumberWithSpecialChars(newValue);
+      setPhoneNumber(formatted);
+      
+      // Validate
+      const validation = validatePhoneNumber(formatted);
+      setPhoneValidation(validation);
     } else {
       setEnteredDigits(prev => prev + digit);
     }
   };
 
   const handleBackspace = () => {
+    // Play sound
+    playActionSound('backspace');
+    
     if (mode === 'dial') {
-      setPhoneNumber(prev => prev.slice(0, -1));
+      const newValue = phoneNumber.slice(0, -1);
+      const formatted = formatPhoneNumberWithSpecialChars(newValue);
+      setPhoneNumber(formatted);
+      
+      // Validate
+      const validation = validatePhoneNumber(formatted);
+      setPhoneValidation(validation);
     } else {
       setEnteredDigits(prev => prev.slice(0, -1));
     }
   };
 
   const handleClear = () => {
+    // Play sound
+    playActionSound('clear');
+    
     if (mode === 'dial') {
       setPhoneNumber('');
+      setPhoneValidation({ isValid: true, message: '' });
     } else {
       setEnteredDigits('');
     }
   };
 
   const handleCall = () => {
-    if (phoneNumber.trim() && onMakeCall) {
+    if (!phoneNumber.trim()) {
+      setPhoneValidation({ isValid: false, message: 'Phone number is required' });
+      return;
+    }
+    
+    // Validate before making call
+    const validation = validatePhoneNumber(phoneNumber);
+    setPhoneValidation(validation);
+    
+    if (!validation.isValid) {
+      showWarning(validation.message);
+      return;
+    }
+    
+    // Play sound
+    playActionSound('call');
+    
+    if (onMakeCall) {
       onMakeCall(phoneNumber.trim());
     }
   };
@@ -244,9 +384,20 @@ export default function IVRDialerModal({
 
   const handleSaveHelpline = async () => {
     if (!newHelplineNumber.trim()) {
+      setNewHelplineValidation({ isValid: false, message: 'Phone number is required' });
       showWarning('Please enter a phone number');
       return;
     }
+    
+    // Validate phone number
+    const validation = validatePhoneNumber(newHelplineNumber);
+    setNewHelplineValidation(validation);
+    
+    if (!validation.isValid) {
+      showWarning(validation.message);
+      return;
+    }
+    
     if (!newHelplineLabel.trim()) {
       showWarning('Please enter a name/label');
       return;
@@ -266,6 +417,7 @@ export default function IVRDialerModal({
         await fetchHelplines();
         setNewHelplineNumber('');
         setNewHelplineLabel('');
+        setNewHelplineValidation({ isValid: true, message: '' });
         setShowAddNewSection(false);
         showSuccess('Helpline saved successfully');
       } else {
@@ -280,7 +432,13 @@ export default function IVRDialerModal({
   };
 
   const handleQuickDial = (helpline) => {
-    setPhoneNumber(helpline.phoneNumber);
+    const formatted = formatPhoneNumberWithSpecialChars(helpline.phoneNumber);
+    setPhoneNumber(formatted);
+    
+    // Validate
+    const validation = validatePhoneNumber(formatted);
+    setPhoneValidation(validation);
+    
     // Switch to dial mode if not already
     if (mode !== 'dial') {
       // Note: mode is controlled by parent, but we can at least set the number
@@ -358,7 +516,7 @@ export default function IVRDialerModal({
   };
 
   const displayValue = mode === 'dial' ? phoneNumber : enteredDigits;
-  const canCall = mode === 'dial' && phoneNumber.length > 0;
+  const canCall = mode === 'dial' && phoneNumber.length > 0 && phoneValidation.isValid;
   const canSend = mode === 'ivr' && enteredDigits.length > 0 && isConnected;
 
   // Calculate right offset when GlobalWebCallInterface is open (w-80 = 320px + 16px spacing)
@@ -372,7 +530,7 @@ export default function IVRDialerModal({
         style={{ 
           right: rightOffset,
           maxHeight: 'calc(100vh - 2rem)',
-          width: '480px',
+          width: '300px',
           maxWidth: 'calc(100vw - 2rem)'
         }}
         onClick={(e) => e.stopPropagation()}
@@ -418,20 +576,28 @@ export default function IVRDialerModal({
         </div>
 
         {/* Body - Reorganized Layout */}
-        <div className="flex flex-col" style={{ maxHeight: 'calc(100vh - 10rem)' }}>
+        <div className="flex flex-col" style={{ maxHeight: 'calc(100vh - 14rem)' }}>
           {/* First Row - Phone Number Input */}
-          <div className="p-3 border-b border-gray-200">
+          <div className="p-1.5 border-b border-gray-200">
             {mode === 'dial' && (
               <>
-                <div className="bg-gray-50 border-2 border-gray-300 rounded-lg p-3 text-center">
+                <div className={`bg-gray-50 border-2 rounded-lg p-1.5 text-center ${phoneValidation.isValid ? 'border-gray-300' : 'border-red-500'}`}>
                   <input
                     ref={inputRef}
                     type="tel"
                     value={phoneNumber}
                     onChange={(e) => {
                       // Allow manual typing but filter invalid characters
-                      const value = e.target.value.replace(/[^\d*#+\-() ]/g, '');
+                      let value = e.target.value.replace(/[^\d*#+\-() ]/g, '');
+                      
+                      // Format the phone number
+                      value = formatPhoneNumberWithSpecialChars(value);
+                      
                       setPhoneNumber(value);
+                      
+                      // Validate
+                      const validation = validatePhoneNumber(value);
+                      setPhoneValidation(validation);
                     }}
                     onPaste={handlePaste}
                     onKeyDown={(e) => {
@@ -447,18 +613,25 @@ export default function IVRDialerModal({
                       e.preventDefault();
                     }}
                     placeholder="Use keypad to enter number"
-                    className="text-2xl font-mono font-bold text-gray-800 w-full text-center bg-transparent border-none outline-none min-h-[48px]"
+                    className={`text-base font-mono font-bold w-full text-center bg-transparent border-none outline-none min-h-[32px] ${phoneValidation.isValid ? 'text-gray-800' : 'text-red-600'}`}
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1 text-center">
-                  Use keypad to enter number (paste disabled)
-                </p>
+                {phoneValidation.message && (
+                  <p className={`text-xs mt-1 text-center ${phoneValidation.isValid ? 'text-gray-500' : 'text-red-600'}`}>
+                    {phoneValidation.message}
+                  </p>
+                )}
+                {!phoneValidation.message && (
+                  <p className="text-xs text-gray-500 mt-1 text-center">
+                    Use keypad to enter number (paste disabled)
+                  </p>
+                )}
               </>
             )}
             {mode === 'ivr' && (
               <>
-                <div className="bg-gray-50 border-2 border-gray-300 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-mono font-bold text-gray-800 min-h-[48px] flex items-center justify-center">
+                <div className="bg-gray-50 border-2 border-gray-300 rounded-lg p-1.5 text-center">
+                  <div className="text-base font-mono font-bold text-gray-800 min-h-[32px] flex items-center justify-center">
                     {enteredDigits || <span className="text-gray-400">Enter IVR digits</span>}
                   </div>
                 </div>
@@ -467,9 +640,9 @@ export default function IVRDialerModal({
           </div>
 
           {/* Second Row - Keypad and Helplines Side by Side */}
-          <div className="flex flex-col flex-1" style={{ maxHeight: 'calc(100vh - 20rem)' }}>
+          <div className="flex flex-col flex-1" style={{ maxHeight: 'calc(100vh - 24rem)' }}>
             {/* Toggle Button for Saved List */}
-            <div className="p-2 border-b border-gray-200 bg-gray-50 flex justify-center">
+            <div className="p-1.5 border-b border-gray-200 bg-gray-50 flex justify-center">
               <button
                 onClick={() => {
                   const newState = !showSavedList;
@@ -479,71 +652,76 @@ export default function IVRDialerModal({
                     fetchHelplines();
                   }
                 }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 text-sm cursor-pointer"
-                title={showSavedList ? "Hide Saved List" : "Show Saved List"}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-1.5 text-xs cursor-pointer"
+                title={showSavedList ? "Show Keypad" : "Show Saved List"}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {showSavedList ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                  )}
                 </svg>
-                {showSavedList ? 'Hide Saved List' : 'Show Saved List'}
+                {showSavedList ? 'Keypad' : 'Helplines'}
               </button>
             </div>
             
-            <div className="flex flex-1" style={{ maxHeight: 'calc(100vh - 25rem)' }}>
-              {/* Left Panel - Keypad Dialer */}
-              <div className={`p-2 flex flex-col ${showSavedList ? 'flex-1 border-r border-gray-200' : 'flex-1'}`} style={{ minHeight: '400px' }}>
+            <div className="flex flex-1" style={{ maxHeight: 'calc(100vh - 29rem)' }}>
+              {/* Keypad Panel - Only show when saved list is hidden */}
+              {!showSavedList && (
+              <div className="p-1.5 flex flex-col w-full" style={{ minHeight: '260px' }}>
               {/* Phone Number Display - DIAL MODE */}
               {mode === 'dial' && (
                 <>
                 {/* Call Status Area - Reserved for future implementation */}
-                <div className="mb-3 min-h-[60px] flex items-center justify-center">
+                <div className="mb-1.5 min-h-[32px] flex items-center justify-center">
                   {/* Call status will be displayed here */}
                 </div>
 
                 {/* Keypad */}
-                <div className="grid grid-cols-3 gap-3 mb-3">
-                  <button onClick={() => handleDigitClick('1')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">1</button>
-                  <button onClick={() => handleDigitClick('2')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">2</button>
-                  <button onClick={() => handleDigitClick('3')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">3</button>
-                  <button onClick={() => handleDigitClick('4')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">4</button>
-                  <button onClick={() => handleDigitClick('5')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">5</button>
-                  <button onClick={() => handleDigitClick('6')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">6</button>
-                  <button onClick={() => handleDigitClick('7')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">7</button>
-                  <button onClick={() => handleDigitClick('8')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">8</button>
-                  <button onClick={() => handleDigitClick('9')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">9</button>
-                  <button onClick={() => handleDigitClick('*')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">*</button>
-                  <button onClick={() => handleDigitClick('0')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">0</button>
-                  <button onClick={() => handleDigitClick('#')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">#</button>
+                <div className="grid grid-cols-3 gap-1.5 mb-1.5">
+                  <button onClick={() => handleDigitClick('1')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">1</button>
+                  <button onClick={() => handleDigitClick('2')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">2</button>
+                  <button onClick={() => handleDigitClick('3')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">3</button>
+                  <button onClick={() => handleDigitClick('4')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">4</button>
+                  <button onClick={() => handleDigitClick('5')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">5</button>
+                  <button onClick={() => handleDigitClick('6')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">6</button>
+                  <button onClick={() => handleDigitClick('7')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">7</button>
+                  <button onClick={() => handleDigitClick('8')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">8</button>
+                  <button onClick={() => handleDigitClick('9')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">9</button>
+                  <button onClick={() => handleDigitClick('*')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">*</button>
+                  <button onClick={() => handleDigitClick('0')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">0</button>
+                  <button onClick={() => handleDigitClick('#')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-1 rounded transition-all duration-150 shadow-sm cursor-pointer">#</button>
                 </div>
 
                 {/* Action buttons - Backspace, Clear, and Call */}
-                <div className="flex gap-2 mt-auto">
+                <div className="flex gap-1.5 mt-auto">
                   <button
                     onClick={handleBackspace}
                     disabled={!phoneNumber}
-                    className="flex-1 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-medium py-3 px-3 rounded-lg transition-colors duration-200 flex items-center justify-center"
+                    className="flex-1 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-medium py-2 px-2 rounded-lg transition-colors duration-200 flex items-center justify-center"
                     title="Backspace"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 00-2-2h-8.172a2 2 0 00-1.414.586L3 12z" />
                     </svg>
                   </button>
                   <button
                     onClick={handleClear}
                     disabled={!phoneNumber}
-                    className="flex-1 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-medium py-3 px-3 rounded-lg transition-colors duration-200 flex items-center justify-center"
+                    className="flex-1 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-medium py-2 px-2 rounded-lg transition-colors duration-200 flex items-center justify-center"
                     title="Clear"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
                   <button
                     onClick={handleCall}
                     disabled={!canCall}
-                    className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-semibold py-3 px-3 rounded-lg transition-colors duration-200 flex items-center justify-center gap-1.5 shadow-lg text-base"
+                    className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-semibold py-2 px-2 rounded-lg transition-colors duration-200 flex items-center justify-center gap-1 shadow-lg text-sm"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                     </svg>
                     Call
@@ -556,57 +734,57 @@ export default function IVRDialerModal({
               {mode === 'ivr' && (
                 <>
                 {/* Call Status Area - Reserved for future implementation */}
-                <div className="mb-3 min-h-[60px] flex items-center justify-center">
+                <div className="mb-1.5 min-h-[32px] flex items-center justify-center">
                   {/* Call status will be displayed here */}
                 </div>
 
                 {/* Keypad - same as dial mode */}
-                <div className="grid grid-cols-3 gap-1 mb-3">
-                  <button onClick={() => handleDigitClick('1')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">1</button>
-                  <button onClick={() => handleDigitClick('2')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">2</button>
-                  <button onClick={() => handleDigitClick('3')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">3</button>
-                  <button onClick={() => handleDigitClick('4')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">4</button>
-                  <button onClick={() => handleDigitClick('5')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">5</button>
-                  <button onClick={() => handleDigitClick('6')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">6</button>
-                  <button onClick={() => handleDigitClick('7')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">7</button>
-                  <button onClick={() => handleDigitClick('8')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">8</button>
-                  <button onClick={() => handleDigitClick('9')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">9</button>
-                  <button onClick={() => handleDigitClick('*')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">*</button>
-                  <button onClick={() => handleDigitClick('0')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">0</button>
-                  <button onClick={() => handleDigitClick('#')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-3 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">#</button>
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  <button onClick={() => handleDigitClick('1')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">1</button>
+                  <button onClick={() => handleDigitClick('2')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">2</button>
+                  <button onClick={() => handleDigitClick('3')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">3</button>
+                  <button onClick={() => handleDigitClick('4')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">4</button>
+                  <button onClick={() => handleDigitClick('5')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">5</button>
+                  <button onClick={() => handleDigitClick('6')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">6</button>
+                  <button onClick={() => handleDigitClick('7')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">7</button>
+                  <button onClick={() => handleDigitClick('8')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">8</button>
+                  <button onClick={() => handleDigitClick('9')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">9</button>
+                  <button onClick={() => handleDigitClick('*')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">*</button>
+                  <button onClick={() => handleDigitClick('0')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">0</button>
+                  <button onClick={() => handleDigitClick('#')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">#</button>
                 </div>
 
                 {/* Action buttons - Backspace, Clear, and Send Digits */}
-                <div className="flex gap-2 mt-auto">
+                <div className="flex gap-1.5 mt-auto">
                   <button
                     onClick={handleBackspace}
                     disabled={!enteredDigits}
-                    className="flex-1 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-medium py-3 px-3 rounded-lg transition-colors duration-200 flex items-center justify-center"
+                    className="flex-1 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-medium py-2 px-2 rounded-lg transition-colors duration-200 flex items-center justify-center"
                     title="Backspace"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 00-2-2h-8.172a2 2 0 00-1.414.586L3 12z" />
                     </svg>
                   </button>
                   <button
                     onClick={handleClear}
                     disabled={!enteredDigits}
-                    className="flex-1 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-medium py-3 px-3 rounded-lg transition-colors duration-200 flex items-center justify-center"
+                    className="flex-1 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-medium py-2 px-2 rounded-lg transition-colors duration-200 flex items-center justify-center"
                     title="Clear"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
                   <button
                     onClick={handleSendDigits}
                     disabled={!canSend}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-semibold py-3 px-3 rounded-lg transition-colors duration-200 flex items-center justify-center gap-1.5 shadow-lg text-base"
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-semibold py-2 px-2 rounded-lg transition-colors duration-200 flex items-center justify-center gap-1 shadow-lg text-sm"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                     </svg>
-                    Send Digits
+                    Send
                   </button>
                 </div>
 
@@ -616,12 +794,13 @@ export default function IVRDialerModal({
                   </div>
                 )}
                 </>
-              )}
+                )}
               </div>
+              )}
 
-            {/* Right Panel - Saved Helplines */}
+            {/* Right Panel - Saved Helplines - Only show when saved list is visible */}
             {showSavedList && (
-              <div className="w-56 border-l border-gray-200 flex flex-col" style={{ height: '400px' }}>
+              <div className="w-full flex flex-col" style={{ height: '260px' }}>
                 {/* Add New Helpline Section - Toggle Button */}
                 <div className="p-2 border-b border-gray-200 bg-gray-50 flex-shrink-0">
               {!showAddNewSection ? (
@@ -645,6 +824,7 @@ export default function IVRDialerModal({
                         setShowAddNewSection(false);
                         setNewHelplineNumber('');
                         setNewHelplineLabel('');
+                        setNewHelplineValidation({ isValid: true, message: '' });
                       }}
                       className="text-gray-500 hover:text-gray-700 transition-colors cursor-pointer"
                       title="Close"
@@ -666,8 +846,16 @@ export default function IVRDialerModal({
                       value={newHelplineNumber}
                       onChange={(e) => {
                         // Allow only digits, +, -, spaces, parentheses, and * for extensions
-                        const value = e.target.value.replace(/[^\d+\-() *]/g, '');
+                        let value = e.target.value.replace(/[^\d+\-() *]/g, '');
+                        
+                        // Format the phone number
+                        value = formatPhoneNumberWithSpecialChars(value);
+                        
                         setNewHelplineNumber(value);
+                        
+                        // Validate
+                        const validation = validatePhoneNumber(value);
+                        setNewHelplineValidation(validation);
                       }}
                       onPaste={(e) => {
                         // Explicitly allow paste and process the pasted content
@@ -675,8 +863,16 @@ export default function IVRDialerModal({
                         e.stopPropagation(); // Stop event from bubbling to document handler
                         const pastedText = (e.clipboardData || window.clipboardData).getData('text');
                         // Clean the pasted text to allow only valid phone number characters
-                        const cleanedValue = pastedText.replace(/[^\d+\-() *]/g, '');
+                        let cleanedValue = pastedText.replace(/[^\d+\-() *]/g, '');
+                        
+                        // Format the pasted value
+                        cleanedValue = formatPhoneNumberWithSpecialChars(cleanedValue);
+                        
                         setNewHelplineNumber(cleanedValue);
+                        
+                        // Validate
+                        const validation = validatePhoneNumber(cleanedValue);
+                        setNewHelplineValidation(validation);
                       }}
                       onCut={(e) => {
                         // Allow cut operation - let it proceed normally
@@ -705,11 +901,18 @@ export default function IVRDialerModal({
                         e.preventDefault();
                       }}
                       placeholder="Enter or paste phone number"
-                      className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-xs"
+                      className={`w-full px-2 py-1 border rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-xs ${newHelplineValidation.isValid ? 'border-gray-300' : 'border-red-500'}`}
                     />
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      You can paste the number here
-                    </p>
+                    {newHelplineValidation.message && (
+                      <p className={`text-xs mt-0.5 ${newHelplineValidation.isValid ? 'text-gray-500' : 'text-red-600'}`}>
+                        {newHelplineValidation.message}
+                      </p>
+                    )}
+                    {!newHelplineValidation.message && (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        You can paste the number here
+                      </p>
+                    )}
                   </div>
 
                   {/* Name/Label Input */}
