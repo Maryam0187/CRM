@@ -528,7 +528,8 @@ export default function IVRDialerModal({
 
   const displayValue = mode === 'dial' ? phoneNumber : enteredDigits;
   const canCall = mode === 'dial' && phoneNumber.length > 0 && phoneValidation.isValid;
-  const canSend = mode === 'ivr' && enteredDigits.length > 0 && isConnected;
+  // Allow sending digits when call is connected, regardless of mode
+  const canSend = enteredDigits.length > 0 && (isConnected || callStatus === 'in-progress');
 
   // Helper function to format timer
   const formatTimer = (seconds) => {
@@ -914,7 +915,7 @@ export default function IVRDialerModal({
                   </button>
                 </div>
 
-                {!isConnected && (
+                {!isConnected && !canSend && enteredDigits.length > 0 && (
                   <div className="mt-2 text-center text-xs text-red-600">
                     ⚠️ Call must be connected to send digits
                   </div>

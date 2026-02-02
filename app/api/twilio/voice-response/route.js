@@ -35,12 +35,13 @@ async function handleVoiceResponse(request) {
     let url;
     let agentId = null;
     let conferenceNameFromUrl = null;
+    let isIvrCallFromUrl = false; // Initialize outside try block to avoid scope issues
     
     try {
       url = new URL(request.url);
       agentId = url.searchParams.get('agentId');
       conferenceNameFromUrl = url.searchParams.get('conferenceName') || url.searchParams.get('conference');
-      const isIvrCallFromUrl = url.searchParams.get('isIvrCall') === 'true';
+      isIvrCallFromUrl = url.searchParams.get('isIvrCall') === 'true';
       console.log('📞 [TwiML voice-response] request received:', {
         method: request.method,
         url: request.url,
@@ -53,6 +54,7 @@ async function handleVoiceResponse(request) {
       console.error('❌ Error parsing URL in voice-response:', urlError);
       console.error('❌ Request URL:', request.url);
       // Continue without agentId - will handle as inbound call
+      // isIvrCallFromUrl remains false (default value)
     }
     
     // For POST requests, also check form data

@@ -97,7 +97,7 @@ module.exports = (sequelize) => {
       field: 'call_notes'
     },
     callPurpose: {
-      type: DataTypes.ENUM('follow_up', 'cold_call', 'support', 'sales', 'appointment', 'other'),
+      type: DataTypes.ENUM('follow_up', 'cold_call', 'support', 'sales', 'appointment', 'other', 'ivr_dialer'),
       allowNull: true,
       defaultValue: 'follow_up',
       field: 'call_purpose'

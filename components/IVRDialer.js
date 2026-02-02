@@ -174,10 +174,84 @@ export default function IVRDialer() {
     setIsMinimized(minimize);
   };
 
-  const handleSendDigits = (digits, callId) => {
-    // TODO: Implement send digits for IVR
-    console.log('Send digits:', digits, callId);
-  };
+  // Handle sending DTMF digits during an active call
+  const handleSendDigits = useCallback((digits, callId) => {
+    if (!digits || !digits.trim()) {
+      console.warn('⚠️ [IVR] No digits provided to send');
+      setIvrCallState(prev => ({
+        ...prev,
+        error: 'No digits to send'
+      }));
+      return;
+    }
+
+    // Check if there's an active connection
+    if (!ivrActiveConnection.current) {
+      console.warn('⚠️ [IVR] No active connection to send digits');
+      setIvrCallState(prev => ({
+        ...prev,
+        error: 'No active call to send digits to'
+      }));
+      return;
+    }
+
+    // Check if call is connected
+    if (!ivrCallState.isConnected && ivrCallState.callStatus !== 'in-progress') {
+      console.warn('⚠️ [IVR] Call is not connected, cannot send digits');
+      setIvrCallState(prev => ({
+        ...prev,
+        error: 'Call must be connected to send digits'
+      }));
+      return;
+    }
+
+    try {
+      const call = ivrActiveConnection.current;
+      const digitsToSend = digits.trim();
+
+      // Validate digits (only allow DTMF characters: 0-9, *, #)
+      const validDigits = /^[0-9*#]+$/.test(digitsToSend);
+      if (!validDigits) {
+        console.warn('⚠️ [IVR] Invalid DTMF digits:', digitsToSend);
+        setIvrCallState(prev => ({
+          ...prev,
+          error: 'Invalid digits. Only 0-9, *, and # are allowed.'
+        }));
+        return;
+      }
+
+      // Check if sendDigits method exists on the call object
+      if (typeof call.sendDigits !== 'function') {
+        console.warn('⚠️ [IVR] sendDigits method not available on call object');
+        setIvrCallState(prev => ({
+          ...prev,
+          error: 'Send digits not supported in this call state'
+        }));
+        return;
+      }
+
+      // Send the digits
+      call.sendDigits(digitsToSend);
+      
+      console.log(`✅ [IVR] Sent DTMF digits: ${digitsToSend}`);
+      
+      // Clear any previous errors
+      setIvrCallState(prev => ({
+        ...prev,
+        error: null
+      }));
+
+      // Optional: Show success feedback (you can add a toast notification here)
+      // The UI will handle clearing the enteredDigits in IVRDialerModal
+
+    } catch (error) {
+      console.error('❌ [IVR] Error sending DTMF digits:', error);
+      setIvrCallState(prev => ({
+        ...prev,
+        error: error.message || 'Failed to send digits'
+      }));
+    }
+  }, [ivrCallState.isConnected, ivrCallState.callStatus]);
 
   // Fetch Twilio token for IVR
   const fetchIVRToken = useCallback(async () => {
