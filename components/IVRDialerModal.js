@@ -13,7 +13,16 @@ export default function IVRDialerModal({
   onAddNew,
   onSendDigits,
   onMakeCall,
+  onHangup,
+  onMute,
   isConnected,
+  isCalling = false,
+  isConnecting = false,
+  callStatus = null,
+  isMuted = false,
+  callTimer = 0,
+  phoneNumber: callPhoneNumber = null,
+  error: callError = null,
   callId,
   callLabel,
   isMinimized = false,
@@ -519,6 +528,25 @@ export default function IVRDialerModal({
   const canCall = mode === 'dial' && phoneNumber.length > 0 && phoneValidation.isValid;
   const canSend = mode === 'ivr' && enteredDigits.length > 0 && isConnected;
 
+  // Helper function to format timer
+  const formatTimer = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Helper function to get status display
+  const getStatusDisplay = () => {
+    if (callStatus === 'in-progress') return 'In Progress';
+    if (callStatus === 'ringing') return 'Ringing';
+    if (callStatus === 'queued') return 'Connecting...';
+    if (callStatus === 'completed') return 'Completed';
+    if (callStatus === 'failed') return 'Failed';
+    if (callStatus === 'no-answer') return 'No Answer';
+    if (callStatus === 'busy') return 'Busy';
+    return callStatus || '';
+  };
+
   // Calculate right offset when GlobalWebCallInterface is open (w-80 = 320px + 16px spacing)
   const rightOffset = isGlobalCallInterfaceOpen ? 'calc(1rem + 336px)' : '1rem';
 
@@ -577,6 +605,73 @@ export default function IVRDialerModal({
 
         {/* Body - Reorganized Layout */}
         <div className="flex flex-col" style={{ maxHeight: 'calc(100vh - 14rem)' }}>
+          {/* Call Status Display - Show when call is active */}
+          {(isCalling || isConnected || callStatus) && (
+            <div className="p-2 bg-blue-50 border-b border-blue-200">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  {callStatus === 'in-progress' && (
+                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                  )}
+                  {callStatus === 'ringing' && (
+                    <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
+                  )}
+                  {(callStatus === 'queued' || isCalling) && (
+                    <div className="w-3 h-3 bg-gray-400 rounded-full animate-pulse"></div>
+                  )}
+                  <span className="font-semibold text-blue-800 text-sm">
+                    {callPhoneNumber || 'Calling...'}
+                  </span>
+                </div>
+                {callStatus && (
+                  <span className="text-xs text-blue-600 font-medium">
+                    {getStatusDisplay()}
+                  </span>
+                )}
+              </div>
+              
+              {/* Timer - only show when in-progress */}
+              {callStatus === 'in-progress' && callTimer > 0 && (
+                <div className="text-base font-bold text-blue-700">
+                  {formatTimer(callTimer)}
+                </div>
+              )}
+
+              {/* Error Display */}
+              {callError && (
+                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                  {callError}
+                </div>
+              )}
+
+              {/* Call Controls - Show when call is active */}
+              {(isCalling || isConnected || callStatus === 'in-progress' || callStatus === 'ringing') && (
+                <div className="mt-2 flex gap-2">
+                  {callStatus === 'in-progress' && onMute && (
+                    <button
+                      onClick={onMute}
+                      className={`flex-1 px-2 py-1.5 rounded-lg font-medium text-xs ${
+                        isMuted 
+                          ? 'bg-orange-600 hover:bg-orange-700 text-white' 
+                          : 'bg-gray-600 hover:bg-gray-700 text-white'
+                      }`}
+                    >
+                      {isMuted ? 'Unmute' : 'Mute'}
+                    </button>
+                  )}
+                  {onHangup && (
+                    <button
+                      onClick={onHangup}
+                      className="flex-1 px-2 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium text-xs"
+                    >
+                      Hang Up
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* First Row - Phone Number Input */}
           <div className="p-1.5 border-b border-gray-200">
             {mode === 'dial' && (
