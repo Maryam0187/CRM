@@ -321,7 +321,15 @@ export default function IVRDialerModal({
     // Play sound when button is clicked
     playKeypadSound(digit);
     
-    if (mode === 'dial') {
+    // If call is active (connected or in-progress), enter digits for DTMF
+    // Otherwise, enter digits for phone number dialing
+    const isCallActive = isConnected || callStatus === 'in-progress' || isCalling || isConnecting;
+    
+    if (isCallActive) {
+      // During active call: digits go to enteredDigits for DTMF
+      setEnteredDigits(prev => prev + digit);
+    } else if (mode === 'dial') {
+      // Before call: digits go to phoneNumber for dialing
       const newValue = phoneNumber + digit;
       const formatted = formatPhoneNumberWithSpecialChars(newValue);
       setPhoneNumber(formatted);
@@ -330,6 +338,7 @@ export default function IVRDialerModal({
       const validation = validatePhoneNumber(formatted);
       setPhoneValidation(validation);
     } else {
+      // IVR mode (for future use)
       setEnteredDigits(prev => prev + digit);
     }
   };
@@ -338,7 +347,15 @@ export default function IVRDialerModal({
     // Play sound
     playActionSound('backspace');
     
-    if (mode === 'dial') {
+    // If call is active, backspace affects enteredDigits (DTMF)
+    // Otherwise, backspace affects phoneNumber (dialing)
+    const isCallActive = isConnected || callStatus === 'in-progress' || isCalling || isConnecting;
+    
+    if (isCallActive) {
+      // During active call: backspace enteredDigits
+      setEnteredDigits(prev => prev.slice(0, -1));
+    } else if (mode === 'dial') {
+      // Before call: backspace phoneNumber
       const newValue = phoneNumber.slice(0, -1);
       const formatted = formatPhoneNumberWithSpecialChars(newValue);
       setPhoneNumber(formatted);
@@ -347,6 +364,7 @@ export default function IVRDialerModal({
       const validation = validatePhoneNumber(formatted);
       setPhoneValidation(validation);
     } else {
+      // IVR mode (for future use)
       setEnteredDigits(prev => prev.slice(0, -1));
     }
   };
@@ -355,10 +373,19 @@ export default function IVRDialerModal({
     // Play sound
     playActionSound('clear');
     
-    if (mode === 'dial') {
+    // If call is active, clear enteredDigits (DTMF)
+    // Otherwise, clear phoneNumber (dialing)
+    const isCallActive = isConnected || callStatus === 'in-progress' || isCalling || isConnecting;
+    
+    if (isCallActive) {
+      // During active call: clear enteredDigits
+      setEnteredDigits('');
+    } else if (mode === 'dial') {
+      // Before call: clear phoneNumber
       setPhoneNumber('');
       setPhoneValidation({ isValid: true, message: '' });
     } else {
+      // IVR mode (for future use)
       setEnteredDigits('');
     }
   };
@@ -675,9 +702,10 @@ export default function IVRDialerModal({
             </div>
           )}
 
-          {/* First Row - Phone Number Input */}
+          {/* First Row - Phone Number Input (when not in call) or DTMF Digits (when in call) */}
           <div className="p-1.5 border-b border-gray-200">
-            {mode === 'dial' && (
+            {/* Show phone number input when call is NOT active */}
+            {!(isConnected || callStatus === 'in-progress' || isCalling || isConnecting) && mode === 'dial' && (
               <>
                 <div className={`bg-gray-50 border-2 rounded-lg p-1.5 text-center ${phoneValidation.isValid ? 'border-gray-300' : 'border-red-500'}`}>
                   <input
@@ -726,13 +754,19 @@ export default function IVRDialerModal({
                 )}
               </>
             )}
-            {mode === 'ivr' && (
+            {/* Show DTMF digits input when call IS active OR in IVR mode */}
+            {((isConnected || callStatus === 'in-progress' || isCalling || isConnecting) || mode === 'ivr') && (
               <>
                 <div className="bg-gray-50 border-2 border-gray-300 rounded-lg p-1.5 text-center">
                   <div className="text-base font-mono font-bold text-gray-800 min-h-[32px] flex items-center justify-center">
                     {enteredDigits || <span className="text-gray-400">Enter IVR digits</span>}
                   </div>
                 </div>
+                {(isConnected || callStatus === 'in-progress') && (
+                  <p className="text-xs text-gray-500 mt-1 text-center">
+                    Enter digits to send DTMF tones during call
+                  </p>
+                )}
               </>
             )}
           </div>

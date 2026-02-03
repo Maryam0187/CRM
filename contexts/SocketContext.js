@@ -268,6 +268,11 @@ export const SocketProvider = ({ children }) => {
     });
 
     // Call status update handlers - simplified, no Redux
+    // NOTE: This handler receives events for BOTH IVR Dialer and GlobalWebCallInterface (CRM calls)
+    // Each component filters events based on:
+    // - IVR calls: twilioData.isIvrCall, callPurpose === 'ivr_dialer', or conferenceName starts with 'ivr-call-'
+    // - CRM calls: All other calls (handled by GlobalWebCallInterface)
+    // Components handle their own filtering - this context just dispatches all events
     socketInstance.on('call_status_update', (data) => {
       // Simple deduplication
       const statusKey = `${data.callSid}-${data.status}-${data.uiStatus || ''}`;
@@ -278,14 +283,22 @@ export const SocketProvider = ({ children }) => {
       }
       lastDispatchedStatusRef.current.set(data.callSid, statusKey);
 
-      console.log('📞 [CALL STATUS UPDATE]', {
+      // Detect call type for logging
+      const isIvrCall = data.twilioData?.isIvrCall || 
+                        data.callPurpose === 'ivr_dialer' ||
+                        (data.conferenceName && data.conferenceName.startsWith('ivr-call-'));
+      const callType = isIvrCall ? 'IVR' : 'CRM';
+
+      console.log(`📞 [CALL STATUS UPDATE - ${callType}]`, {
         callSid: data.callSid?.substring(0, 15) + '...',
         status: data.status,
         uiStatus: data.uiStatus,
-        conferenceName: data.conferenceName
+        conferenceName: data.conferenceName,
+        callType: callType,
+        isIvrCall: isIvrCall
       });
       
-      // Update call status in state
+      // Update call status in state (both IVR and CRM calls stored here)
       setCallStatusUpdates(prev => {
         const newMap = new Map(prev);
         newMap.set(data.callSid, data);
@@ -300,6 +313,7 @@ export const SocketProvider = ({ children }) => {
       }
 
       // Dispatch custom event for components to listen to
+      // IVRDialer and GlobalWebCallInterface will filter based on isIvrCall flag
       const callStatusEvent = new CustomEvent('callStatusUpdate', {
         detail: { callStatusData: data }
       });
@@ -308,14 +322,28 @@ export const SocketProvider = ({ children }) => {
 
 
     // Conference event handlers - simplified, no Redux
+    // NOTE: This handler receives events for BOTH IVR Dialer and GlobalWebCallInterface conferences
+    // Each component filters events based on conference name pattern:
+    // - IVR conferences: conferenceName starts with 'ivr-call-'
+    // - CRM conferences: conferenceName starts with 'call-' or 'inbound-'
+    // Components handle their own filtering - this context just dispatches all events
     socketInstance.on('conference_event', (data) => {
-      console.log('📞 [CONFERENCE EVENT]', {
+      // Detect conference type for logging
+      const isIvrConference = data.conferenceName?.startsWith('ivr-call-') ||
+                              data.twilioData?.isIvrCall ||
+                              data.callPurpose === 'ivr_dialer';
+      const conferenceType = isIvrConference ? 'IVR' : 'CRM';
+
+      console.log(`📞 [CONFERENCE EVENT - ${conferenceType}]`, {
         event: data.event,
         conferenceName: data.conferenceName,
-        participantRole: data.participantRole || 'unknown'
+        participantRole: data.participantRole || 'unknown',
+        conferenceType: conferenceType,
+        isIvrConference: isIvrConference
       });
       
       // Dispatch custom event for components to listen to
+      // IVRDialer and GlobalWebCallInterface will filter based on conference name pattern
       const conferenceEvent = new CustomEvent('conferenceEvent', {
         detail: { conferenceEventData: data }
       });
@@ -323,17 +351,27 @@ export const SocketProvider = ({ children }) => {
     });
 
     // Conference status handlers (status updates with participant count, etc.)
+    // NOTE: This handler receives events for BOTH IVR Dialer and GlobalWebCallInterface conferences
+    // Each component filters events based on conference name pattern
     socketInstance.on('conference_status', (data) => {
-      // Minimal log: conference status only
-      console.log('📞 [CONFERENCE STATUS]', {
+      // Detect conference type for logging
+      const isIvrConference = data.conferenceName?.startsWith('ivr-call-') ||
+                              data.twilioData?.isIvrCall ||
+                              data.callPurpose === 'ivr_dialer';
+      const conferenceType = isIvrConference ? 'IVR' : 'CRM';
+
+      console.log(`📞 [CONFERENCE STATUS - ${conferenceType}]`, {
         conferenceName: data.conferenceName,
         conferenceSid: data.conferenceSid,
         status: data.status,
         callSid: data.callSid,
-        timestamp: data.timestamp
+        timestamp: data.timestamp,
+        conferenceType: conferenceType,
+        isIvrConference: isIvrConference
       });
       
       // Dispatch custom event for components to listen to
+      // IVRDialer and GlobalWebCallInterface will filter based on conference name pattern
       const conferenceStatusEvent = new CustomEvent('conferenceStatus', {
         detail: { conferenceStatusData: data }
       });
