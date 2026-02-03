@@ -64,10 +64,12 @@ export async function POST(request) {
     // Note: We don't update agent status to 'busy' for IVR calls
     // This allows agents to use IVR dialer while maintaining CRM call status
 
-    const fromNumber = validatePhoneNumber(process.env.TWILIO_PHONE_NUMBER);
+    // Use IVR-specific phone number if set, otherwise fall back to default Twilio number
+    const ivrPhoneNumber = process.env.TWILIO_IVR_PHONE_NUMBER || process.env.TWILIO_PHONE_NUMBER;
+    const fromNumber = validatePhoneNumber(ivrPhoneNumber);
     if (!fromNumber) {
       return NextResponse.json(
-        { success: false, message: 'TWILIO_PHONE_NUMBER is not set or invalid' },
+        { success: false, message: 'TWILIO_IVR_PHONE_NUMBER or TWILIO_PHONE_NUMBER is not set or invalid' },
         { status: 500 }
       );
     }
