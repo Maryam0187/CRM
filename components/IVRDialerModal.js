@@ -34,6 +34,7 @@ export default function IVRDialerModal({
 }) {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [enteredDigits, setEnteredDigits] = useState('');
+  const [lastSentDigit, setLastSentDigit] = useState(''); // For visual feedback when sending immediately
   const [savedHelplines, setSavedHelplines] = useState([]);
   const [showSavedList, setShowSavedList] = useState(false); // Toggle right column visibility - closed by default
   const [rightPanelView, setRightPanelView] = useState('helplines'); // 'helplines' or 'history'
@@ -321,13 +322,22 @@ export default function IVRDialerModal({
     // Play sound when button is clicked
     playKeypadSound(digit);
     
-    // If call is active (connected or in-progress), enter digits for DTMF
+    // If call is active (connected or in-progress), send digits immediately as DTMF
     // Otherwise, enter digits for phone number dialing
-    const isCallActive = isConnected || callStatus === 'in-progress' || isCalling || isConnecting;
+    const isCallActive = isConnected || callStatus === 'in-progress';
     
     if (isCallActive) {
-      // During active call: digits go to enteredDigits for DTMF
-      setEnteredDigits(prev => prev + digit);
+      // During active call: send digit immediately as DTMF
+      // Show visual feedback that digit was sent
+      setLastSentDigit(digit);
+      // Send the single digit immediately
+      if (onSendDigits) {
+        onSendDigits(digit, callId);
+      }
+      // Clear visual feedback after a brief moment
+      setTimeout(() => {
+        setLastSentDigit('');
+      }, 500);
     } else if (mode === 'dial') {
       // Before call: digits go to phoneNumber for dialing
       const newValue = phoneNumber + digit;
@@ -338,7 +348,7 @@ export default function IVRDialerModal({
       const validation = validatePhoneNumber(formatted);
       setPhoneValidation(validation);
     } else {
-      // IVR mode (for future use)
+      // IVR mode (for future use) - accumulate digits for batch sending
       setEnteredDigits(prev => prev + digit);
     }
   };
@@ -554,7 +564,13 @@ export default function IVRDialerModal({
   };
 
   const displayValue = mode === 'dial' ? phoneNumber : enteredDigits;
-  const canCall = mode === 'dial' && phoneNumber.length > 0 && phoneValidation.isValid;
+  // Disable call button if:
+  // 1. Not in dial mode, OR
+  // 2. No phone number entered, OR
+  // 3. Phone number is invalid, OR
+  // 4. A call is already in progress (calling, connecting, or connected)
+  const isCallActive = isCalling || isConnecting || isConnected || callStatus === 'in-progress' || callStatus === 'ringing';
+  const canCall = mode === 'dial' && phoneNumber.length > 0 && phoneValidation.isValid && !isCallActive;
   // Allow sending digits when call is connected, regardless of mode
   const canSend = enteredDigits.length > 0 && (isConnected || callStatus === 'in-progress');
 
@@ -759,12 +775,22 @@ export default function IVRDialerModal({
               <>
                 <div className="bg-gray-50 border-2 border-gray-300 rounded-lg p-1.5 text-center">
                   <div className="text-base font-mono font-bold text-gray-800 min-h-[32px] flex items-center justify-center">
-                    {enteredDigits || <span className="text-gray-400">Enter IVR digits</span>}
+                    {lastSentDigit ? (
+                      <span className="text-green-600 animate-pulse">Sent: {lastSentDigit}</span>
+                    ) : enteredDigits ? (
+                      enteredDigits
+                    ) : (
+                      <span className="text-gray-400">
+                        {(isConnected || callStatus === 'in-progress') 
+                          ? 'Press keypad to send DTMF' 
+                          : 'Enter IVR digits'}
+                      </span>
+                    )}
                   </div>
                 </div>
                 {(isConnected || callStatus === 'in-progress') && (
                   <p className="text-xs text-gray-500 mt-1 text-center">
-                    Enter digits to send DTMF tones during call
+                    Digits are sent immediately when pressed
                   </p>
                 )}
               </>
@@ -915,11 +941,11 @@ export default function IVRDialerModal({
                   <button onClick={() => handleDigitClick('#')} className="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 font-bold text-sm py-2 px-2 rounded transition-all duration-150 shadow-sm cursor-pointer">#</button>
                 </div>
 
-                {/* Action buttons - Backspace, Clear, and Send Digits */}
+                {/* Action buttons - Backspace, Clear, and Send Digits (only show Send when not in active call) */}
                 <div className="flex gap-1.5 mt-auto">
                   <button
                     onClick={handleBackspace}
-                    disabled={!enteredDigits}
+                    disabled={!enteredDigits && !(isConnected || callStatus === 'in-progress')}
                     className="flex-1 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-medium py-2 px-2 rounded-lg transition-colors duration-200 flex items-center justify-center"
                     title="Backspace"
                   >
@@ -929,7 +955,7 @@ export default function IVRDialerModal({
                   </button>
                   <button
                     onClick={handleClear}
-                    disabled={!enteredDigits}
+                    disabled={!enteredDigits && !(isConnected || callStatus === 'in-progress')}
                     className="flex-1 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-medium py-2 px-2 rounded-lg transition-colors duration-200 flex items-center justify-center"
                     title="Clear"
                   >
@@ -937,19 +963,22 @@ export default function IVRDialerModal({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
-                  <button
-                    onClick={handleSendDigits}
-                    disabled={!canSend}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-semibold py-2 px-2 rounded-lg transition-colors duration-200 flex items-center justify-center gap-1 shadow-lg text-sm"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                    </svg>
-                    Send
-                  </button>
+                  {/* Only show Send button when NOT in active call (for batch sending in IVR mode) */}
+                  {!(isConnected || callStatus === 'in-progress') && (
+                    <button
+                      onClick={handleSendDigits}
+                      disabled={!canSend}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer text-white font-semibold py-2 px-2 rounded-lg transition-colors duration-200 flex items-center justify-center gap-1 shadow-lg text-sm"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                      </svg>
+                      Send
+                    </button>
+                  )}
                 </div>
 
-                {!isConnected && !canSend && enteredDigits.length > 0 && (
+                {!(isConnected || callStatus === 'in-progress') && !canSend && enteredDigits.length > 0 && (
                   <div className="mt-2 text-center text-xs text-red-600">
                     ⚠️ Call must be connected to send digits
                   </div>
