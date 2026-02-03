@@ -331,7 +331,7 @@ export default function IVRDialer() {
     }
   }, []);
 
-  // Reset call state
+  // Reset call state and cleanup device
   const resetIVRCallState = useCallback(() => {
     stopIVRTimer();
     
@@ -344,6 +344,9 @@ export default function IVRDialer() {
       }
       ivrActiveConnection.current = null;
     }
+    
+    // Cleanup device if it exists (but don't set ivrDevice to null here to avoid infinite loops)
+    // Device cleanup will be handled by the useEffect cleanup or explicit cleanup calls
     
     setIvrCallState({
       isCalling: false,
@@ -503,7 +506,15 @@ export default function IVRDialer() {
                   ...prev,
                   isConnected: true,
                   isConnecting: false,
-                  isCalling: false
+                  isCalling: false,
+                  callStatus: 'in-progress' // Update status when call is accepted
+                };
+              }
+              // Even if already connected, ensure status is in-progress
+              if (prev.callStatus !== 'in-progress') {
+                return {
+                  ...prev,
+                  callStatus: 'in-progress'
                 };
               }
               return prev;
@@ -528,12 +539,31 @@ export default function IVRDialer() {
               setIvrCallState(prev => ({
                 ...prev,
                 isConnected: false,
-                isConnecting: false
+                isConnecting: false,
+                callStatus: 'completed'
               }));
               ivrActiveConnection.current = null;
               ivrLocalMediaStream.current = null;
               
-              resetIVRCallState();
+              // Cleanup device when disconnected
+              if (ivrDevice && !isIvrCleaningUp.current) {
+                isIvrCleaningUp.current = true;
+                console.log('🧹 [IVR] Cleaning up device - call disconnected');
+                setTimeout(() => {
+                  try {
+                    safelyCleanupDevice(ivrDevice);
+                    setIvrDevice(null);
+                  } catch (e) {
+                    console.warn('⚠️ [IVR] Error cleaning up device on disconnect:', e);
+                  }
+                  isIvrCleaningUp.current = false;
+                }, 500);
+              }
+              
+              // Reset state after cleanup
+              setTimeout(() => {
+                resetIVRCallState();
+              }, 1000);
             } catch (e) {
               console.warn('⚠️ [IVR] Error in onDisconnect (ignored):', e.message);
             }
@@ -998,10 +1028,25 @@ export default function IVRDialer() {
               ivrActiveConnection.current = null;
             }
 
+            // Cleanup device when call ends
+            if (ivrDevice && !isIvrCleaningUp.current) {
+              isIvrCleaningUp.current = true;
+              console.log('🧹 [IVR] Cleaning up device - call ended');
+              setTimeout(() => {
+                try {
+                  safelyCleanupDevice(ivrDevice);
+                  setIvrDevice(null);
+                } catch (e) {
+                  console.warn('⚠️ [IVR] Error cleaning up device on call end:', e);
+                }
+                isIvrCleaningUp.current = false;
+              }, 500);
+            }
+
             // Reset state after a short delay
             setTimeout(() => {
               resetIVRCallState();
-            }, 500);
+            }, 1000);
           }
 
           return {
@@ -1147,7 +1192,7 @@ export default function IVRDialer() {
   };
 
   // Handle hangup
-  const handleIVRHangup = async () => {
+  const handleIVRHangup = useCallback(async () => {
     try {
       console.log('📞 [IVR] Hanging up call');
       
@@ -1179,6 +1224,7 @@ export default function IVRDialer() {
         } catch (err) {
           console.warn('⚠️ [IVR] Error disconnecting call:', err);
         }
+        ivrActiveConnection.current = null;
       } else if (ivrDevice && typeof ivrDevice.disconnectAll === 'function') {
         console.log('📞 [IVR] No active connection, disconnecting all calls');
         ivrDevice.disconnectAll();
@@ -1196,6 +1242,21 @@ export default function IVRDialer() {
         }
       }
 
+      // Cleanup device when hanging up
+      if (ivrDevice && !isIvrCleaningUp.current) {
+        isIvrCleaningUp.current = true;
+        console.log('🧹 [IVR] Cleaning up device - manual hangup');
+        setTimeout(() => {
+          try {
+            safelyCleanupDevice(ivrDevice);
+            setIvrDevice(null);
+          } catch (e) {
+            console.warn('⚠️ [IVR] Error cleaning up device on hangup:', e);
+          }
+          isIvrCleaningUp.current = false;
+        }, 500);
+      }
+
       // Reset state
       resetIVRCallState();
       
@@ -1205,7 +1266,7 @@ export default function IVRDialer() {
       // Reset state anyway
       resetIVRCallState();
     }
-  };
+  }, [ivrCallState.callSid, ivrCallState.conferenceName, ivrDevice, resetIVRCallState, safelyCleanupDevice]);
 
   // Handle mute/unmute
   const handleIVRMute = useCallback(async () => {

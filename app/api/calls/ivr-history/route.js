@@ -74,25 +74,29 @@ export async function GET(request) {
     });
     
     // Format response data
-    const calls = callLogs.map(callLog => ({
-      id: callLog.id,
-      callSid: callLog.callSid,
-      customerCallSid: callLog.customerCallSid,
-      agentCallSid: callLog.agentCallSid,
-      conferenceName: callLog.conferenceName,
-      agentId: callLog.agentId,
-      direction: callLog.direction,
-      fromNumber: callLog.fromNumber,
-      toNumber: callLog.toNumber,
-      status: callLog.status,
-      uiStatus: callLog.status, // For IVR, status and uiStatus are the same
-      callPurpose: callLog.callPurpose,
-      duration: callLog.duration,
-      isIvrCall: true,
-      createdAt: callLog.createdAt,
-      updatedAt: callLog.updatedAt,
-      twilioData: callLog.twilioData || {}
-    }));
+    // Use toJSON() to ensure we get the properly mapped values (created_at -> createdAt)
+    const calls = callLogs.map(callLog => {
+      const callData = callLog.toJSON ? callLog.toJSON() : callLog;
+      return {
+        id: callData.id,
+        callSid: callData.callSid,
+        customerCallSid: callData.customerCallSid,
+        agentCallSid: callData.agentCallSid,
+        conferenceName: callData.conferenceName,
+        agentId: callData.agentId,
+        direction: callData.direction,
+        fromNumber: callData.fromNumber,
+        toNumber: callData.toNumber,
+        status: callData.status,
+        uiStatus: callData.status, // For IVR, status and uiStatus are the same
+        callPurpose: callData.callPurpose,
+        duration: callData.duration,
+        isIvrCall: true,
+        createdAt: callData.createdAt || callData.created_at,
+        updatedAt: callData.updatedAt || callData.updated_at,
+        twilioData: callData.twilioData || {}
+      };
+    });
     
     return NextResponse.json({
       success: true,
