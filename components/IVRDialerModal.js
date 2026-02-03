@@ -23,6 +23,7 @@ export default function IVRDialerModal({
   isMuted = false,
   callTimer = 0,
   phoneNumber: callPhoneNumber = null,
+  callerId = 'unknown',
   error: callError = null,
   callId,
   callLabel,
@@ -327,7 +328,9 @@ export default function IVRDialerModal({
     const isCallActive = isConnected || callStatus === 'in-progress';
     
     if (isCallActive) {
-      // During active call: send digit immediately as DTMF
+      // During active call: send digit immediately as DTMF and keep it in input
+      // Add digit to enteredDigits so it remains visible
+      setEnteredDigits(prev => prev + digit);
       // Show visual feedback that digit was sent
       setLastSentDigit(digit);
       // Send the single digit immediately
@@ -665,9 +668,14 @@ export default function IVRDialerModal({
                   {(callStatus === 'queued' || isCalling) && (
                     <div className="w-3 h-3 bg-gray-400 rounded-full animate-pulse"></div>
                   )}
-                  <span className="font-semibold text-blue-800 text-sm">
-                    {callPhoneNumber || 'Calling...'}
-                  </span>
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-blue-800 text-sm">
+                      {callPhoneNumber || 'Calling...'}
+                    </span>
+                    <span className="text-xs text-gray-600 mt-0.5">
+                      From: {callerId}
+                    </span>
+                  </div>
                 </div>
                 {callStatus && (
                   <span className="text-xs text-blue-600 font-medium">

@@ -31,6 +31,7 @@ export default function IVRDialer() {
     callSid: null,
     conferenceName: null,
     phoneNumber: null,
+    callerId: 'unknown', // The phone number the call is coming from
     callStatus: null, // 'queued', 'ringing', 'in-progress', 'completed', etc.
     isMuted: false,
     error: null,
@@ -1147,12 +1148,13 @@ export default function IVRDialer() {
       const result = await response.json();
 
       if (result?.success) {
-        const { callSid, conferenceName, to } = result.data;
+        const { callSid, conferenceName, to, from } = result.data;
         
         console.log('✅ [IVR] Call initiated successfully:', {
           callSid,
           conferenceName,
-          to
+          to,
+          from
         });
 
         // Update state with call information
@@ -1161,6 +1163,7 @@ export default function IVRDialer() {
           callSid,
           conferenceName,
           phoneNumber: to,
+          callerId: 'unknown',
           isCalling: true,
           callStatus: 'queued'
         }));
@@ -1358,6 +1361,7 @@ export default function IVRDialer() {
       isMuted={ivrCallState.isMuted}
       callTimer={ivrCallState.callTimer}
       phoneNumber={ivrCallState.phoneNumber}
+      callerId={ivrCallState.callerId}
       error={ivrCallState.error}
       callId="navbar-dialer"
       callLabel="IVR Dialer"
