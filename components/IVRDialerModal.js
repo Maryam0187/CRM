@@ -490,9 +490,16 @@ export default function IVRDialerModal({
     const validation = validatePhoneNumber(formatted);
     setPhoneValidation(validation);
     
-    // Switch to dial mode if not already
-    if (mode !== 'dial') {
-      // Note: mode is controlled by parent, but we can at least set the number
+    // If validation passes, make the call immediately
+    if (validation.isValid && onMakeCall) {
+      // Play sound
+      playActionSound('call');
+      
+      // Make the call
+      onMakeCall(helpline.phoneNumber.trim());
+    } else if (!validation.isValid) {
+      // Show warning if validation fails
+      showWarning(validation.message || 'Invalid phone number');
     }
   };
 
