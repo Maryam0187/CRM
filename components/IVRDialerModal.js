@@ -490,6 +490,9 @@ export default function IVRDialerModal({
     const validation = validatePhoneNumber(formatted);
     setPhoneValidation(validation);
     
+    // Show keypad when dialing
+    setShowSavedList(false);
+    
     // If validation passes, make the call immediately
     if (validation.isValid && onMakeCall) {
       // Play sound
