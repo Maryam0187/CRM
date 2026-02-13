@@ -82,6 +82,11 @@ module.exports = (sequelize) => {
       allowNull: true,
       field: 'last_logout_time'
     },
+    lastSeenAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'last_seen_at'
+    },
     latitude: {
       type: DataTypes.DECIMAL(10, 8),
       allowNull: true
