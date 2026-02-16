@@ -870,6 +870,12 @@ export default function UserDetailsModal({ user, onClose }) {
                       </p>
                     </div>
                     <div>
+                      <p className="text-sm text-gray-500 mb-1">Last seen</p>
+                      <p className="font-medium">
+                        {user.last_seen_at ? formatDate(user.last_seen_at) : '—'}
+                      </p>
+                    </div>
+                    <div>
                       <p className="text-sm text-gray-500 mb-1">Account Status</p>
                       <p>
                         {user.is_active ? (

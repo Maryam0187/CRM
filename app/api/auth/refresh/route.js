@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
-import { User } from '../../../../models';
+import { User, UserSession } from '../../../../models';
 
 export async function POST(request) {
   try {
@@ -15,11 +15,21 @@ export async function POST(request) {
 
     // Verify refresh token
     const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key-change-in-production';
-    
+
     let decoded;
     try {
       decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
     } catch (error) {
+      // When refresh token is expired, mark the session inactive so server state matches reality
+      try {
+        const expired = jwt.decode(refreshToken);
+        if (expired?.sessionId && expired?.userId) {
+          await UserSession.update(
+            { isActive: false },
+            { where: { sessionId: expired.sessionId, userId: expired.userId } }
+          );
+        }
+      } catch (_) { /* ignore */ }
       return NextResponse.json(
         { error: 'Invalid or expired refresh token' },
         { status: 401 }
@@ -43,16 +53,31 @@ export async function POST(request) {
       );
     }
 
-    // Generate new access token
+    // Ensure session exists and is still active (not logged out / invalidated)
+    if (decoded.sessionId) {
+      const session = await UserSession.findOne({
+        where: { sessionId: decoded.sessionId, userId: user.id }
+      });
+      if (!session || !session.isActive) {
+        return NextResponse.json(
+          { error: 'Session was invalidated. Please sign in again.' },
+          { status: 401 }
+        );
+      }
+      // Session validity is isActive only; refresh token expiry controls max login duration
+    }
+
+    // Generate new access token (include sessionId from refresh token)
     const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
     const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m'; // Default to 15 minutes if not set
-    
+
     const newAccessToken = jwt.sign(
       {
         userId: user.id,
         email: user.email,
         role: user.role,
         name: `${user.firstName} ${user.lastName}`.trim(),
+        sessionId: decoded.sessionId,
         type: 'access'
       },
       JWT_SECRET,

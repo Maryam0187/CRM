@@ -199,24 +199,14 @@ export async function POST(request) {
     // Create new session FIRST before invalidating old sessions
     // This ensures there's always an active session when old sessions log out
     const sessionId = UserSession.generateSessionId();
-    
-    // Calculate expiration time (same as JWT expiration)
-    const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
-    let expiresAt = null;
-    if (JWT_EXPIRES_IN) {
-      const expiresInMs = parseExpiration(JWT_EXPIRES_IN);
-      if (expiresInMs) {
-        expiresAt = new Date(Date.now() + expiresInMs);
-      }
-    }
+    // Session validity = isActive only; max login duration is controlled by refresh token expiry
 
     await UserSession.create({
       userId: user.id,
       sessionId: sessionId,
       deviceInfo: userAgent || null,
       ipAddress: ipAddress || null,
-      isActive: true,
-      expiresAt: expiresAt
+      isActive: true
     });
 
     console.log(`✅ Created new session ${sessionId} for user ${user.id}`);
@@ -309,8 +299,9 @@ export async function POST(request) {
     // Generate JWT tokens
     const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
     const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key-change-in-production';
-    const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '1d'; // Default to 1 day if not set
-    
+    const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
+    const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '1d';
+
     // Access token (configurable via JWT_EXPIRES_IN) - includes sessionId
     const accessToken = jwt.sign(
       {
@@ -325,11 +316,12 @@ export async function POST(request) {
       { expiresIn: JWT_EXPIRES_IN }
     );
 
-    // Refresh token (configurable via JWT_REFRESH_EXPIRES_IN)
+    // Refresh token (configurable via JWT_REFRESH_EXPIRES_IN) - includes sessionId
     const refreshToken = jwt.sign(
       {
         userId: userData.id,
         email: userData.email,
+        sessionId: sessionId,
         type: 'refresh'
       },
       JWT_REFRESH_SECRET,

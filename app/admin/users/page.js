@@ -254,6 +254,9 @@ export default function AdminUsersPage() {
                       Online Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Last seen
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Created
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -264,7 +267,7 @@ export default function AdminUsersPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {users.length === 0 ? (
                     <tr>
-                      <td colSpan="9" className="px-6 py-4 text-center text-gray-500">
+                      <td colSpan="10" className="px-6 py-4 text-center text-gray-500">
                         No users found
                       </td>
                     </tr>
@@ -334,6 +337,11 @@ export default function AdminUsersPage() {
                              userItem.status === 'away' ? '🟡 Away' :
                              '⚫ Offline'}
                           </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {userItem.last_seen_at
+                            ? new Date(userItem.last_seen_at).toLocaleString()
+                            : '—'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {new Date(userItem.created_at).toLocaleDateString()}
