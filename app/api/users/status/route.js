@@ -41,10 +41,12 @@ export async function PUT(request) {
     // Get old status for logging
     const oldStatus = user.status || 'offline';
 
-    // Update status if it changed
+    const now = new Date();
+
+    // Update status if it changed (always update lastSeenAt when user reports status)
     if (oldStatus !== status) {
-      await user.update({ status });
-      
+      await user.update({ status, lastSeenAt: now });
+
       // Log status change activity
       const ipAddress = UserActivityLogger.getIpAddress(request);
       const userAgent = UserActivityLogger.getUserAgent(request);
@@ -66,6 +68,8 @@ export async function PUT(request) {
       });
     }
 
+    // Status unchanged but still update last seen (user is active)
+    await user.update({ lastSeenAt: now });
     return NextResponse.json({
       success: true,
       message: 'Status unchanged',
