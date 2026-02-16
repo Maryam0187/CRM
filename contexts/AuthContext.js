@@ -2,6 +2,16 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { getUserSession, clearUserSession, isAuthenticated } from '../lib/auth';
+
+function isAccessTokenExpired(token, bufferSeconds = 60) {
+  if (!token) return true;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp && payload.exp * 1000 < Date.now() + bufferSeconds * 1000;
+  } catch {
+    return true;
+  }
+}
 import { getUserLocation, checkGeolocationPermission } from '../lib/geolocation';
 
 const AuthContext = createContext();
@@ -13,54 +23,37 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check if user is logged in on app load
-    const userSession = getUserSession();
-    if (userSession && isAuthenticated()) {
-      setUser(userSession);
-      
-      // Load tokens from localStorage
-      if (typeof window !== 'undefined') {
+    const init = async () => {
+      const userSession = getUserSession();
+      if (userSession && isAuthenticated() && typeof window !== 'undefined') {
         const storedAccessToken = localStorage.getItem('accessToken');
         const storedRefreshToken = localStorage.getItem('refreshToken');
-        
-        if (storedAccessToken) {
-          setAccessToken(storedAccessToken);
-        }
-        if (storedRefreshToken) {
-          setRefreshToken(storedRefreshToken);
+        setUser(userSession);
+        setAccessToken(storedAccessToken);
+        setRefreshToken(storedRefreshToken);
+
+        // Proactively refresh access token on load if it's expired (avoids 401 on first requests after refresh)
+        if (storedRefreshToken && isAccessTokenExpired(storedAccessToken)) {
+          try {
+            const res = await fetch('/api/auth/refresh', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refreshToken: storedRefreshToken })
+            });
+            const data = await res.json();
+            if (data.success && data.accessToken) {
+              localStorage.setItem('accessToken', data.accessToken);
+              setAccessToken(data.accessToken);
+            }
+          } catch {
+            // Ignore - first API call will trigger refresh flow
+          }
         }
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    };
+    init();
   }, []);
-
-  // Handle window close/tab close to ensure logout is called
-  useEffect(() => {
-    if (typeof window === 'undefined' || !user) return;
-
-    const handleBeforeUnload = (event) => {
-      // Use navigator.sendBeacon for reliable logout on window close
-      // sendBeacon doesn't support custom headers, so we'll send token in body
-      const token = accessToken || localStorage.getItem('accessToken');
-      if (token) {
-        const logoutData = JSON.stringify({
-          token: token,
-          location: null, // Can't get location during unload
-          locationPermission: 'not_set'
-        });
-        
-        // Use sendBeacon which is designed for this exact use case
-        // It guarantees the request will be sent even if the page is unloading
-        navigator.sendBeacon('/api/auth/logout', new Blob([logoutData], { type: 'application/json' }));
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [user, accessToken]);
 
   const login = (userData, accessToken = null, refreshTokenValue = null) => {
     console.log('🔍 AuthContext - Login called with:', { 

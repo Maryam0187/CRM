@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { User } from '../../../../models';
-import jwt from 'jsonwebtoken';
+import { requireJWTAuth } from '../../../../lib/jwtAuth';
 const UserActivityLogger = require('../../../../lib/userActivityLogger');
 const UserTimeTracker = require('../../../../lib/userTimeTracker');
 const socketManager = require('../../../../lib/socket');
@@ -12,16 +12,14 @@ const socketManager = require('../../../../lib/socket');
  */
 export async function PUT(request) {
   try {
-    // Get authorization header
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
       return NextResponse.json(
-        { error: 'Authorization token required' },
-        { status: 401 }
+        { error: authResult.error },
+        { status: authResult.status }
       );
     }
 
-    const token = authHeader.substring(7);
     const { status } = await request.json();
 
     // Validate status
@@ -32,21 +30,7 @@ export async function PUT(request) {
       );
     }
 
-    // Verify JWT token
-    const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-    let decoded;
-    
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (error) {
-      return NextResponse.json(
-        { error: 'Invalid or expired token' },
-        { status: 401 }
-      );
-    }
-
-    // Find user
-    const user = await User.findByPk(decoded.userId);
+    const user = await User.findByPk(authResult.user.id);
     if (!user) {
       return NextResponse.json(
         { error: 'User not found' },
@@ -103,35 +87,18 @@ export async function PUT(request) {
  */
 export async function GET(request) {
   try {
-    // Get authorization header
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
       return NextResponse.json(
-        { error: 'Authorization token required' },
-        { status: 401 }
+        { error: authResult.error },
+        { status: authResult.status }
       );
     }
 
-    const token = authHeader.substring(7);
-
-    // Verify JWT token
-    const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-    let decoded;
-    
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (error) {
-      return NextResponse.json(
-        { error: 'Invalid or expired token' },
-        { status: 401 }
-      );
-    }
-
-    // Find user
-    const user = await User.findByPk(decoded.userId, {
+    const user = await User.findByPk(authResult.user.id, {
       attributes: ['id', 'status', 'lastLoginTime', 'lastLogoutTime']
     });
-    
+
     if (!user) {
       return NextResponse.json(
         { error: 'User not found' },
