@@ -1715,12 +1715,14 @@ export default function GlobalWebCallInterface() {
   const displayError = error || callError;
 
   return (
-    <div className={`fixed bottom-4 right-4 z-[9999] transition-all duration-300 ${
-      isMinimized ? 'w-64' : 'w-80'
-    }`}>
-      <div className="bg-white rounded-lg shadow-2xl border-2 border-blue-200 backdrop-blur-sm overflow-hidden">
+    <div
+      className={`fixed bottom-4 right-4 z-[9999] transition-all duration-300 ${
+        isMinimized ? 'w-64' : 'w-80 max-h-[calc(100vh-2rem)]'
+      }`}
+    >
+      <div className="bg-white rounded-lg shadow-2xl border-2 border-blue-200 backdrop-blur-sm overflow-hidden flex flex-col max-h-[calc(100vh-2rem)]">
         {/* Header with minimize button and call status */}
-        <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-3 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-3 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="flex-shrink-0">
               {displayCallStatus === 'in-progress' ? (
@@ -1795,9 +1797,9 @@ export default function GlobalWebCallInterface() {
           </button>
         </div>
 
-        {/* Main content - only show when not minimized */}
+        {/* Main content - only show when not minimized - scrollable on small viewports */}
         {!isMinimized && (
-          <div className="p-4">
+          <div className="p-4 overflow-y-auto flex-1 min-h-0">
             {/* Error Display */}
             {displayError && (
               <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg mb-3">

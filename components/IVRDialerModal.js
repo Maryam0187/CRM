@@ -613,7 +613,7 @@ export default function IVRDialerModal({
     <>
       {/* Main Modal - positioned bottom right */}
       <div 
-        className="fixed bottom-4 bg-white rounded-lg shadow-2xl z-[10001] overflow-hidden"
+        className="fixed bottom-4 flex flex-col bg-white rounded-lg shadow-2xl z-[10001] overflow-hidden"
         style={{ 
           right: rightOffset,
           maxHeight: 'calc(100vh - 2rem)',
@@ -622,8 +622,8 @@ export default function IVRDialerModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between p-2 border-b border-gray-200 bg-gradient-to-r from-blue-500 to-blue-600">
+        {/* Header - flex-shrink-0 so it never shrinks */}
+        <div className="flex items-center justify-between p-2 border-b border-gray-200 bg-gradient-to-r from-blue-500 to-blue-600 flex-shrink-0">
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-semibold text-white">
               {mode === 'dial' ? 'Phone Dialer' : 'IVR Dialer'}
@@ -662,11 +662,11 @@ export default function IVRDialerModal({
           </div>
         </div>
 
-        {/* Body - Reorganized Layout */}
-        <div className="flex flex-col" style={{ maxHeight: 'calc(100vh - 14rem)' }}>
+        {/* Body - flex-1 min-h-0 so it shrinks on small viewports and scrolls */}
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           {/* Call Status Display - Show when call is active */}
           {(isCalling || isConnected || callStatus) && (
-            <div className="p-2 bg-blue-50 border-b border-blue-200">
+            <div className="p-2 bg-blue-50 border-b border-blue-200 flex-shrink-0">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   {callStatus === 'in-progress' && (
@@ -737,7 +737,7 @@ export default function IVRDialerModal({
           )}
 
           {/* First Row - Phone Number Input (when not in call) or DTMF Digits (when in call) */}
-          <div className="p-1.5 border-b border-gray-200">
+          <div className="p-1.5 border-b border-gray-200 flex-shrink-0">
             {/* Show phone number input when call is NOT active */}
             {!(isConnected || callStatus === 'in-progress' || isCalling || isConnecting) && mode === 'dial' && (
               <>
@@ -815,10 +815,10 @@ export default function IVRDialerModal({
             )}
           </div>
 
-          {/* Second Row - Keypad and Helplines Side by Side */}
-          <div className="flex flex-col flex-1" style={{ maxHeight: 'calc(100vh - 24rem)' }}>
+          {/* Second Row - Keypad and Helplines Side by Side - flex-1 min-h-0 so it shrinks and scrolls on small viewports */}
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
             {/* Toggle Button for Options Panel */}
-            <div className="p-1.5 border-b border-gray-200 bg-gray-50 flex justify-center items-center gap-2">
+            <div className="p-1.5 border-b border-gray-200 bg-gray-50 flex justify-center items-center gap-2 flex-shrink-0">
               <button
                 onClick={() => {
                   const newState = !showSavedList;
@@ -871,10 +871,10 @@ export default function IVRDialerModal({
               )}
             </div>
             
-            <div className="flex flex-1" style={{ maxHeight: 'calc(100vh - 29rem)' }}>
-              {/* Keypad Panel - Only show when saved list is hidden */}
+            <div className="flex flex-1 min-h-0 overflow-hidden">
+              {/* Keypad Panel - Only show when saved list is hidden - scrollable on small viewports */}
               {!showSavedList && (
-              <div className="p-1.5 flex flex-col w-full" style={{ minHeight: '260px' }}>
+              <div className="p-1.5 flex flex-col w-full min-h-0 overflow-y-auto flex-1">
               {/* Phone Number Display - DIAL MODE */}
               {mode === 'dial' && (
                 <>
@@ -1008,7 +1008,7 @@ export default function IVRDialerModal({
 
             {/* Right Panel - Saved Helplines or Call History - Only show when saved list is visible */}
             {showSavedList && (
-              <div className="w-full flex flex-col" style={{ height: '260px' }}>
+              <div className="w-full flex flex-col flex-1 min-h-0 overflow-hidden">
                 {/* Show Add New Helpline Section only when viewing helplines */}
                 {rightPanelView === 'helplines' && (
                 <div className="p-2 border-b border-gray-200 bg-gray-50 flex-shrink-0">

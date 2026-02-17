@@ -346,8 +346,8 @@ export default function UserDetailsModal({ user, onClose }) {
   if (!user) return null;
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.5)' }}>
+      <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[min(90vh,calc(100vh-2rem))] flex flex-col my-auto">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
           <div>

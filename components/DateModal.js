@@ -44,8 +44,8 @@ export default function DateModal({ title, onClose, onDateSelect, showTime = fal
   };
 
   return (
-    <div className="fixed inset-0 bg-black flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+    <div className="fixed inset-0 bg-black flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.5)' }}>
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 my-4 max-h-[calc(100vh-2rem)] overflow-y-auto flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">{title}</h3>

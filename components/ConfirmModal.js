@@ -26,12 +26,12 @@ export default function ConfirmModal({
 
   return (
     <div 
-      className="fixed inset-0 flex items-center justify-center z-[10002] p-4" 
+      className="fixed inset-0 flex items-center justify-center z-[10002] p-4 overflow-y-auto" 
       style={{ background: 'rgba(0,0,0,0.5)' }}
       onClick={handleCancel}
     >
       <div 
-        className="bg-white rounded-lg shadow-xl max-w-md w-full"
+        className="bg-white rounded-lg shadow-xl max-w-md w-full my-auto max-h-[calc(100vh-2rem)] overflow-y-auto flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
