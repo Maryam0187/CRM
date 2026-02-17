@@ -2426,76 +2426,101 @@ Room: `;
     }
   };
 
-  // Handle "Not a Customer" action - update customer status without creating sale
+  // Handle "Not a Customer" action - add customer if not exists, update if already added
   const handleNotACustomer = async () => {
     setSaving(true);
     setError(null);
-    
-    // Validate customer fields before proceeding
+
     if (!validateAllCustomerFields()) {
       setError('Please fix the validation errors before proceeding');
       setSaving(false);
       return;
     }
-    
+
+    if (!customer.firstName || customer.firstName.trim() === '') {
+      setError('Please enter customer name to mark as non-prospect');
+      setSaving(false);
+      return;
+    }
+
+    const customerData = {
+      firstName: customer.firstName.trim(),
+      lastName: null,
+      email: null,
+      phone: customer.phone,
+      landline: customer.landline,
+      address: customer.address,
+      state: customer.state,
+      city: customer.city,
+      country: 'USA',
+      mailingAddress: customer.mailingAddress,
+      customerFeedback: customer.customerFeedback,
+      status: 'non_prospect'
+    };
+
     try {
-      // Check if customer exists
-      if (customer.firstName && customer.firstName.trim() !== '') {
-        // Create or update customer with "not_customer" status
-        const customerData = {
-          firstName: customer.firstName.trim(),
-          lastName: null,
-          email: null,
-          phone: customer.phone,
-          landline: customer.landline,
-          address: customer.address,
-          state: customer.state,
-          city: customer.city,
-          country: 'USA',
-          mailingAddress: customer.mailingAddress,
-          customerFeedback: customer.customerFeedback,
-          status: 'non_prospect' // Special status for non-prospect
-        };
-        
-        const customerResponse = await apiClient.post('/api/customers', customerData);
-        const customerResult = await customerResponse.json();
-        
-        if (!customerResult.success) {
-          
-          // Handle specific error cases based on error type
-          if (customerResult.error === 'DUPLICATE_CUSTOMER') {
-            setError('A customer with this name and landline number already exists. Please use a different name or landline number.');
-          } else if (customerResult.error === 'VALIDATION_ERROR') {
-            setError(customerResult.message || 'Please check the customer information and try again.');
-          } else if (customerResult.message && customerResult.message.includes('already exists')) {
-            setError('This customer already exists in the system. Please check the customer list or use a different name.');
-          } else if (customerResult.message && customerResult.message.includes('duplicate')) {
-            setError('A customer with this information already exists. Please verify the customer details.');
-          } else {
-            setError(customerResult.message || 'Failed to create customer record. Please try again.');
-          }
+      let customerId = null;
+
+      // 1) If we already have a customer id (e.g. from "Check Customer" exact match), update that customer
+      if (customer.id) {
+        customerId = customer.id;
+        const updateRes = await apiClient.put(`/api/customers/${customerId}`, { status: 'non_prospect' });
+        const updateResult = await updateRes.json();
+        if (!updateResult.success) {
+          setError(updateResult.message || 'Failed to update customer status.');
           return;
         }
-        
-        const customerId = customerResult.data.id;
-        
-        // Log the "not a customer" event in sales_logs (without a sale)
-        await apiClient.post('/api/sales-logs', {
-          saleId: null, // No sale for non-prospect customers
-          customerId: customerId,
-          agentId: user?.id,
-          action: 'customer_marked_non_prospect',
-          status: 'non_prospect',
-          note: `Customer marked as non-prospect (not a customer). No sale created.`,
-          spokeTo: customer.firstName || null,
-          appointment_datetime: null
-        });
-        
-        // Redirect to dashboard
-        router.push('/');
       } else {
-        setError('Please enter customer name to mark as non-prospect');
+        // 2) Check if customer exists by number + name (landline or phone)
+        const numberToCheck = customer.landline || customer.phone;
+        if (numberToCheck) {
+          const checkRes = await apiClient.post('/api/customers/check-existing', {
+            landline: numberToCheck,
+            firstName: customer.firstName.trim()
+          });
+          const checkResult = await checkRes.json();
+          if (checkResult.success && checkResult.hasExactMatch && checkResult.exactMatchCustomer) {
+            customerId = checkResult.exactMatchCustomer.id;
+            const updateRes = await apiClient.put(`/api/customers/${customerId}`, { status: 'non_prospect' });
+            const updateResult = await updateRes.json();
+            if (!updateResult.success) {
+              setError(updateResult.message || 'Failed to update customer status.');
+              return;
+            }
+          }
+        }
+
+        // 3) If no existing customer, create new one
+        if (!customerId) {
+          const createRes = await apiClient.post('/api/customers', customerData);
+          const createResult = await createRes.json();
+          if (!createResult.success) {
+            if (createResult.error === 'DUPLICATE_CUSTOMER') {
+              setError('A customer with this name and number already exists. Please use a different name or number.');
+            } else if (createResult.error === 'VALIDATION_ERROR') {
+              setError(createResult.message || 'Please check the customer information and try again.');
+            } else {
+              setError(createResult.message || 'Failed to create customer record. Please try again.');
+            }
+            return;
+          }
+          customerId = createResult.data.id;
+        }
       }
+
+      // Log the "not a customer" event in sales_logs (without a sale)
+      await apiClient.post('/api/sales-logs', {
+        saleId: null,
+        customerId: customerId,
+        agentId: user?.id,
+        action: 'customer_marked_non_prospect',
+        status: 'non_prospect',
+        note: `Customer marked as non-prospect (not a customer). No sale created.`,
+        spokeTo: customer.firstName || null,
+        appointment_datetime: null
+      });
+
+      router.push('/');
     } catch (error) {
       setError(error.message || 'Failed to mark customer as non-prospect. Please try again.');
     } finally {

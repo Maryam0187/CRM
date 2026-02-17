@@ -14,21 +14,19 @@ export async function POST(request) {
       );
     }
 
-    const { landline, firstName } = await request.json();
-    
-    if (!landline || !firstName) {
+    const { landline, phone, firstName } = await request.json();
+    const landlineOrPhone = landline || phone;
+
+    if (!landlineOrPhone || !firstName) {
       return Response.json(
-        { success: false, message: 'Landline and first name are required' },
+        { success: false, message: 'Landline or phone and first name are required' },
         { status: 400 }
       );
     }
-    
-    // IMPORTANT: Normalize the landline before querying (same as create endpoint)
-    // This ensures we match customers even if the format is different (+1-234-567-8901 vs 2345678901)
-    const normalizedLandline = normalizePhoneForStorage(landline) || landline;
-    
-    // Always get all customers with this landline (using normalized format)
-    const landlineCustomers = await CustomerService.findAllByLandline(normalizedLandline);
+
+    // Search by landline OR phone so we find customer whether number was entered in either field
+    const normalized = normalizePhoneForStorage(landlineOrPhone) || landlineOrPhone;
+    const landlineCustomers = await CustomerService.findAllByLandlineOrPhone(normalized);
     
     if (landlineCustomers && landlineCustomers.length > 0) {
       // Check if there's an exact match (same name and landline)
