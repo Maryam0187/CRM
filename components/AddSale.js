@@ -141,6 +141,7 @@ export default function AddSale() {
   const [showCustomerInfoModal, setShowCustomerInfoModal] = useState(false); // Show customer info popup
   const [lastSaleInfo, setLastSaleInfo] = useState(null); // Store last sale information
   const [isCheckNumberMode, setIsCheckNumberMode] = useState(false); // Track if in check number mode
+  const [hideCheckNumberSection, setHideCheckNumberSection] = useState(false); // Hide Check Number block after call button is clicked
   const [callJustEnded, setCallJustEnded] = useState(false); // Track if call just ended to highlight action buttons
   const [sale, setSale] = useState(null); // Store full sale data including cards/banks for tag checking
   
@@ -779,6 +780,7 @@ export default function AddSale() {
     // Reset checked customer and last sale info
     setCheckedCustomer(null);
     setLastSaleInfo(null);
+    setHideCheckNumberSection(false); // Show Check Number again when call completes
     // Note: callJustEnded is now set automatically based on callStatus from CallContext
   };
 
@@ -791,6 +793,8 @@ export default function AddSale() {
     setShowCallInfo(false);
     // Close customer info popup after call is initiated
     setShowCustomerInfoModal(false);
+    // Hide Check Number section when call button is clicked after number was checked
+    setHideCheckNumberSection(true);
     // Don't reset checked customer - keep it for status updates
   };
 
@@ -923,6 +927,7 @@ export default function AddSale() {
     setCheckedCustomer(null);
     setShowCustomerInfoModal(false);
     setLastSaleInfo(null);
+    setHideCheckNumberSection(false);
 
     try {
       // Check if customer already exists with this landline
@@ -4005,15 +4010,18 @@ Room: `;
                     {isEditMode && (
                       <span className="text-gray-500 text-xs ml-2">(Read-only in edit mode)</span>
                     )}
+                    {!isEditMode && hideCheckNumberSection && (
+                      <span className="text-gray-500 text-xs ml-2">(Read-only - called)</span>
+                    )}
                   </label>
                   <input
                     type="tel"
                     id="landline"
                     value={customer.landline}
                     onChange={(e) => handleCustomerChange('landline', e.target.value)}
-                    disabled={isEditMode}
+                    disabled={isEditMode || hideCheckNumberSection}
                     className={`border text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 ${
-                      isEditMode 
+                      isEditMode || hideCheckNumberSection
                         ? 'bg-gray-100 border-gray-300 cursor-not-allowed' 
                         : customerValidation.landline.isValid 
                           ? 'bg-gray-50 border-gray-300' 
@@ -4025,8 +4033,8 @@ Room: `;
                     <p className="mt-1 text-sm text-red-600">{customerValidation.landline.message}</p>
                   )}
                   
-                  {/* Check Number Button - Show when not in edit mode */}
-                  {!isEditMode && (
+                  {/* Check Number Button - Show when not in edit mode and not hidden after call */}
+                  {!isEditMode && !hideCheckNumberSection && (
                     <div className="mt-2">
                       <button
                         type="button"
