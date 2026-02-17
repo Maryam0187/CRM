@@ -19,7 +19,7 @@ export const useSocket = () => {
 };
 
 export const SocketProvider = ({ children }) => {
-  const { user, accessToken, logout } = useAuth();
+  const { user, accessToken, logout, refreshAccessToken } = useAuth();
   const router = useRouter();
   const { showWarning, showError } = useToast();
   const dispatch = useAppDispatch();
@@ -36,6 +36,8 @@ export const SocketProvider = ({ children }) => {
   const maxReconnectAttempts = 5;
   const reconnectDelay = 3000;
   const socketInitializedRef = useRef(false);
+  const backgroundRetryIntervalRef = useRef(null);
+  const [reconnectTrigger, setReconnectTrigger] = useState(0);
   // Track last dispatched status updates to prevent duplicates
   const lastDispatchedStatusRef = useRef(new Map());
 
@@ -63,9 +65,12 @@ export const SocketProvider = ({ children }) => {
       return;
     }
 
-    // Prevent re-initialization if we're already in the process of initializing
-    if (socketInitializedRef.current && socket) {
-      return;
+    // If socket exists but is disconnected (e.g. after token refresh or auth error), clean up so we can create a new one with current token
+    if (socket) {
+      socket.removeAllListeners();
+      socket.disconnect();
+      setSocket(null);
+      socketInitializedRef.current = false;
     }
 
     socketInitializedRef.current = true;
@@ -150,11 +155,27 @@ export const SocketProvider = ({ children }) => {
       }
     });
 
-    socketInstance.on('connect_error', (error) => {
+    socketInstance.on('connect_error', async (error) => {
       console.error('❌ Socket.IO connection error:', error);
       setIsConnected(false);
       setConnectionStatus('error');
-      
+
+      const msg = error?.message || '';
+      const isAuthError = msg.includes('Authentication') || msg.includes('Token expired') || msg.includes('Invalid token') || msg.includes('Token verification');
+
+      if (isAuthError && user) {
+        try {
+          console.log('🔄 Socket auth error – refreshing access token...');
+          await refreshAccessToken();
+          setConnectionStatus('reconnecting');
+          // AuthContext updated accessToken; effect will re-run and create a new socket with the new token
+          return;
+        } catch (e) {
+          console.warn('Socket token refresh failed:', e);
+          return;
+        }
+      }
+
       if (user) {
         attemptReconnect();
       }
@@ -416,7 +437,7 @@ export const SocketProvider = ({ children }) => {
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, [user, accessToken]);
+  }, [user, accessToken, reconnectTrigger]);
 
   // Handle authentication state changes
   useEffect(() => {
@@ -437,7 +458,7 @@ export const SocketProvider = ({ children }) => {
   // Reconnection logic
   const attemptReconnect = () => {
     if (reconnectAttempts.current >= maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
+      console.warn('Max reconnection attempts reached; will retry in background while user is active');
       setConnectionStatus('failed');
       return;
     }
@@ -449,9 +470,36 @@ export const SocketProvider = ({ children }) => {
     reconnectTimeoutRef.current = setTimeout(() => {
       if (socket) {
         socket.connect();
+      } else {
+        setReconnectTrigger((t) => t + 1);
       }
-    }, reconnectDelay * reconnectAttempts.current);
+    }, Math.min(reconnectDelay * reconnectAttempts.current, 15000));
   };
+
+  // While user is active and socket is failed/disconnected, keep trying to reconnect (e.g. every 30s)
+  useEffect(() => {
+    if (!user || !accessToken) return;
+    if (connectionStatus !== 'failed') {
+      if (backgroundRetryIntervalRef.current) {
+        clearInterval(backgroundRetryIntervalRef.current);
+        backgroundRetryIntervalRef.current = null;
+      }
+      return;
+    }
+    const interval = setInterval(() => {
+      console.log('🔄 Background retry: reconnecting socket while user is active...');
+      reconnectAttempts.current = 0;
+      setConnectionStatus('reconnecting');
+      setReconnectTrigger((t) => t + 1);
+    }, 30000);
+    backgroundRetryIntervalRef.current = interval;
+    return () => {
+      if (backgroundRetryIntervalRef.current) {
+        clearInterval(backgroundRetryIntervalRef.current);
+        backgroundRetryIntervalRef.current = null;
+      }
+    };
+  }, [user, accessToken, connectionStatus]);
 
   // Manual reconnection
   const reconnect = () => {
