@@ -74,10 +74,29 @@ export default function SignIn() {
         permissionStatus = await checkGeolocationPermission();
         console.log('📍 Location permission status:', permissionStatus);
         
-        // Location is required - try to get it
+        // Location is required - try to get it (with fallback if timeout)
         if (permissionStatus === 'granted' || permissionStatus === 'prompt') {
           try {
-            location = await getUserLocation({ timeout: 10000, enableHighAccuracy: true });
+            // Prefer high accuracy; accept cached location up to 1 min old for faster login
+            try {
+              location = await getUserLocation({
+                timeout: 20000,
+                maximumAge: 60000,
+                enableHighAccuracy: true
+              });
+            } catch (firstError) {
+              // If timeout or unavailable, retry with lower accuracy (faster: uses network/cell/wifi)
+              if (firstError.message?.includes('timeout') || firstError.message?.includes('unavailable')) {
+                console.warn('📍 High-accuracy location failed, retrying with network location...');
+                location = await getUserLocation({
+                  timeout: 15000,
+                  maximumAge: 120000,
+                  enableHighAccuracy: false
+                });
+              } else {
+                throw firstError;
+              }
+            }
             console.log('📍 Location retrieved successfully:', {
               latitude: location.latitude,
               longitude: location.longitude,
@@ -89,41 +108,32 @@ export default function SignIn() {
             }
           } catch (locationError) {
             console.error('❌ Could not get location:', locationError.message);
-            // If permission is denied, update status
+            // User explicitly denied (e.g. clicked "Block" on browser prompt) → block login
             if (locationError.message.includes('denied')) {
               permissionStatus = 'denied';
+              setErrors({
+                submit: 'Location access is required to login. Please enable location in your browser settings and try again.'
+              });
+              setIsLoading(false);
+              return;
             }
-            // Location is REQUIRED - block login
-            setErrors({ 
-              submit: 'Location access is required to login. Please enable location services and grant permission.' 
-            });
-            setIsLoading(false);
-            return;
+            // Timeout, unavailable, or other technical/network issue → allow login without location
+            location = null;
           }
         } else if (permissionStatus === 'denied') {
-          console.error('📍 Location permission denied by user');
-          setErrors({ 
-            submit: 'Location access is required to login. Please enable location services in your browser settings and try again.' 
-          });
-          setIsLoading(false);
-          return;
-        }
-        
-        // Final check: location is required
-        if (!location || !location.latitude || !location.longitude) {
-          setErrors({ 
-            submit: 'Unable to get your location. Please ensure location services are enabled and try again.' 
+          // User had previously denied location → block login
+          console.warn('📍 Location permission denied by user.');
+          setErrors({
+            submit: 'Location access is required to login. Please enable location services in your browser settings and try again.'
           });
           setIsLoading(false);
           return;
         }
       } catch (permissionError) {
+        // Permission check failed (network/API/unsupported) → allow login without location
         console.error('❌ Could not check location permission:', permissionError.message);
-        setErrors({ 
-          submit: 'Location access is required to login. Please enable location services and try again.' 
-        });
-        setIsLoading(false);
-        return;
+        location = null;
+        permissionStatus = 'unknown';
       }
 
       const response = await fetch('/api/auth/signin', {
