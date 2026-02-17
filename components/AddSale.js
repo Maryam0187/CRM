@@ -3100,6 +3100,13 @@ Room: `;
               >
                 🚫 Not a Customer
               </button>
+              <button
+                onClick={isEditMode ? handleNonProspect : handleNotACustomer}
+                disabled={saving || loading}
+                className="bg-amber-500 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-amber-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                📵 Disconnect #
+              </button>
               </div>
             </div>
           )}
