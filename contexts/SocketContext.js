@@ -160,25 +160,19 @@ export const SocketProvider = ({ children }) => {
       setIsConnected(false);
       setConnectionStatus('error');
 
-      const msg = error?.message || '';
-      const isAuthError = msg.includes('Authentication') || msg.includes('Token expired') || msg.includes('Invalid token') || msg.includes('Token verification');
+      if (!user) return;
 
-      if (isAuthError && user) {
-        try {
-          console.log('🔄 Socket auth error – refreshing access token...');
-          await refreshAccessToken();
-          setConnectionStatus('reconnecting');
-          // AuthContext updated accessToken; effect will re-run and create a new socket with the new token
-          return;
-        } catch (e) {
-          console.warn('Socket token refresh failed:', e);
-          return;
-        }
+      // Try refresh on first failure so we don't burn reconnects with an expired token
+      try {
+        console.log('🔄 Socket connect error – refreshing access token...');
+        await refreshAccessToken();
+        setConnectionStatus('reconnecting');
+        return;
+      } catch (e) {
+        console.warn('Socket token refresh failed, will retry with current token:', e);
       }
 
-      if (user) {
-        attemptReconnect();
-      }
+      attemptReconnect();
     });
 
     // Notification handlers
