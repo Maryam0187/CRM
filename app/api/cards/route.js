@@ -55,27 +55,27 @@ export async function POST(request) {
 
     const card = await Card.create(cleanedCardData);
     
-    // Update sale status to payment_info when card is created
+    // Add payment-info tag to sale when card is created (status enum no longer has payment_info)
     if (card.saleId) {
-      await Sale.update(
-        { status: 'payment_info' },
-        { where: { id: card.saleId } }
-      );
-      
-      // Get the sale to retrieve customerId
       const sale = await Sale.findByPk(card.saleId);
-      
-      // Log the status change in sales logs
-      await SalesLog.create({
-        saleId: card.saleId,
-        customerId: sale.customerId,
-        agentId: user.id,
-        action: 'payment_info_added',
-        status: 'payment_info',
-        note: 'Payment information added via card',
-        cardId: card.id,
-        timestamp: new Date()
-      });
+      if (sale) {
+        const tags = Array.isArray(sale.tags) ? [...sale.tags] : [];
+        if (!tags.includes('payment-info')) {
+          tags.push('payment-info');
+          await Sale.update({ tags }, { where: { id: card.saleId } });
+        }
+        // Log the payment info addition in sales logs
+        await SalesLog.create({
+          saleId: card.saleId,
+          customerId: sale.customerId,
+          agentId: user.id,
+          action: 'payment_info_added',
+          status: sale.status || 'active',
+          note: 'Payment information added via card',
+          cardId: card.id,
+          timestamp: new Date()
+        });
+      }
     }
     
     return Response.json({
