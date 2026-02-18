@@ -1,5 +1,6 @@
-import { ChequeMail, Sale, SalesLog } from '../../../models/index.js';
+import { ChequeMail } from '../../../models/index.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth.js';
+import { addPaymentInfoTagToSale } from '../../../lib/sale-payment-tag.js';
 
 export async function POST(request) {
   try {
@@ -30,23 +31,9 @@ export async function POST(request) {
     }
 
     const cheque = await ChequeMail.create(chequeData);
-    
     if (cheque.saleId) {
-      await Sale.update(
-        { status: 'payment_info' },
-        { where: { id: cheque.saleId } }
-      );
-      
-      const sale = await Sale.findByPk(cheque.saleId);
-      
-      await SalesLog.create({
-        saleId: cheque.saleId,
-        customerId: sale.customerId,
-        agentId: user?.id || 1,
-        action: 'payment_info_added',
-        status: 'payment_info',
-        note: 'Payment information added via cheque to mail',
-        timestamp: new Date()
+      await addPaymentInfoTagToSale(cheque.saleId, user?.id || 1, {
+        note: 'Payment information added via cheque to mail'
       });
     }
     

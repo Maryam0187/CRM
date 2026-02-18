@@ -1,9 +1,7 @@
-import { Bank, Sale, SalesLog } from '../../../models/index.js';
-import { 
-  validateBankForm, 
-  cleanBankData 
-} from '../../../lib/validation.js';
+import { Bank } from '../../../models/index.js';
+import { validateBankForm, cleanBankData } from '../../../lib/validation.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth.js';
+import { addPaymentInfoTagToSale } from '../../../lib/sale-payment-tag.js';
 export async function POST(request) {
   try {
     
@@ -52,27 +50,10 @@ export async function POST(request) {
     const cleanedBankData = cleanBankData(bankData);
 
     const bank = await Bank.create(cleanedBankData);
-    
-    // Update sale status to payment_info when bank is created
     if (bank.saleId) {
-      await Sale.update(
-        { status: 'payment_info' },
-        { where: { id: bank.saleId } }
-      );
-      
-      // Get the sale to retrieve customerId
-      const sale = await Sale.findByPk(bank.saleId);
-      
-      // Log the status change in sales logs
-      await SalesLog.create({
-        saleId: bank.saleId,
-        customerId: sale.customerId,
-        agentId: user?.id || 1, // Use user ID from request or default to 1
-        action: 'payment_info_added',
-        status: 'payment_info',
+      await addPaymentInfoTagToSale(bank.saleId, user?.id || 1, {
         note: 'Payment information added via bank',
-        bankId: bank.id,
-        timestamp: new Date()
+        bankId: bank.id
       });
     }
     

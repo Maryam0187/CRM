@@ -1,5 +1,6 @@
-import { PaymentEmail, Sale, SalesLog } from '../../../models/index.js';
+import { PaymentEmail } from '../../../models/index.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth.js';
+import { addPaymentInfoTagToSale } from '../../../lib/sale-payment-tag.js';
 
 export async function POST(request) {
   try {
@@ -30,23 +31,9 @@ export async function POST(request) {
     }
 
     const paymentEmail = await PaymentEmail.create(emailData);
-    
     if (paymentEmail.saleId) {
-      await Sale.update(
-        { status: 'payment_info' },
-        { where: { id: paymentEmail.saleId } }
-      );
-      
-      const sale = await Sale.findByPk(paymentEmail.saleId);
-      
-      await SalesLog.create({
-        saleId: paymentEmail.saleId,
-        customerId: sale.customerId,
-        agentId: user?.id || 1,
-        action: 'payment_info_added',
-        status: 'payment_info',
-        note: 'Payment information added via email',
-        timestamp: new Date()
+      await addPaymentInfoTagToSale(paymentEmail.saleId, user?.id || 1, {
+        note: 'Payment information added via email'
       });
     }
     

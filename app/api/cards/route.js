@@ -1,11 +1,12 @@
-import { Card, Sale, SalesLog } from '../../../models/index.js';
-import { 
-  validateCardForm, 
+import { Card } from '../../../models/index.js';
+import {
+  validateCardForm,
   cleanCardData,
   getCardExpirationStatus,
   formatDisplayDate
 } from '../../../lib/validation.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth.js';
+import { addPaymentInfoTagToSale } from '../../../lib/sale-payment-tag.js';
 export async function POST(request) {
   try {
     
@@ -54,28 +55,11 @@ export async function POST(request) {
     const cleanedCardData = cleanCardData(cardData);
 
     const card = await Card.create(cleanedCardData);
-    
-    // Add payment-info tag to sale when card is created (status enum no longer has payment_info)
     if (card.saleId) {
-      const sale = await Sale.findByPk(card.saleId);
-      if (sale) {
-        const tags = Array.isArray(sale.tags) ? [...sale.tags] : [];
-        if (!tags.includes('payment-info')) {
-          tags.push('payment-info');
-          await Sale.update({ tags }, { where: { id: card.saleId } });
-        }
-        // Log the payment info addition in sales logs
-        await SalesLog.create({
-          saleId: card.saleId,
-          customerId: sale.customerId,
-          agentId: user.id,
-          action: 'payment_info_added',
-          status: sale.status || 'active',
-          note: 'Payment information added via card',
-          cardId: card.id,
-          timestamp: new Date()
-        });
-      }
+      await addPaymentInfoTagToSale(card.saleId, user.id, {
+        note: 'Payment information added via card',
+        cardId: card.id
+      });
     }
     
     return Response.json({
