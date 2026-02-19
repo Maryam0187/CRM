@@ -19,6 +19,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
     phone: '',
     cnic: '',
     address: '',
+    additional_info: '',
     superiorId: ''
   });
   
@@ -50,6 +51,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
         phone: user.phone ? formatPhone(user.phone) : '',
         cnic: user.cnic ? formatCNIC(user.cnic) : '',
         address: user.address || '',
+        additional_info: user.additional_info || '',
         superiorId: user.superiorId || ''
       });
       
@@ -78,6 +80,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
         phone: '',
         cnic: '',
         address: '',
+        additional_info: '',
         superiorId: '',
         extension: '',
         sip_username: '',
@@ -100,6 +103,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
         phone: '',
         cnic: '',
         address: '',
+        additional_info: '',
         superiorId: '',
         extension: '',
         sip_username: '',
@@ -347,7 +351,8 @@ export default function UserForm({ user, onClose, onSuccess }) {
         email: formData.email,
         phone: formData.phone ? formData.phone.replace(/\D/g, '') : '',
         cnic: formData.cnic ? formData.cnic.replace(/\D/g, '') : '',
-        address: formData.address
+        address: formData.address,
+        additional_info: formData.additional_info ? formData.additional_info.trim() : ''
       };
 
       // Only include role if not editing an admin user
@@ -374,6 +379,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
       const data = await response.json();
       
       if (data.success) {
+        showSuccess(isEditMode ? 'User updated successfully' : 'User created successfully');
         onSuccess();
       } else {
         setError(data.error || `Failed to ${isEditMode ? 'update' : 'create'} user`);
@@ -511,6 +517,22 @@ export default function UserForm({ user, onClose, onSuccess }) {
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-vertical"
                 placeholder="Enter Address"
+              />
+            </div>
+
+            {/* Additional Info */}
+            <div className="md:col-span-2">
+              <label htmlFor="additional_info" className="block mb-2 text-sm font-medium text-gray-900">
+                Additional Info
+              </label>
+              <textarea
+                id="additional_info"
+                name="additional_info"
+                value={formData.additional_info}
+                onChange={handleInputChange}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-vertical"
+                placeholder="Enter any additional information for this user"
               />
             </div>
 

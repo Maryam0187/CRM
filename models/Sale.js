@@ -204,6 +204,12 @@ module.exports = (sequelize) => {
       allowNull: true,
       defaultValue: [],
       comment: 'Tags for active sales (e.g., verification, process)'
+    },
+    processingRequired: {
+      type: DataTypes.BOOLEAN,
+      allowNull: true,
+      field: 'processing_required',
+      comment: 'Whether processing is required: null (unknown), true, or false'
     }
   }, {
     tableName: 'sales',

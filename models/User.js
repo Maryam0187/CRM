@@ -170,6 +170,12 @@ module.exports = (sequelize) => {
       defaultValue: true,
       field: 'twilio_enabled',
       comment: 'Enable/disable Twilio calling functionality for user'
+    },
+    additionalInfo: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: 'additional_info',
+      comment: 'Additional information for the user'
     }
   }, {
     tableName: 'users',

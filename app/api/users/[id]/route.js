@@ -18,7 +18,7 @@ export async function GET(request, { params }) {
     const userId = (await params).id;
 
     const user = await User.findByPk(userId, {
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'status', 'lastLoginTime', 'lastLogoutTime', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'twilioEnabled', 'created_at', 'updated_at'],
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'additionalInfo', 'status', 'lastLoginTime', 'lastLogoutTime', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'twilioEnabled', 'created_at', 'updated_at'],
       include: [
         {
           model: require('../../../../models').SupervisorAgent,
@@ -68,6 +68,7 @@ export async function GET(request, { params }) {
         location_permission: user.locationPermission,
         call_status: user.callStatus || 'offline',
         twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
+      additional_info: user.additionalInfo ?? null,
       superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
       supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
       created_at: user.created_at,
@@ -110,6 +111,7 @@ export async function PUT(request, { params }) {
       phone,
       cnic,
       address,
+      additional_info,
       superiorId,
       twilio_enabled
     } = await request.json();
@@ -212,6 +214,10 @@ export async function PUT(request, { params }) {
       updateData.address = address === '' ? null : address;
     }
 
+    // Handle optional additional_info field - convert empty string to null
+    if (additional_info !== undefined) {
+      updateData.additionalInfo = additional_info === '' || !additional_info.trim() ? null : additional_info.trim();
+    }
 
     try {
       await user.update(updateData);
@@ -269,6 +275,7 @@ export async function PUT(request, { params }) {
       cnic: user.cnic,
       phone: user.phone,
       address: user.address,
+      additional_info: user.additionalInfo ?? null,
       call_status: user.callStatus || 'offline',
       twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
       created_at: user.created_at,

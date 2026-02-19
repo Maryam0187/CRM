@@ -11,7 +11,7 @@ import AppointmentSummary from './AppointmentSummary';
 import { useAuth } from '../contexts/AuthContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
 import apiClient from '../lib/apiClient';
-import { SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName, getTagDisplayName, getTagBadgeClasses, SALE_TAGS } from '../lib/salesStatuses';
+import { SALES_STATUSES, SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName, getTagDisplayName, getTagBadgeClasses, SALE_TAGS, DISPLAY_TAGS, hasTag } from '../lib/salesStatuses';
 import { downloadSaleDoc, buildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
 
 export default function Home() {
@@ -489,7 +489,19 @@ export default function Home() {
       render: (tags, row) => {
         // Get tags from sale
         const saleTags = Array.isArray(tags) ? tags : (tags ? [tags] : []);
-        
+        const displayTags = [...saleTags];
+
+        // When status is active and sale does NOT have verification tag, show "Verification required"
+        if (row.status === SALES_STATUSES.ACTIVE && !hasTag(saleTags, SALE_TAGS.VERIFICATION) && !displayTags.includes(DISPLAY_TAGS.VERIFICATION_REQUIRED)) {
+          displayTags.push(DISPLAY_TAGS.VERIFICATION_REQUIRED);
+        }
+
+        // When processing required is true (hide when null/false) and sale does NOT have process tag, show "Processing required"
+        const processingRequired = row.processingRequired ?? row.processing_required ?? null;
+        if (processingRequired === true && !hasTag(saleTags, SALE_TAGS.PROCESS) && !displayTags.includes(DISPLAY_TAGS.PROCESSING_REQUIRED)) {
+          displayTags.push(DISPLAY_TAGS.PROCESSING_REQUIRED);
+        }
+
         // Check if sale has cards or banks or other payment methods
         const hasCards = row.cards && Array.isArray(row.cards) && row.cards.length > 0;
         const hasBanks = row.banks && Array.isArray(row.banks) && row.banks.length > 0;
@@ -497,17 +509,16 @@ export default function Home() {
         const hasChequesMail = row.chequesMail && Array.isArray(row.chequesMail) && row.chequesMail.length > 0;
         const hasPaymentEmails = row.paymentEmails && Array.isArray(row.paymentEmails) && row.paymentEmails.length > 0;
         const hasPayments = hasCards || hasBanks || hasChequesElectronic || hasChequesMail || hasPaymentEmails;
-        
+
         // Automatically include payment-info tag if payments exist
-        const displayTags = [...saleTags];
         if (hasPayments && !displayTags.includes(SALE_TAGS.PAYMENT_INFO)) {
           displayTags.push(SALE_TAGS.PAYMENT_INFO);
         }
-        
+
         if (displayTags.length === 0) {
           return <span className="text-gray-400 text-sm">No tags</span>;
         }
-        
+
         return (
           <div className="flex flex-wrap gap-1">
             {displayTags.map((tag, index) => (

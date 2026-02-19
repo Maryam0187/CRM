@@ -905,6 +905,15 @@ export default function UserDetailsModal({ user, onClose }) {
                     </div>
                   </div>
 
+                  {(user.additional_info || (displayedUser && displayedUser.additional_info)) && (
+                    <div className="mt-4 border-t border-gray-200 pt-4">
+                      <p className="text-sm text-gray-500 mb-1">Additional Info</p>
+                      <p className="font-medium text-gray-900 whitespace-pre-wrap bg-gray-50 p-3 rounded-lg">
+                        {user.additional_info || (displayedUser && displayedUser.additional_info) || '—'}
+                      </p>
+                    </div>
+                  )}
+
                   {/* Location Information */}
                   {user.latitude && user.longitude && (
                     <div className="mt-6 border-t border-gray-200 pt-4">

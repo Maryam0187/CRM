@@ -30,7 +30,7 @@ import {
   validateCurrency 
 } from '../lib/validation.js';
 import { useToast } from '../contexts/ToastContext';
-import { SALES_STATUSES, SALE_TAGS, getStepForStatus, getStatusDisplayName, getStatusColorClass, getStatusBadgeClasses, hasTag, addTag, toggleTag, getTagDisplayName, getTagBadgeClasses } from '../lib/salesStatuses.js';
+import { SALES_STATUSES, SALE_TAGS, DISPLAY_TAGS, getStepForStatus, getStatusDisplayName, getStatusColorClass, getStatusBadgeClasses, hasTag, toggleTag, getTagDisplayName, getTagBadgeClasses } from '../lib/salesStatuses.js';
 import { downloadSaleDoc, escapeHtml as docEscapeHtml, buildTableRows as docBuildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
 
 // Helper function to calculate time ago
@@ -325,7 +325,8 @@ export default function AddSale() {
     appointmentDateTime: '',
     services: [],
     receivers: {},
-    receiversInfo: {}
+    receiversInfo: {},
+    processingRequired: null // null | true | false - only relevant when status is active
   });
 
   // Modal states
@@ -384,6 +385,9 @@ export default function AddSale() {
   // Dialog state for customer warning
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [customerWarning, setCustomerWarning] = useState(null);
+
+  // Toggle: when ON, Process button is enabled; when OFF, Process button is disabled (active sales only)
+  const [processButtonEnabled, setProcessButtonEnabled] = useState(true);
 
   // Comment modal state
   const [isCommentModalOpen, setIsCommentModalOpen] = useState(false);
@@ -552,8 +556,11 @@ export default function AddSale() {
           services: sale.services || [],
           receivers: sale.receivers || {},
           receiversInfo: sale.receiversInfo || {},
-          tags: sale.tags || [] // Load tags when sale is fetched
+          tags: sale.tags || [], // Load tags when sale is fetched
+          processingRequired: sale.processingRequired ?? sale.processing_required ?? null
         });
+        // Sync Process toggle from backend: ON when processingRequired is true, OFF when false/null
+        setProcessButtonEnabled(sale.processingRequired === true || sale.processing_required === true);
         
         // Set selected receivers
         if (sale.receivers) {
@@ -1934,6 +1941,33 @@ Room: `;
     }
   };
 
+  // Update processing_required in backend when Process toggle is changed (active sales)
+  const updateProcessingRequired = async (value) => {
+    if (!saleForm.id && !editId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const saleId = saleForm.id || editId;
+      const processingValue = value === true;
+      const response = await apiClient.put(`/api/sales/${saleId}`, {
+        status: saleForm.status,
+        processingRequired: processingValue
+      });
+      const result = await response.json();
+      if (result.success) {
+        setSaleForm(prev => ({ ...prev, processingRequired: processingValue }));
+        showSuccess(processingValue ? 'Processing required set' : 'Processing required cleared');
+      } else {
+        setError(result.message || 'Failed to update');
+      }
+    } catch (err) {
+      console.error('Error updating processing required:', err);
+      setError('Failed to update');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Add or update sale with status
   // Handle customer dialog close and continue with sale
   const handleCustomerDialogClose = async (status) => {
@@ -2822,7 +2856,8 @@ Room: `;
         receiversInfo: saleForm.receiversInfo,
         techVisitDate: sanitizeValue(saleForm.techVisitDate),
         techVisitTime: sanitizeValue(saleForm.techVisitTime),
-        appointment_datetime: additionalData.appointmentDateTime || saleForm.appointmentDateTime || null
+        appointment_datetime: additionalData.appointmentDateTime || saleForm.appointmentDateTime || null,
+        processingRequired: saleForm.processingRequired === undefined ? null : saleForm.processingRequired
       };
       
       
@@ -3296,7 +3331,7 @@ Room: `;
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-sm font-medium text-gray-900">Sale Status</h4>
-                  <p className="text-sm text-gray-600 mt-1">
+                  <p className="text-sm text-gray-600 mt-1 flex items-center gap-2 flex-wrap">
                     Current status: <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColorClass(saleForm.status)} text-white`}>
                       {getStatusDisplayName(saleForm.status)}
                     </span>
@@ -3387,7 +3422,7 @@ Room: `;
                           const newTags = toggleTag(currentTags, SALE_TAGS.PROCESS);
                           updateSaleTags(newTags, 'process');
                         }}
-                        disabled={saving || loading}
+                        disabled={saving || loading || !processButtonEnabled}
                         className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
                           hasTag(saleForm.tags, SALE_TAGS.PROCESS)
                             ? 'bg-yellow-600 text-white hover:bg-yellow-700'
@@ -3397,11 +3432,46 @@ Room: `;
                         {hasTag(saleForm.tags, SALE_TAGS.PROCESS) ? '✓ ' : ''}
                         ⚙️ Process
                       </button>
+                       {/* Toggle to enable/disable Process button */}
+                       <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={processButtonEnabled}
+                          onClick={() => {
+                            const newValue = !processButtonEnabled;
+                            setProcessButtonEnabled(newValue);
+                            setSaleForm(prev => ({ ...prev, processingRequired: newValue }));
+                            updateProcessingRequired(newValue); // Sale id is always present here (only shown for active sales)
+                          }}
+                          disabled={saving || loading}
+                          className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                            processButtonEnabled ? 'bg-yellow-500' : 'bg-gray-200'
+                          }`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                              processButtonEnabled ? 'translate-x-5' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                        <span className="text-xs text-gray-600">Processing required</span>
+                      </div>
                     </div>
                     {/* Display current tags - automatically include payment-info if cards/banks exist */}
                     {(() => {
                       // Get tags from form
                       const displayTags = [...(saleForm.tags || [])];
+                      
+                      // When sale is active and does NOT have verification tag, show "Verification required"
+                      if (saleForm.status === SALES_STATUSES.ACTIVE && !hasTag(saleForm.tags, SALE_TAGS.VERIFICATION) && !displayTags.includes(DISPLAY_TAGS.VERIFICATION_REQUIRED)) {
+                        displayTags.push(DISPLAY_TAGS.VERIFICATION_REQUIRED);
+                      }
+                      
+                      // Show "Processing required" only when toggle is on AND value is true; hide when toggle is false or value is null/false
+                      if (processButtonEnabled && saleForm.processingRequired === true && !hasTag(saleForm.tags, SALE_TAGS.PROCESS) && !displayTags.includes(DISPLAY_TAGS.PROCESSING_REQUIRED)) {
+                        displayTags.push(DISPLAY_TAGS.PROCESSING_REQUIRED);
+                      }
                       
                       // Check if sale has cards or banks (from fetched sale data)
                       const hasCards = sale?.cards && sale.cards.length > 0;
@@ -3520,9 +3590,10 @@ Room: `;
               >
                 🔍 Verification
               </button>
+              <span className="text-xs font-medium text-gray-600 flex items-center">Processing required:</span>
               <button
                 onClick={() => handleThirdStepAction('process', 'process')}
-                disabled={saving || loading}
+                disabled={saving || loading || !processButtonEnabled}
                 className="bg-yellow-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-yellow-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ⚙️ Process

@@ -17,7 +17,7 @@ export async function GET(request) {
     }
 
     const users = await User.findAll({
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'lastSeenAt', 'cnic', 'phone', 'address', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'twilioEnabled', 'created_at', 'updated_at'],
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'lastSeenAt', 'cnic', 'phone', 'address', 'additionalInfo', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'twilioEnabled', 'created_at', 'updated_at'],
       include: [
         {
           model: require('../../../models').SupervisorAgent,
@@ -63,6 +63,7 @@ export async function GET(request) {
         location_permission: user.locationPermission,
         call_status: user.callStatus || 'offline',
         twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
+        additional_info: user.additionalInfo ?? null,
         superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
         supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
         created_at: user.created_at,
@@ -105,6 +106,7 @@ export async function POST(request) {
       phone,
       cnic,
       address,
+      additional_info,
       superiorId
     } = await request.json();
 
@@ -158,6 +160,7 @@ export async function POST(request) {
       cnic: cnic || null,
       phone: phone || null,
       address: address || null,
+      additionalInfo: additional_info && additional_info.trim() ? additional_info.trim() : null,
       callStatus: 'offline'
     });
 
@@ -182,6 +185,7 @@ export async function POST(request) {
       cnic: newUser.cnic,
       phone: newUser.phone,
       address: newUser.address,
+      additional_info: newUser.additionalInfo ?? null,
       call_status: newUser.callStatus || 'offline',
       created_at: newUser.created_at
     };
