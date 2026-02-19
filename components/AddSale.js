@@ -3265,7 +3265,7 @@ Room: `;
                 disabled={saving || loading}
                 className="bg-green-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                ✅ Ready for Payment
+                ✅ Authorize
               </button>
               <button
                 onClick={() => handlePaymentInfoAction('cancelled', SALES_STATUSES.CANCELLED)}
@@ -3736,7 +3736,7 @@ Room: `;
                       disabled={saving || loading}
                       className="bg-green-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      ✅ Ready for Payment
+                      ✅ Authorize
                     </button>
                   )}
                 </div>
@@ -3772,7 +3772,7 @@ Room: `;
                       disabled={saving || loading}
                       className="bg-green-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-green-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      ✅ Ready for Payment
+                      ✅ Authorize
                     </button>
                     <button
                       onClick={() => handleAdminAction('cancelled', SALES_STATUSES.CANCELLED)}

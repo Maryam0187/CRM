@@ -62,18 +62,19 @@ export async function PUT(request, { params }) {
       return (value === '' || value === null || value === undefined) ? null : value;
     };
     
-    // Sanitize the update data
+    // Sanitize the update data (only set fields that are provided - omit tags when not sent to preserve existing tags)
     const sanitizedData = {
       ...updateData,
       pinCodeStatus: sanitizeEnumField(updateData.pinCodeStatus),
       ssnNumberStatus: sanitizeEnumField(updateData.ssnNumberStatus),
       basicPackageStatus: sanitizeEnumField(updateData.basicPackageStatus),
       bundle: sanitizeEnumField(updateData.bundle),
-      status: sanitizeEnumField(updateData.status),
-      // Handle tags - ensure it's an array
-      tags: Array.isArray(updateData.tags) ? updateData.tags : (updateData.tags ? [updateData.tags] : [])
+      status: sanitizeEnumField(updateData.status)
     };
-    
+    if (updateData.tags !== undefined) {
+      sanitizedData.tags = Array.isArray(updateData.tags) ? updateData.tags : (updateData.tags ? [updateData.tags] : []);
+    }
+
     // Map appointment_datetime to appointmentDateTime for the model
     if (updateData.appointment_datetime !== undefined) {
       sanitizedData.appointmentDateTime = updateData.appointment_datetime;
