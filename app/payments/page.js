@@ -10,6 +10,7 @@ function PaymentsPageContent() {
   const { user, loading } = useAuth();
   const searchParams = useSearchParams();
   const saleId = searchParams.get('saleId');
+  const customerId = searchParams.get('customerId');
 
   // Show loading while user is being fetched
   if (loading) {
@@ -50,8 +51,8 @@ function PaymentsPageContent() {
     );
   }
 
-  // Require saleId parameter
-  if (!saleId) {
+  // Require either saleId or customerId to view payments
+  if (!saleId && !customerId) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
         <div className="sm:mx-auto sm:w-full sm:max-w-md">
@@ -60,9 +61,9 @@ function PaymentsPageContent() {
               <svg className="mx-auto h-12 w-12 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
               </svg>
-              <h3 className="mt-2 text-lg font-medium text-gray-900">Sale ID Required</h3>
+              <h3 className="mt-2 text-lg font-medium text-gray-900">Sale or Customer Required</h3>
               <p className="mt-1 text-sm text-gray-500">
-                Please select a sale to view its payment information.
+                Please select a sale or customer to view payment information.
               </p>
             </div>
           </div>

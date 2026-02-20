@@ -1,4 +1,4 @@
-import { SaleService, CustomerService } from '../../../../lib/sequelize-db.js';
+import { SaleService, CustomerService, getCustomerIdsWithPayments } from '../../../../lib/sequelize-db.js';
 import { NotificationManager } from '../../../../lib/notificationService';
 import socketManager from '../../../../lib/socket';
 import { requireJWTAuth } from '../../../../lib/jwtAuth';
@@ -22,10 +22,15 @@ export async function GET(request, { params }) {
         { status: 404 }
       );
     }
+
+    const saleData = sale.get ? sale.get({ plain: true }) : (sale.toJSON ? sale.toJSON() : sale);
+    const customerId = saleData.customerId;
+    const customerIdsWithPayments = customerId ? await getCustomerIdsWithPayments([customerId]) : new Set();
+    const dataWithPaymentFlag = { ...saleData, customerHasPayments: customerIdsWithPayments.has(customerId) };
     
     return Response.json({
       success: true,
-      data: sale
+      data: dataWithPaymentFlag
     });
   } catch (error) {
     console.error('Get sale error:', error);

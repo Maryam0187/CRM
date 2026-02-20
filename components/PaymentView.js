@@ -13,23 +13,27 @@ export default function PaymentView() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const saleId = searchParams.get('saleId');
+  const customerId = searchParams.get('customerId');
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showFullDetails, setShowFullDetails] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
+  const [showAllPaymentsView, setShowAllPaymentsView] = useState(false); // Consolidated view + API fetches all payments when true
 
   useEffect(() => {
     if (user) {
       fetchPayments();
     }
-  }, [user, saleId, showFullDetails]);
+  }, [user, saleId, customerId, showFullDetails, showAllPaymentsView]);
 
   const fetchPayments = async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
       if (saleId) params.append('saleId', saleId);
+      if (customerId) params.append('customerId', customerId);
+      if (customerId && showAllPaymentsView) params.append('showAllPayments', 'true');
       if (isAdmin(user) && showFullDetails) params.append('showFullDetails', 'true');
       
       const url = `/api/payments?${params.toString()}`;
@@ -48,15 +52,16 @@ export default function PaymentView() {
     }
   };
 
-  const handleAdminAction = async (action, status) => {
-    if (!saleId) return;
+  const handleAdminAction = async (action, status, saleIdToUpdate) => {
+    const effectiveSaleId = saleIdToUpdate ?? saleId;
+    if (!effectiveSaleId) return;
     
     setSavingStatus(true);
     setError(null);
     
     try {
       // Update sale status
-      const response = await apiClient.put(`/api/sales/${saleId}`, {
+      const response = await apiClient.put(`/api/sales/${effectiveSaleId}`, {
         status: status
       });
       
@@ -64,10 +69,10 @@ export default function PaymentView() {
       
       if (result.success) {
         // Log the action to sales logs
-        const saleData = payments[0]; // Get current sale data
+        const saleData = payments.find((p) => p.saleId === effectiveSaleId) || payments[0];
         if (saleData) {
           const logData = {
-            saleId: parseInt(saleId),
+            saleId: parseInt(effectiveSaleId),
             customerId: saleData.customer?.id || saleData.saleInfo?.customerId,
             agentId: user?.id ?? saleData.agent?.id ?? saleData.saleInfo?.agentId, // Who performed the action (e.g. supervisor marking done)
             action: action,
@@ -276,12 +281,21 @@ export default function PaymentView() {
             </button>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
-                Payment Information - Sale #{saleId}
+                {customerId ? 'Payment Information - Customer' : `Payment Information - Sale #${saleId}`}
               </h1>
               <p className="text-gray-600 mt-1">
-                View payment details for this sale
+                {customerId ? 'View all payment details for this customer' : 'View payment details for this sale'}
               </p>
             </div>
+            {/* Show All Payments button - customer view: toggle consolidated cards/banks view */}
+            {customerId && payments.length > 0 && (
+              <button
+                onClick={() => setShowAllPaymentsView(!showAllPaymentsView)}
+                className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition-colors duration-200"
+              >
+                {showAllPaymentsView ? 'View by Sale' : 'Show All Payments'}
+              </button>
+            )}
           </div>
           
           {/* Admin Toggle */}
@@ -340,7 +354,222 @@ export default function PaymentView() {
 
       </div>
 
-      {/* Payment Cards */}
+      {/* Consolidated All Payments View (customerId only) */}
+      {customerId && showAllPaymentsView && (() => {
+        const allCards = payments.flatMap((p) => (p.cards || []).map((c) => ({ ...c, saleId: p.saleId })));
+        const allBanks = payments.flatMap((p) => (p.banks || []).map((b) => ({ ...b, saleId: p.saleId })));
+        const allChequesElectronic = payments.flatMap((p) => (p.chequesElectronic || []).map((c) => ({ ...c, saleId: p.saleId })));
+        const allChequesMail = payments.flatMap((p) => (p.chequesMail || []).map((c) => ({ ...c, saleId: p.saleId })));
+        const allPaymentEmails = payments.flatMap((p) => (p.paymentEmails || []).map((e) => ({ ...e, saleId: p.saleId })));
+        const hasAny = allCards.length > 0 || allBanks.length > 0 || allChequesElectronic.length > 0 || allChequesMail.length > 0 || allPaymentEmails.length > 0;
+
+        const cardBlock = (card, idx) => {
+          const getCardBgClass = () => {
+            if (card.isExpired) return 'bg-red-50 border-l-4 border-red-500 rounded-lg p-4';
+            if (card.isExpiringSoon) return 'bg-yellow-50 border-l-4 border-yellow-500 rounded-lg p-4';
+            return 'bg-green-50 border-l-4 border-green-500 rounded-lg p-4';
+          };
+          const getExpiryTextClass = () => {
+            if (card.isExpired) return 'text-red-700 font-bold';
+            if (card.isExpiringSoon) return 'text-yellow-700 font-bold';
+            return 'text-green-700';
+          };
+          const getStatusBadgeClass = () => {
+            if (card.isExpired) return 'bg-red-100 text-red-800';
+            if (card.isExpiringSoon) return 'bg-yellow-100 text-yellow-800';
+            return 'bg-green-100 text-green-800';
+          };
+          return (
+            <div key={idx} className={getCardBgClass()}>
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium text-gray-900">{card.provider ? card.provider.toUpperCase() : 'N/A'}</span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">Sale #{card.saleId}</span>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusBadgeClass()}`}>
+                    {card.isExpired && '❌ Expired'}
+                    {card.isExpiringSoon && '⚠️ Expiring Soon'}
+                    {!card.isExpired && !card.isExpiringSoon && '✅ Valid'}
+                  </span>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Card Number:</span>
+                  <span className="font-mono">{card.cardNumber}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">CVV:</span>
+                  <span className="font-mono">{card.cvv}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Expiry:</span>
+                  <span className={`font-mono ${getExpiryTextClass()}`}>{card.expiryDate && card.expiryDate.trim() !== '' ? card.expiryDate : 'N/A'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Name on Card:</span>
+                  <span>{card.customerName || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Type:</span>
+                  <span className="capitalize">{card.cardType || 'N/A'}</span>
+                </div>
+                <div className="mt-2 pt-2 border-t border-gray-200">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Added:</span>
+                    <span className="text-gray-500 text-xs">{card.createdDate ? formatDisplayDate(card.createdDate) : card.created_at ? formatDisplayDate(card.created_at) : 'N/A'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        const bankBlock = (bank, idx) => (
+          <div key={idx} className="bg-gray-50 rounded-lg p-4">
+            <div className="flex justify-between items-start mb-2">
+              <div className="flex items-center space-x-2">
+                <span className="text-sm font-medium text-gray-900">{bank.bankName || 'N/A'}</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">Sale #{bank.saleId}</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${bank.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{bank.status}</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Account Number:</span><span className="font-mono">{bank.accountNumber}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Routing Number:</span><span className="font-mono">{bank.routingNumber}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Check Number:</span><span className="font-mono">{bank.checkNumber || 'N/A'}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Account Holder:</span><span>{bank.accountHolder || 'N/A'}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Driver License:</span><span className="font-mono">{bank.driverLicense}</span></div>
+              <div className="mt-2 pt-2 border-t border-gray-200">
+                <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{bank.createdDate || formatDisplayDate(bank.created_at) || 'N/A'}</span></div>
+              </div>
+            </div>
+          </div>
+        );
+
+        const chequeElectronicBlock = (cheque, idx) => (
+          <div key={idx} className="bg-blue-50 rounded-lg p-4 border-l-4 border-blue-500">
+            <div className="flex justify-between items-start mb-2">
+              <div className="flex items-center space-x-2">
+                <span className="text-sm font-medium text-gray-900">{cheque.bankName || 'N/A'}</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">Sale #{cheque.saleId}</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cheque.status === 'active' ? 'bg-green-100 text-green-800' : cheque.status === 'processed' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>{cheque.status}</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Routing Number:</span><span className="font-mono">{cheque.routingNumber || 'N/A'}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Account Number:</span><span className="font-mono">{cheque.accountNumber || 'N/A'}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Cheque Number:</span><span className="font-mono">{cheque.chequeNumber || 'N/A'}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Name on Cheque:</span><span>{cheque.nameOnCheque || 'N/A'}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">State:</span><span>{cheque.state || 'N/A'}</span></div>
+              <div className="mt-2 pt-2 border-t border-gray-200">
+                <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{cheque.createdDate || formatDisplayDate(cheque.created_at) || 'N/A'}</span></div>
+              </div>
+            </div>
+          </div>
+        );
+
+        const chequeMailBlock = (cheque, idx) => (
+          <div key={idx} className="bg-purple-50 rounded-lg p-4 border-l-4 border-purple-500">
+            <div className="flex justify-between items-start mb-2">
+              <div className="flex items-center space-x-2">
+                <span className="text-sm font-medium text-gray-900">{cheque.bankName || 'N/A'}</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">Sale #{cheque.saleId}</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cheque.status === 'active' ? 'bg-green-100 text-green-800' : cheque.status === 'sent' ? 'bg-blue-100 text-blue-800' : cheque.status === 'received' ? 'bg-green-100 text-green-800' : cheque.status === 'processed' ? 'bg-purple-100 text-purple-800' : 'bg-yellow-100 text-yellow-800'}`}>{cheque.status}</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Cheque Number:</span><span className="font-mono">{cheque.chequeNumber || 'N/A'}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Name on Cheque:</span><span>{cheque.nameOnCheque || 'N/A'}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Bank Name:</span><span>{cheque.bankName || 'N/A'}</span></div>
+              <div className="mt-2 pt-2 border-t border-gray-200">
+                <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{cheque.createdDate || formatDisplayDate(cheque.created_at) || 'N/A'}</span></div>
+              </div>
+            </div>
+          </div>
+        );
+
+        const paymentEmailBlock = (email, idx) => (
+          <div key={idx} className="bg-indigo-50 rounded-lg p-4 border-l-4 border-indigo-500">
+            <div className="flex justify-between items-start mb-2">
+              <div className="flex items-center space-x-2">
+                <span className="text-sm font-medium text-gray-900">📧 Email Invoice</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">Sale #{email.saleId}</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${email.status === 'active' ? 'bg-green-100 text-green-800' : email.status === 'sent' ? 'bg-blue-100 text-blue-800' : email.status === 'opened' ? 'bg-green-100 text-green-800' : email.status === 'paid' ? 'bg-green-200 text-green-900' : 'bg-yellow-100 text-yellow-800'}`}>{email.status}</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Email Address:</span><span className="font-mono">{email.emailAddress || 'N/A'}</span></div>
+              {email.invoiceLink && <div className="flex justify-between text-sm"><span className="text-gray-600">Invoice Link:</span><a href={email.invoiceLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View Link</a></div>}
+              {email.sentAt && <div className="flex justify-between text-sm"><span className="text-gray-600">Sent At:</span><span className="text-gray-500 text-xs">{formatDisplayDate(email.sentAt)}</span></div>}
+              <div className="mt-2 pt-2 border-t border-gray-200">
+                <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{email.createdDate || formatDisplayDate(email.created_at) || 'N/A'}</span></div>
+              </div>
+            </div>
+          </div>
+        );
+
+        if (!hasAny) {
+          return (
+            <div className="bg-white shadow rounded-lg p-6 mb-6">
+              <p className="text-sm text-gray-500 text-center">No payment methods found for this customer.</p>
+            </div>
+          );
+        }
+
+        return (
+          <div className="bg-white shadow rounded-lg overflow-hidden mb-6">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">All Payment Methods (Consolidated)</h2>
+              <p className="text-sm text-gray-600">All cards, banks, cheques, and payment emails for this customer across all sales</p>
+              {!isAdmin(user) && (
+                <div className="mt-3 flex items-center space-x-2">
+                  <svg className="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-sm text-blue-600">Limited view - Showing masked payment information</span>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {allCards.length > 0 && (
+                  <div>
+                    <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">All Cards ({allCards.length})</h5>
+                    <div className="space-y-3">{allCards.map((c, i) => cardBlock(c, i))}</div>
+                  </div>
+                )}
+                {allBanks.length > 0 && (
+                  <div>
+                    <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">All Bank Accounts ({allBanks.length})</h5>
+                    <div className="space-y-3">{allBanks.map((b, i) => bankBlock(b, i))}</div>
+                  </div>
+                )}
+                {allChequesElectronic.length > 0 && (
+                  <div>
+                    <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">All Electronic Cheques ({allChequesElectronic.length})</h5>
+                    <div className="space-y-3">{allChequesElectronic.map((c, i) => chequeElectronicBlock(c, i))}</div>
+                  </div>
+                )}
+                {allChequesMail.length > 0 && (
+                  <div>
+                    <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">All Cheques to Mail ({allChequesMail.length})</h5>
+                    <div className="space-y-3">{allChequesMail.map((c, i) => chequeMailBlock(c, i))}</div>
+                  </div>
+                )}
+                {allPaymentEmails.length > 0 && (
+                  <div>
+                    <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">All Payment Emails ({allPaymentEmails.length})</h5>
+                    <div className="space-y-3">{allPaymentEmails.map((e, i) => paymentEmailBlock(e, i))}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Payment Cards (by sale) - hidden when showing consolidated view */}
+      {!(customerId && showAllPaymentsView) && (
       <div className="grid gap-6">
         {payments.length === 0 ? (
           <div className="text-center py-12">
@@ -348,7 +577,9 @@ export default function PaymentView() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
             <h3 className="mt-2 text-sm font-medium text-gray-900">No payment information found</h3>
-            <p className="mt-1 text-sm text-gray-500">This sale doesn't have any payment methods added yet.</p>
+            <p className="mt-1 text-sm text-gray-500">
+              {customerId ? "This customer doesn't have any payment methods on file." : "This sale doesn't have any payment methods added yet."}
+            </p>
           </div>
         ) : (
           payments.map((payment) => (
@@ -439,7 +670,7 @@ export default function PaymentView() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                       {showCharged && (
                         <button
-                          onClick={() => handleAdminAction('charged', SALES_STATUSES.CHARGED)}
+                          onClick={() => handleAdminAction('charged', SALES_STATUSES.CHARGED, payment.saleId)}
                           disabled={savingStatus}
                           className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -448,7 +679,7 @@ export default function PaymentView() {
                       )}
                       {showDeclined && (
                         <button
-                          onClick={() => handleAdminAction('declined', SALES_STATUSES.DECLINED)}
+                          onClick={() => handleAdminAction('declined', SALES_STATUSES.DECLINED, payment.saleId)}
                           disabled={savingStatus}
                           className="bg-red-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -457,7 +688,7 @@ export default function PaymentView() {
                       )}
                       {showChargeback && (
                         <button
-                          onClick={() => handleAdminAction('chargeback', SALES_STATUSES.CHARGEBACK)}
+                          onClick={() => handleAdminAction('chargeback', SALES_STATUSES.CHARGEBACK, payment.saleId)}
                           disabled={savingStatus}
                           className="bg-red-800 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-900 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -466,7 +697,7 @@ export default function PaymentView() {
                       )}
                       {showCancelled && (
                         <button
-                          onClick={() => handleAdminAction('cancelled', SALES_STATUSES.CANCELLED)}
+                          onClick={() => handleAdminAction('cancelled', SALES_STATUSES.CANCELLED, payment.saleId)}
                           disabled={savingStatus}
                           className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -878,6 +1109,7 @@ export default function PaymentView() {
           ))
         )}
       </div>
+      )}
     </div>
   );
 }

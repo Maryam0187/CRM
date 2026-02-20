@@ -144,7 +144,8 @@ export default function AddSale() {
   const [hideCheckNumberSection, setHideCheckNumberSection] = useState(false); // Hide Check Number block after call button is clicked
   const [callJustEnded, setCallJustEnded] = useState(false); // Track if call just ended to highlight action buttons
   const [sale, setSale] = useState(null); // Store full sale data including cards/banks for tag checking
-  
+  const [customerHasPayments, setCustomerHasPayments] = useState(null); // Create mode: whether selected customer has any payment (any sale)
+
   // Payment section state
   const [showPaymentSection, setShowPaymentSection] = useState(false); // Show payment section after call ends
   const [selectedPaymentType, setSelectedPaymentType] = useState('card'); // 'card' or 'bank'
@@ -636,6 +637,30 @@ export default function AddSale() {
   useEffect(() => {
     fetchSaleData();
   }, [editId]);
+
+  // Customer-based payment-info: in create mode, fetch whether selected customer has any payment (on any sale)
+  useEffect(() => {
+    if (editId) {
+      setCustomerHasPayments(null);
+      return;
+    }
+    const cid = customer?.id || checkedCustomer?.customerId || checkedCustomer?.id;
+    if (!cid) {
+      setCustomerHasPayments(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiClient.get(`/api/customers/${cid}/has-payments`);
+        const data = await res.json();
+        if (!cancelled && data.success) setCustomerHasPayments(data.hasPayments === true);
+      } catch {
+        if (!cancelled) setCustomerHasPayments(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [editId, customer?.id, checkedCustomer?.customerId, checkedCustomer?.id]);
 
   // Validation functions
   const validateCustomerName = (name) => {
@@ -3473,12 +3498,10 @@ Room: `;
                         displayTags.push(DISPLAY_TAGS.PROCESSING_REQUIRED);
                       }
                       
-                      // Check if sale has cards or banks (from fetched sale data)
-                      const hasCards = sale?.cards && sale.cards.length > 0;
-                      const hasBanks = sale?.banks && sale.banks.length > 0;
-                      const hasPayments = hasCards || hasBanks;
+                      // Customer-based: show payment-info tag if this customer has any payment on any sale
+                      const hasPayments = sale?.customerHasPayments === true || customerHasPayments === true;
                       
-                      // Automatically add payment-info tag if payments exist (but don't save to form state)
+                      // Automatically add payment-info tag if customer has payments (but don't save to form state)
                       if (hasPayments && !displayTags.includes(SALE_TAGS.PAYMENT_INFO)) {
                         displayTags.push(SALE_TAGS.PAYMENT_INFO);
                       }
@@ -3499,7 +3522,7 @@ Room: `;
                     })()}
                   </div>
                   
-                  {/* ACTIVE status buttons: Add Payment, Add Note, Update Sale Data, Cancelled */}
+                  {/* ACTIVE status buttons: Add Payment, View Payment, Add Note, Update Sale Data, Cancelled */}
                   <button
                     onClick={() => handleSecondStepAction('add_payments', saleForm.status)}
                     disabled={saving || loading}
@@ -3507,6 +3530,15 @@ Room: `;
                   >
                     💳 Add Payment
                   </button>
+                  {(sale?.customerHasPayments === true || customerHasPayments === true) && (saleForm.customerId || customer?.id || checkedCustomer?.customerId || checkedCustomer?.id) && (
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/payments?customerId=${saleForm.customerId || customer?.id || checkedCustomer?.customerId || checkedCustomer?.id}`)}
+                      className="bg-purple-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-purple-700 transition-colors duration-200"
+                    >
+                      View Payment
+                    </button>
+                  )}
                   <button
                     onClick={() => handleSecondStepAction('add_note', saleForm.status)}
                     disabled={saving || loading}

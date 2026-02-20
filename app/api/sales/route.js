@@ -1,4 +1,4 @@
-import { SaleService, SupervisorAgentService, CustomerService } from '../../../lib/sequelize-db.js';
+import { SaleService, SupervisorAgentService, CustomerService, getCustomerIdsWithPayments } from '../../../lib/sequelize-db.js';
 import { NotificationManager } from '../../../lib/notificationService';
 import socketManager from '../../../lib/socket';
 import { requireJWTAuth } from '../../../lib/jwtAuth';
@@ -119,6 +119,10 @@ export async function GET(request) {
       }
     }
     
+    // Customer-based payment-info: which customers (in this page) have any payment
+    const customerIdsInPage = [...new Set(result.data.map((s) => (s.get ? s.get({ plain: true }) : s).customerId).filter(Boolean))];
+    const customerIdsWithPaymentsSet = await getCustomerIdsWithPayments(customerIdsInPage);
+
     // Ensure associations are properly serialized
     const serializedData = result.data.map(sale => {
       // Use get({ plain: true }) to get plain object with all associations
@@ -137,7 +141,8 @@ export async function GET(request) {
         banks,
         chequesElectronic,
         chequesMail,
-        paymentEmails
+        paymentEmails,
+        customerHasPayments: customerIdsWithPaymentsSet.has(saleData.customerId)
       };
     });
     

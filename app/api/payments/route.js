@@ -19,48 +19,53 @@ export async function GET(request) {
     // Get query parameters
     const { searchParams } = new URL(request.url);
     const saleId = searchParams.get('saleId');
+    const customerIdParam = searchParams.get('customerId');
+    const showAllPayments = searchParams.get('showAllPayments') === 'true';
     const requestedFullDetails = searchParams.get('showFullDetails') === 'true';
     
     // Only admins can request full details
     const showFullDetails = userRole === 'admin' && requestedFullDetails;
 
+    const includePaymentModels = [
+      { model: Customer, as: 'customer', attributes: ['id', 'firstName', 'lastName', 'email', 'phone', 'landline'] },
+      { model: User, as: 'agent', attributes: ['id', 'firstName', 'lastName', 'email'] },
+      { model: Card, as: 'cards' },
+      { model: Bank, as: 'banks' },
+      { model: ChequeElectronic, as: 'chequesElectronic' },
+      { model: ChequeMail, as: 'chequesMail' },
+      { model: PaymentEmail, as: 'paymentEmails' }
+    ];
+
     let sales = [];
 
-    if (saleId) {
+    if (customerIdParam) {
+      // All sales for this customer (customer-based payment view)
+      const customerId = parseInt(customerIdParam, 10);
+      if (Number.isNaN(customerId)) {
+        return NextResponse.json({ error: 'Invalid customerId' }, { status: 400 });
+      }
+      const customerSales = await Sale.findAll({
+        where: { customerId },
+        include: includePaymentModels
+      });
+      // When showAllPayments=true (clicked "Show All Payments" button), return all customer payments regardless of who added
+      if (showAllPayments) {
+        sales = customerSales;
+      } else if (userRole === 'agent') {
+        sales = customerSales.filter((s) => s.agentId === userId);
+      } else if (userRole === 'supervisor') {
+        const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(userId);
+        const agentIds = supervisedAgents.map((a) => a.id);
+        sales = customerSales.filter(
+          (s) => s.agentId === userId || agentIds.length === 0 || agentIds.includes(s.agentId)
+        );
+      } else {
+        sales = customerSales;
+      }
+    } else if (saleId) {
       // EFFICIENT: Query only the specific sale when saleId is provided
       const sale = await Sale.findByPk(parseInt(saleId), {
-        include: [
-          {
-            model: Customer,
-            as: 'customer',
-            attributes: ['id', 'firstName', 'lastName', 'email', 'phone', 'landline']
-          },
-          {
-            model: User,
-            as: 'agent',
-            attributes: ['id', 'firstName', 'lastName', 'email']
-          },
-          {
-            model: Card,
-            as: 'cards'
-          },
-          {
-            model: Bank,
-            as: 'banks'
-          },
-          {
-            model: ChequeElectronic,
-            as: 'chequesElectronic'
-          },
-          {
-            model: ChequeMail,
-            as: 'chequesMail'
-          },
-          {
-            model: PaymentEmail,
-            as: 'paymentEmails'
-          }
-        ]
+        include: includePaymentModels
       });
 
       if (!sale) {

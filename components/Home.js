@@ -502,15 +502,11 @@ export default function Home() {
           displayTags.push(DISPLAY_TAGS.PROCESSING_REQUIRED);
         }
 
-        // Check if sale has cards or banks or other payment methods
-        const hasCards = row.cards && Array.isArray(row.cards) && row.cards.length > 0;
-        const hasBanks = row.banks && Array.isArray(row.banks) && row.banks.length > 0;
-        const hasChequesElectronic = row.chequesElectronic && Array.isArray(row.chequesElectronic) && row.chequesElectronic.length > 0;
-        const hasChequesMail = row.chequesMail && Array.isArray(row.chequesMail) && row.chequesMail.length > 0;
-        const hasPaymentEmails = row.paymentEmails && Array.isArray(row.paymentEmails) && row.paymentEmails.length > 0;
-        const hasPayments = hasCards || hasBanks || hasChequesElectronic || hasChequesMail || hasPaymentEmails;
+        // Customer-based: show payment-info tag if this customer has any payment on any sale
+        const customerHasPayments = row.customerHasPayments === true;
+        const hasPayments = customerHasPayments;
 
-        // Automatically include payment-info tag if payments exist
+        // Automatically include payment-info tag if customer has payments
         if (hasPayments && !displayTags.includes(SALE_TAGS.PAYMENT_INFO)) {
           displayTags.push(SALE_TAGS.PAYMENT_INFO);
         }
@@ -537,13 +533,8 @@ export default function Home() {
       header: 'Actions',
       key: 'actions',
       render: (value, row) => {
-        // Check for all payment types - arrays are always present now
-        const hasCards = row.cards && Array.isArray(row.cards) && row.cards.length > 0;
-        const hasBanks = row.banks && Array.isArray(row.banks) && row.banks.length > 0;
-        const hasChequesElectronic = row.chequesElectronic && Array.isArray(row.chequesElectronic) && row.chequesElectronic.length > 0;
-        const hasChequesMail = row.chequesMail && Array.isArray(row.chequesMail) && row.chequesMail.length > 0;
-        const hasPaymentEmails = row.paymentEmails && Array.isArray(row.paymentEmails) && row.paymentEmails.length > 0;
-        const hasPayments = hasCards || hasBanks || hasChequesElectronic || hasChequesMail || hasPaymentEmails;
+        // Customer-based: show View Payment if this customer has any payment on any sale
+        const hasPayments = row.customerHasPayments === true;
         
         return (
           <div className="flex gap-2">
@@ -563,7 +554,7 @@ export default function Home() {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleViewPayment(row.id);
+                  handleViewPayment(row.id, row.customerId);
                 }}
                 className="inline-flex items-center px-3 py-1 text-xs font-medium text-purple-600 bg-purple-50 rounded-md hover:bg-purple-100 transition-colors duration-200"
               >
@@ -665,9 +656,13 @@ export default function Home() {
     router.push(`/add-sale?id=${saleId}`);
   };
 
-  const handleViewPayment = (saleId) => {
-    // Redirect to dedicated payments page to view all payment information
-    router.push(`/payments?saleId=${saleId}`);
+  const handleViewPayment = (saleId, customerId) => {
+    // Redirect to payments page: by customer (all payments for customer) when we have customerId
+    if (customerId) {
+      router.push(`/payments?customerId=${customerId}`);
+    } else {
+      router.push(`/payments?saleId=${saleId}`);
+    }
   };
 
 
