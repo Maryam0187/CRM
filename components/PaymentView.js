@@ -69,7 +69,7 @@ export default function PaymentView() {
           const logData = {
             saleId: parseInt(saleId),
             customerId: saleData.customer?.id || saleData.saleInfo?.customerId,
-            agentId: saleData.agent?.id || saleData.saleInfo?.agentId,
+            agentId: user?.id ?? saleData.agent?.id ?? saleData.saleInfo?.agentId, // Who performed the action (e.g. supervisor marking done)
             action: action,
             status: status,
             currentSaleData: {
