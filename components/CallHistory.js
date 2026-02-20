@@ -206,12 +206,12 @@ const CallHistory = ({
                 <div className="space-y-1 text-sm text-gray-600">
                   {showCustomerInfo && call.customer && (
                     <div>
-                      <span className="font-medium">Customer:</span> {call.customer.firstName} {call.customer.lastName}
+                      <span className="font-medium">Customer:</span> {`${call.customer.firstName || ''} ${call.customer.lastName || ''}`.trim() || 'N/A'}
                     </div>
                   )}
                   {showAgentInfo && call.agent && (
                     <div>
-                      <span className="font-medium">Agent:</span> {call.agent.firstName} {call.agent.lastName}
+                      <span className="font-medium">Agent:</span> {`${call.agent.firstName || ''} ${call.agent.lastName || ''}`.trim() || 'N/A'}
                     </div>
                   )}
                   <div>

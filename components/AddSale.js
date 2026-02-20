@@ -4214,7 +4214,7 @@ Room: `;
                               (user.id === saleForm.agent.id || 
                                (user.firstName === saleForm.agent.firstName && user.lastName === saleForm.agent.lastName));
                             return isCurrentUser && (
-                              <div><strong>Agent:</strong> {saleForm.agent.firstName} {saleForm.agent.lastName}</div>
+                              <div><strong>Agent:</strong> {`${saleForm.agent.firstName || ''} ${saleForm.agent.lastName || ''}`.trim() || 'N/A'}</div>
                             );
                           })()}
                           {saleForm.notes && (
@@ -4269,7 +4269,7 @@ Room: `;
                                   (user.id === lastSaleInfo.lastSale.agent.id || 
                                    (user.firstName === lastSaleInfo.lastSale.agent.firstName && user.lastName === lastSaleInfo.lastSale.agent.lastName));
                                 return isCurrentUser && (
-                                  <div><strong>Agent:</strong> {lastSaleInfo.lastSale.agent.firstName} {lastSaleInfo.lastSale.agent.lastName}</div>
+                                  <div><strong>Agent:</strong> {`${lastSaleInfo.lastSale.agent.firstName || ''} ${lastSaleInfo.lastSale.agent.lastName || ''}`.trim() || 'N/A'}</div>
                                 );
                               })()}
                               {lastSaleInfo.lastSale.notes && (
@@ -5373,7 +5373,7 @@ Room: `;
                         <div className="flex items-center justify-between">
                           <div className="flex-1">
                             <div className="text-sm font-medium">
-                              {customer.firstName} {customer.lastName || ''}
+                              {`${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'N/A'}
                               {customer.isExactMatch && (
                                 <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                   ✓ Exact Match
@@ -5621,7 +5621,7 @@ Room: `;
                   <div className="bg-green-50 rounded-lg p-4 border border-green-200">
                     <h4 className="text-lg font-semibold text-green-800 mb-3">👤 Customer Information</h4>
                     <div className="space-y-2 text-sm">
-                      <p><span className="font-medium">Name:</span> {customer.firstName} {customer.lastName}</p>
+                      <p><span className="font-medium">Name:</span> {`${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'N/A'}</p>
                       <p><span className="font-medium">Phone:</span> {customer.phone || 'N/A'}</p>
                       <p><span className="font-medium">Landline:</span> {customer.landline || 'N/A'}</p>
                       <p><span className="font-medium">Email:</span> {customer.email || 'N/A'}</p>
@@ -5637,7 +5637,7 @@ Room: `;
                   <div className="space-y-2 text-sm">
                     <p><span className="font-medium">Customer ID:</span> {checkedCustomer.id}</p>
                     <p><span className="font-medium">Status:</span> Customer checked - ready to call</p>
-                    <p><span className="font-medium">Agent:</span> {user?.firstName} {user?.lastName}</p>
+                    <p><span className="font-medium">Agent:</span> {`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'N/A'}</p>
                     <p><span className="font-medium">Next Step:</span> Make call, then create sale based on result</p>
                   </div>
                 </div>
@@ -5672,7 +5672,7 @@ Room: `;
                         <p><span className="font-medium">Sale ID:</span> {lastSaleInfo.lastSale.id}</p>
                         <p><span className="font-medium">Status:</span> <span className="capitalize">{lastSaleInfo.lastSale.status}</span></p>
                         <p><span className="font-medium">Date & Time:</span> {new Date(lastSaleInfo.lastSale.created_at).toLocaleString()}</p>
-                        <p><span className="font-medium">Agent:</span> {lastSaleInfo.lastSale.agent ? `${lastSaleInfo.lastSale.agent.firstName} ${lastSaleInfo.lastSale.agent.lastName}` : 'Unknown'}</p>
+                        <p><span className="font-medium">Agent:</span> {lastSaleInfo.lastSale.agent ? `${lastSaleInfo.lastSale.agent.firstName || ''} ${lastSaleInfo.lastSale.agent.lastName || ''}`.trim() || 'Unknown' : 'Unknown'}</p>
                         {lastSaleInfo.lastSale.notes && (
                           <p><span className="font-medium">Notes:</span> {lastSaleInfo.lastSale.notes}</p>
                         )}

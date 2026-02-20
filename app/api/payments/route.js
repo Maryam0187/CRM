@@ -125,13 +125,21 @@ export async function GET(request) {
         saleId: sale.id,
         customer: {
           id: sale.customer?.id,
-          name: sale.customer ? `${sale.customer.firstName} ${sale.customer.lastName}` : 'N/A',
-          email: sale.customer?.email || 'N/A',
-          phone: sale.customer?.phone || sale.customer?.landline || 'N/A'
+          name: (() => {
+            if (!sale.customer) return 'N/A';
+            const n = `${sale.customer.firstName || ''} ${sale.customer.lastName || ''}`.trim();
+            return n || 'N/A';
+          })(),
+          email: sale.customer?.email || '-',
+          phone: sale.customer?.phone || sale.customer?.landline || '-'
         },
         agent: {
           id: sale.agent?.id,
-          name: sale.agent ? `${sale.agent.firstName} ${sale.agent.lastName}` : 'N/A'
+          name: (() => {
+            if (!sale.agent) return 'N/A';
+            const n = `${sale.agent.firstName || ''} ${sale.agent.lastName || ''}`.trim();
+            return n || 'N/A';
+          })()
         },
         saleInfo: {
           status: sale.status,

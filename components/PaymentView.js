@@ -749,11 +749,11 @@ export default function PaymentView() {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-sm text-gray-600">Email:</span>
-                        <span className="text-sm font-medium">{payment.customer.email}</span>
+                        <span className="text-sm font-medium">{payment.customer.email || '-'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-sm text-gray-600">Phone:</span>
-                        <span className="text-sm font-medium">{payment.customer.phone}</span>
+                        <span className="text-sm font-medium">{payment.customer.phone || '-'}</span>
                       </div>
                     </div>
                   </div>

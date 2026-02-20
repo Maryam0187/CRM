@@ -676,7 +676,7 @@ export default function UserDetailsModal({ user, onClose }) {
                               </div>
                               {log.customer && (
                                 <p className="text-sm text-gray-600 mt-1">
-                                  <span className="font-medium">Customer:</span> {log.customer.firstName} {log.customer.lastName}
+                                  <span className="font-medium">Customer:</span> {`${log.customer.firstName || ''} ${log.customer.lastName || ''}`.trim() || 'N/A'}
                                   {log.customer.phone && ` • ${log.customer.phone}`}
                                 </p>
                               )}
@@ -790,7 +790,7 @@ export default function UserDetailsModal({ user, onClose }) {
                               </div>
                               {callLog.customer && (
                                 <p className="text-sm text-gray-600 mt-1">
-                                  <span className="font-medium">Customer:</span> {callLog.customer.firstName} {callLog.customer.lastName}
+                                  <span className="font-medium">Customer:</span> {`${callLog.customer.firstName || ''} ${callLog.customer.lastName || ''}`.trim() || 'N/A'}
                                   {callLog.customer.phone && ` • ${callLog.customer.phone}`}
                                 </p>
                               )}

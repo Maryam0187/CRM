@@ -105,7 +105,7 @@ export async function PUT(request, { params }) {
         if (sale.customerId) {
           const customer = await CustomerService.findById(sale.customerId);
           if (customer) {
-            customerName = `${customer.firstName}`.trim() || 'Unknown Customer';
+            customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown Customer';
           }
         }
         
@@ -113,7 +113,7 @@ export async function PUT(request, { params }) {
           const { UserService } = await import('../../../../lib/sequelize-db.js');
           const agent = await UserService.findById(sale.agentId);
           if (agent) {
-            agentName = `${agent.firstName} ${agent.lastName}`.trim() || 'Unknown Agent';
+            agentName = `${agent.firstName || ''} ${agent.lastName || ''}`.trim() || 'Unknown Agent';
           }
         }
 
