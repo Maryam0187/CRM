@@ -1,4 +1,4 @@
-import { ChequeMail } from '../../../models/index.js';
+import { ChequeMail, Sale } from '../../../models/index.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth.js';
 import { addPaymentInfoTagToSale } from '../../../lib/sale-payment-tag.js';
 
@@ -28,6 +28,12 @@ export async function POST(request) {
         { success: false, message: 'Missing required fields' },
         { status: 400 }
       );
+    }
+
+    // Use customerId from frontend when provided; otherwise fallback to sale lookup
+    if (chequeData.customerId == null && chequeData.saleId) {
+      const sale = await Sale.findByPk(chequeData.saleId, { attributes: ['customerId'] });
+      if (sale?.customerId) chequeData.customerId = sale.customerId;
     }
 
     const cheque = await ChequeMail.create(chequeData);

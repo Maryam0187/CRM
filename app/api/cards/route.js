@@ -1,4 +1,4 @@
-import { Card } from '../../../models/index.js';
+import { Card, Sale } from '../../../models/index.js';
 import {
   validateCardForm,
   cleanCardData,
@@ -53,6 +53,12 @@ export async function POST(request) {
 
     // Clean card data using shared function
     const cleanedCardData = cleanCardData(cardData);
+
+    // Use customerId from frontend when provided; otherwise fallback to sale lookup
+    if (cleanedCardData.customerId == null && cardData.saleId) {
+      const sale = await Sale.findByPk(cardData.saleId, { attributes: ['customerId'] });
+      if (sale?.customerId) cleanedCardData.customerId = sale.customerId;
+    }
 
     const card = await Card.create(cleanedCardData);
     if (card.saleId) {

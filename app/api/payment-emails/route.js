@@ -1,4 +1,4 @@
-import { PaymentEmail } from '../../../models/index.js';
+import { PaymentEmail, Sale } from '../../../models/index.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth.js';
 import { addPaymentInfoTagToSale } from '../../../lib/sale-payment-tag.js';
 
@@ -28,6 +28,12 @@ export async function POST(request) {
         { success: false, message: 'Missing required fields' },
         { status: 400 }
       );
+    }
+
+    // Use customerId from frontend when provided; otherwise fallback to sale lookup
+    if (emailData.customerId == null && emailData.saleId) {
+      const sale = await Sale.findByPk(emailData.saleId, { attributes: ['customerId'] });
+      if (sale?.customerId) emailData.customerId = sale.customerId;
     }
 
     const paymentEmail = await PaymentEmail.create(emailData);

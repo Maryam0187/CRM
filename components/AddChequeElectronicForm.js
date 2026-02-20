@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { formatNumericOnly, formatRoutingNumber } from '../lib/validation.js';
 import apiClient from '../lib/apiClient.js';
 
-export default function AddChequeElectronicForm({ mode, saleId, onSuccess, initialData, onDataChange }) {
+export default function AddChequeElectronicForm({ mode, saleId, customerId, onSuccess, initialData, onDataChange }) {
   const [formData, setFormData] = useState(initialData || {
     routingNumber: '',
     accountNumber: '',
@@ -75,6 +75,7 @@ export default function AddChequeElectronicForm({ mode, saleId, onSuccess, initi
 
       const chequeData = {
         saleId: parseInt(saleId),
+        ...(customerId != null && { customerId: parseInt(customerId) }),
         routingNumber: formData.routingNumber,
         accountNumber: formData.accountNumber,
         chequeNumber: formData.chequeNumber,

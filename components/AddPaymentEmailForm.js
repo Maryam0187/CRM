@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../lib/apiClient.js';
 
-export default function AddPaymentEmailForm({ mode, saleId, onSuccess, initialData, onDataChange }) {
+export default function AddPaymentEmailForm({ mode, saleId, customerId, onSuccess, initialData, onDataChange }) {
   const [formData, setFormData] = useState(initialData || {
     emailAddress: '',
     notes: ''
@@ -71,6 +71,7 @@ export default function AddPaymentEmailForm({ mode, saleId, onSuccess, initialDa
 
       const emailData = {
         saleId: parseInt(saleId),
+        ...(customerId != null && { customerId: parseInt(customerId) }),
         emailAddress: formData.emailAddress,
         notes: formData.notes
       };

@@ -3905,6 +3905,7 @@ Room: `;
                   <AddCardForm 
                     mode="create" 
                     saleId={saleForm.id || editId} 
+                    customerId={saleForm.customerId}
                     onSuccess={(data) => handlePaymentSuccess('card', data)}
                     initialData={cardFormData}
                     onDataChange={handleCardFormDataChange}
@@ -3913,6 +3914,7 @@ Room: `;
                   <AddBankForm 
                     mode="create" 
                     saleId={saleForm.id || editId} 
+                    customerId={saleForm.customerId}
                     onSuccess={(data) => handlePaymentSuccess('bank', data)}
                     initialData={bankFormData}
                     onDataChange={handleBankFormDataChange}
@@ -3921,6 +3923,7 @@ Room: `;
                   <AddChequeElectronicForm 
                     mode="create" 
                     saleId={saleForm.id || editId} 
+                    customerId={saleForm.customerId}
                     onSuccess={(data) => handlePaymentSuccess('cheque_electronic', data)}
                     initialData={{}}
                     onDataChange={() => {}}
@@ -3929,6 +3932,7 @@ Room: `;
                   <AddChequeMailForm 
                     mode="create" 
                     saleId={saleForm.id || editId} 
+                    customerId={saleForm.customerId}
                     onSuccess={(data) => handlePaymentSuccess('cheque_mail', data)}
                     initialData={{}}
                     onDataChange={() => {}}
@@ -3937,6 +3941,7 @@ Room: `;
                   <AddPaymentEmailForm 
                     mode="create" 
                     saleId={saleForm.id || editId} 
+                    customerId={saleForm.customerId}
                     onSuccess={(data) => handlePaymentSuccess('payment_email', data)}
                     initialData={{}}
                     onDataChange={() => {}}

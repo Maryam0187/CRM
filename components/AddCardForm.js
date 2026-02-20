@@ -8,7 +8,7 @@ import {
 } from '../lib/validation.js';
 import apiClient from '../lib/apiClient.js';
 
-export default function AddCardForm({ mode, saleId, onSuccess, initialData, onDataChange }) {
+export default function AddCardForm({ mode, saleId, customerId, onSuccess, initialData, onDataChange }) {
   const [formData, setFormData] = useState(initialData || {
     cardType: '',
     provider: '',
@@ -84,9 +84,10 @@ export default function AddCardForm({ mode, saleId, onSuccess, initialData, onDa
       // Clear any previous validation errors
       setValidationErrors({});
 
-      // Prepare data for API
+      // Prepare data for API (send customerId from frontend when available; API uses sale lookup as fallback)
       const cardData = {
         saleId: parseInt(saleId),
+        ...(customerId != null && { customerId: parseInt(customerId) }),
         cardType: formData.cardType,
         provider: formData.provider,
         customerName: formData.customerName,

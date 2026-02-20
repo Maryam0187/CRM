@@ -1,4 +1,4 @@
-import { Bank } from '../../../models/index.js';
+import { Bank, Sale } from '../../../models/index.js';
 import { validateBankForm, cleanBankData } from '../../../lib/validation.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth.js';
 import { addPaymentInfoTagToSale } from '../../../lib/sale-payment-tag.js';
@@ -48,6 +48,12 @@ export async function POST(request) {
 
     // Clean bank data using shared function
     const cleanedBankData = cleanBankData(bankData);
+
+    // Use customerId from frontend when provided; otherwise fallback to sale lookup
+    if (cleanedBankData.customerId == null && bankData.saleId) {
+      const sale = await Sale.findByPk(bankData.saleId, { attributes: ['customerId'] });
+      if (sale?.customerId) cleanedBankData.customerId = sale.customerId;
+    }
 
     const bank = await Bank.create(cleanedBankData);
     if (bank.saleId) {
