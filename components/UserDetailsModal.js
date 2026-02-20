@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../lib/apiClient';
 import { useSocket } from '../contexts/SocketContext';
+import { getStatusBadgeClasses } from '../lib/salesStatuses';
 
 export default function UserDetailsModal({ user, onClose }) {
   const { socket, isConnected } = useSocket();
@@ -662,12 +663,9 @@ export default function UserDetailsModal({ user, onClose }) {
                                 <span className="font-medium text-gray-900">
                                   {log.action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                                 </span>
-                                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                                  log.status === 'sale-done' || log.status === 'done' || log.status === 'approved' ? 'bg-green-100 text-green-800' :
-                                  log.status === 'lead-call' || log.status === 'lead_call' ? 'bg-blue-100 text-blue-800' :
-                                  log.status === 'decline' || log.status === 'chargeback' || log.action === 'hangup' ? 'bg-red-100 text-red-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
+                                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeClasses(
+                                  log.action === 'hangup' ? 'hang-up' : (log.status || '').replace(/_/g, '-')
+                                )}`}>
                                   {log.status}
                                 </span>
                                 <span className="text-sm text-gray-500">
