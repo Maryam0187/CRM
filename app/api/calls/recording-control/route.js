@@ -43,51 +43,34 @@ export async function POST(request) {
 
     const client = getClient();
 
-    // Get conference SID - from CallLog first, then from Twilio API
-    let conferenceSid = null;
+    // Get call log and customer call SID (the customer's leg in the conference)
     const callLog = await sequelizeDb.CallLog.findOne({
       where: { conferenceName },
       order: [['created_at', 'DESC']]
     });
-    if (callLog?.conferenceSid) {
-      conferenceSid = callLog.conferenceSid;
-    }
 
-    if (!conferenceSid) {
-      // Fallback: list in-progress conferences by friendly name
-      const conferences = await client.conferences.list({
-        friendlyName: conferenceName,
-        status: 'in-progress',
-        limit: 1
-      });
-      if (conferences.length > 0) {
-        conferenceSid = conferences[0].sid;
-        // Save to call log for future use
-        if (callLog) {
-          await callLog.update({ conferenceSid });
-        }
-      }
-    }
-
-    if (!conferenceSid) {
+    const callSid = callLog?.customerCallSid || callLog?.callSid;
+    if (!callSid) {
       return NextResponse.json(
-        { success: false, message: 'Conference not found or not in progress' },
+        { success: false, message: 'Call not found or customer leg not yet established' },
         { status: 404 }
       );
     }
 
     const recordingCallbackUrl = getWebhookUrl('/api/twilio/recording-callback');
 
+    // Use Call Recordings API (conference recordings.create not in Twilio Node SDK)
+    // Recording the customer's call leg captures the full conference audio (both parties)
     if (action === 'start') {
       const recording = await client
-        .conferences(conferenceSid)
+        .calls(callSid)
         .recordings.create({
           recordingStatusCallback: recordingCallbackUrl,
           recordingStatusCallbackEvent: ['in-progress', 'completed', 'absent'],
           playBeep: true
         });
 
-      console.log('🎙️ Recording started:', { conferenceSid, recordingSid: recording.sid });
+      console.log('🎙️ Recording started:', { callSid, recordingSid: recording.sid });
 
       return NextResponse.json({
         success: true,
@@ -101,11 +84,11 @@ export async function POST(request) {
 
     // action === 'stop'
     await client
-      .conferences(conferenceSid)
+      .calls(callSid)
       .recordings(recordingSid)
       .update({ status: 'stopped' });
 
-    console.log('🎙️ Recording stopped:', { conferenceSid, recordingSid });
+    console.log('🎙️ Recording stopped:', { callSid, recordingSid });
 
     return NextResponse.json({
       success: true,
