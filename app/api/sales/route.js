@@ -1,4 +1,5 @@
 import { SaleService, SupervisorAgentService, CustomerService, getCustomerIdsWithPayments } from '../../../lib/sequelize-db.js';
+import { CallLog } from '../../../models';
 import { NotificationManager } from '../../../lib/notificationService';
 import socketManager from '../../../lib/socket';
 import { requireJWTAuth } from '../../../lib/jwtAuth';
@@ -196,6 +197,29 @@ export async function POST(request) {
     }
     
     const sale = await SaleService.create(sanitizedData);
+    
+    // After creating a new sale, attach the most recent call log (for this agent + customer)
+    // that does not yet have a saleId. This ensures the latest call made before the sale
+    // is linked to the sale for call history and recordings.
+    try {
+      if (sale.customerId && sale.agentId) {
+        const lastCallLog = await CallLog.findOne({
+          where: {
+            customerId: sale.customerId,
+            agentId: sale.agentId,
+            saleId: null
+          },
+          order: [['created_at', 'DESC']]
+        });
+
+        if (lastCallLog) {
+          await lastCallLog.update({ saleId: sale.id });
+        }
+      }
+    } catch (linkError) {
+      console.error('Error linking latest call log to new sale:', linkError);
+      // Do not fail sale creation if linking the call log fails
+    }
     
     // Send notification if sale is created with lead-call or sale-done status
     try {
