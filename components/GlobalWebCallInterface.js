@@ -86,6 +86,8 @@ export default function GlobalWebCallInterface() {
 
   const { getCallStatus } = useSocket();
   const [isMinimized, setIsMinimized] = useState(false);
+  const [showKeypad, setShowKeypad] = useState(false);
+  const [keypadDigits, setKeypadDigits] = useState('');
   
   // Track known CallSids for matching conference participants
   const [knownSids, setKnownSids] = useState({
@@ -971,6 +973,29 @@ export default function GlobalWebCallInterface() {
       return await mute();
     }
   };
+
+  // Send DTMF digits during call (keypad)
+  const sendKeypadDigits = useCallback((digitsToSend) => {
+    if (!digitsToSend || typeof digitsToSend !== 'string') return;
+    const validated = digitsToSend.replace(/[^0-9*#]/g, '');
+    if (!validated) return;
+    try {
+      if (!activeConnection.current || !isConnected) {
+        console.warn('⚠️ Cannot send digits: call not connected');
+        return;
+      }
+      const call = activeConnection.current;
+      if (typeof call.sendDigits === 'function') {
+        call.sendDigits(validated);
+        console.log(`✅ Sent DTMF digits: ${validated}`);
+        setKeypadDigits('');
+      } else {
+        console.warn('⚠️ sendDigits not available on call object');
+      }
+    } catch (err) {
+      console.error('❌ Error sending DTMF digits:', err);
+    }
+  }, [isConnected]);
 
   // Cleanup function for call state
   const cleanupCallState = useCallback((reason = 'unknown') => {
@@ -1995,6 +2020,56 @@ export default function GlobalWebCallInterface() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
                 </svg>
                 <span>Microphone Muted</span>
+              </div>
+            )}
+
+            {/* Keypad - DTMF digits during call */}
+            {(isWebCallConnected || isConnected) && displayCallStatus === 'in-progress' && (
+              <div className="mb-3">
+                <button
+                  onClick={() => setShowKeypad(!showKeypad)}
+                  className="w-full px-4 py-2 font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-700 text-white mb-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+                  </svg>
+                  {showKeypad ? 'Hide Keypad' : 'Show Keypad'}
+                </button>
+                {showKeypad && (
+                  <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                    <input
+                      type="text"
+                      value={keypadDigits}
+                      onChange={(e) => setKeypadDigits(e.target.value.replace(/[^0-9*#]/g, ''))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && keypadDigits) {
+                          sendKeypadDigits(keypadDigits);
+                        }
+                      }}
+                      placeholder="Enter digits (0-9, *, #)"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded mb-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      {['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'].map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => setKeypadDigits((prev) => prev + d)}
+                          className="py-2 text-lg font-semibold bg-white border border-gray-300 rounded hover:bg-gray-100 active:bg-gray-200 transition-colors"
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => keypadDigits && sendKeypadDigits(keypadDigits)}
+                      disabled={!keypadDigits}
+                      className="w-full mt-3 px-3 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
+                    >
+                      Send (Enter)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
