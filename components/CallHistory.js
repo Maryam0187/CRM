@@ -51,18 +51,26 @@ const CallHistory = ({
   className = ''
 }) => {
   const { user } = useAuth();
+  const canViewRecordings = isAdmin(user);
   const [calls, setCalls] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
 
   useEffect(() => {
-    fetchCallHistory();
+    setOffset(0);
+    fetchCallHistory(0, false);
   }, [customerId, saleId, agentId, limit]);
 
-  const fetchCallHistory = async () => {
+  const fetchCallHistory = async (offsetVal = 0, append = false) => {
     try {
-      setLoading(true);
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
       setError(null);
 
       const params = new URLSearchParams();
@@ -70,13 +78,19 @@ const CallHistory = ({
       if (saleId) params.append('saleId', saleId);
       if (agentId) params.append('agentId', agentId);
       params.append('limit', limit);
+      params.append('offset', offsetVal);
 
       const response = await apiClient.get(`/api/calls/initiate?${params}`);
       const result = await response.json();
 
       if (result.success) {
-        setCalls(result.data.calls);
+        if (append) {
+          setCalls(prev => [...prev, ...result.data.calls]);
+        } else {
+          setCalls(result.data.calls);
+        }
         setTotal(result.data.total);
+        setOffset(offsetVal + result.data.calls.length);
       } else {
         setError(result.message || 'Failed to fetch call history');
       }
@@ -85,8 +99,15 @@ const CallHistory = ({
       setError('Network error. Please try again.');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
+
+  const handleLoadMore = () => {
+    fetchCallHistory(offset, true);
+  };
+
+  const hasMore = calls.length < total;
 
   const getStatusBadgeClasses = (status) => {
     const baseClasses = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium';
@@ -150,7 +171,7 @@ const CallHistory = ({
               <div className="mt-2 text-sm text-red-700">{error}</div>
               <div className="mt-3">
                 <button
-                  onClick={fetchCallHistory}
+                  onClick={() => fetchCallHistory(0, false)}
                   className="text-sm font-medium text-red-800 hover:text-red-600"
                 >
                   Try again
@@ -227,7 +248,7 @@ const CallHistory = ({
                   )}
                 </div>
 
-                {((call.recordings && call.recordings.length > 0) || call.recordingUrl) && (
+                {canViewRecordings && ((call.recordings && call.recordings.length > 0) || call.recordingUrl) && (
                   <div className="mt-3">
                     <div className="mb-2">
                       <span className="font-medium text-sm">
@@ -277,6 +298,25 @@ const CallHistory = ({
           </div>
         ))}
       </div>
+
+      {hasMore && (
+        <div className="mt-4 flex justify-center">
+          <button
+            onClick={handleLoadMore}
+            disabled={loadingMore}
+            className="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loadingMore ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></span>
+                Loading...
+              </span>
+            ) : (
+              `Load more (${calls.length} of ${total})`
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 };

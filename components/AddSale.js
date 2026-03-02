@@ -4044,11 +4044,12 @@ Room: `;
               </div>
             )}
 
-            {/* Call History */}
+            {/* Call History - when on sale page, filter by saleId to show only calls for this sale */}
             {showCallHistory && customer.id && (
               <div className="mb-6">
                 <CallHistory
                   customerId={customer.id}
+                  saleId={saleForm?.id || editId}
                   limit={10}
                   showCustomerInfo={false}
                   showAgentInfo={true}

@@ -58,7 +58,7 @@ export async function GET(request, { params }) {
       offset
     });
 
-    // Format call logs data
+    // Format call logs data (call-logs API is admin-only via requireJWTAdmin, so include recordings)
     const formattedCallLogs = callLogs.map(callLog => ({
       id: callLog.id,
       callSid: callLog.callSid,

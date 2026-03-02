@@ -190,6 +190,16 @@ export async function POST(request) {
 // Get call history for a customer or agent
 export async function GET(request) {
   try {
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+    const currentUser = authResult.user;
+    const isAdmin = currentUser?.role === 'admin';
+
     const { searchParams } = new URL(request.url);
     const customerId = searchParams.get('customerId');
     const agentId = searchParams.get('agentId');
@@ -227,10 +237,20 @@ export async function GET(request) {
       offset
     });
 
+    // Strip recording data for non-admin users
+    const callsData = calls.rows.map((call) => {
+      const c = call.toJSON ? call.toJSON() : call;
+      if (!isAdmin) {
+        const { recordingUrl, recordings, recordingSid, recordingDuration, ...rest } = c;
+        return rest;
+      }
+      return c;
+    });
+
     return NextResponse.json({
       success: true,
       data: {
-        calls: calls.rows,
+        calls: callsData,
         total: calls.count,
         limit,
         offset

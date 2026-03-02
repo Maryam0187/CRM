@@ -3,10 +3,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../lib/apiClient';
 import { useSocket } from '../contexts/SocketContext';
+import { useAuth } from '../contexts/AuthContext';
+import { isAdmin } from '../lib/roleUtils';
 import { getStatusBadgeClasses } from '../lib/salesStatuses';
 
 export default function UserDetailsModal({ user, onClose }) {
+  const { user: currentUser } = useAuth();
   const { socket, isConnected } = useSocket();
+  const canViewRecordings = isAdmin(currentUser);
   const [activeTab, setActiveTab] = useState('activities');
   const [activities, setActivities] = useState([]);
   const [timeLogs, setTimeLogs] = useState([]);
@@ -805,7 +809,7 @@ export default function UserDetailsModal({ user, onClose }) {
                                   </p>
                                 </div>
                               )}
-                              {((callLog.recordings && callLog.recordings.length > 0) || callLog.recordingUrl) && (
+                              {canViewRecordings && ((callLog.recordings && callLog.recordings.length > 0) || callLog.recordingUrl) && (
                                 <div className="mt-2">
                                   <span className="text-xs font-medium text-gray-500 block mb-1">
                                     {(callLog.recordings?.length || 1) > 1 ? 'Recordings:' : 'Recording:'}
