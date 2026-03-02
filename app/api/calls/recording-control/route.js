@@ -47,7 +47,7 @@ export async function POST(request) {
     let conferenceSid = null;
     const callLog = await sequelizeDb.CallLog.findOne({
       where: { conferenceName },
-      order: [['createdAt', 'DESC']]
+      order: [['created_at', 'DESC']]
     });
     if (callLog?.conferenceSid) {
       conferenceSid = callLog.conferenceSid;
