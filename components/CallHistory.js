@@ -227,15 +227,36 @@ const CallHistory = ({
                   )}
                 </div>
 
-                {call.recordingUrl && (
+                {((call.recordings && call.recordings.length > 0) || call.recordingUrl) && (
                   <div className="mt-3">
                     <div className="mb-2">
-                      <span className="font-medium text-sm">Recording:</span>
+                      <span className="font-medium text-sm">
+                        {(call.recordings?.length || 1) > 1 ? 'Recordings:' : 'Recording:'}
+                      </span>
                     </div>
-                    <audio controls className="w-full max-w-md">
-                      <source src={call.recordingUrl} type="audio/wav" />
-                      Your browser does not support the audio element.
-                    </audio>
+                    {call.recordings && call.recordings.length > 0 ? (
+                      <div className="space-y-3">
+                        {call.recordings.map((rec, idx) => (
+                          <div key={rec.recordingSid || idx}>
+                            {call.recordings.length > 1 && (
+                              <span className="text-xs text-gray-500 block mb-1">
+                                Recording {idx + 1}
+                                {rec.recordingDuration ? ` (${Math.floor(rec.recordingDuration / 60)}m ${rec.recordingDuration % 60}s)` : ''}
+                              </span>
+                            )}
+                            <audio controls className="w-full max-w-md">
+                              <source src={rec.recordingUrl} type="audio/wav" />
+                              Your browser does not support the audio element.
+                            </audio>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <audio controls className="w-full max-w-md">
+                        <source src={call.recordingUrl} type="audio/wav" />
+                        Your browser does not support the audio element.
+                      </audio>
+                    )}
                   </div>
                 )}
 

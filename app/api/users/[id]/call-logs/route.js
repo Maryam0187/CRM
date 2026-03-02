@@ -70,6 +70,7 @@ export async function GET(request, { params }) {
       callPurpose: callLog.callPurpose,
       callNotes: callLog.callNotes,
       recordingUrl: callLog.recordingUrl,
+      recordings: callLog.recordings || (callLog.recordingUrl ? [{ recordingSid: callLog.recordingSid, recordingUrl: callLog.recordingUrl, recordingDuration: callLog.recordingDuration, createdAt: (callLog.updatedAt || callLog.updated_at)?.toISOString?.() || new Date().toISOString() }] : []),
       transcriptionText: callLog.transcriptionText,
       createdAt: callLog.created_at,
       updatedAt: callLog.updated_at,

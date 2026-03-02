@@ -60,11 +60,31 @@ export async function POST(request) {
       );
     }
 
-    // Update call log with recording and transcription information
-    const updateData = {
-      recordingUrl,
+    // Build recordings array - append new or update existing when status is 'completed'
+    const recordings = Array.isArray(callLog.recordings) ? [...callLog.recordings] : [];
+    const recordingEntry = {
       recordingSid,
+      recordingUrl,
       recordingDuration: recordingDuration ? parseInt(recordingDuration) : null,
+      createdAt: new Date().toISOString()
+    };
+
+    if (recordingStatus === 'completed' && recordingUrl) {
+      const existingIdx = recordings.findIndex(r => r.recordingSid === recordingSid);
+      if (existingIdx >= 0) {
+        recordings[existingIdx] = { ...recordings[existingIdx], ...recordingEntry };
+      } else {
+        recordings.push(recordingEntry);
+      }
+    }
+
+    // Update call log - keep single fields for backward compat (use latest from array or current callback)
+    const latestRecording = recordings.length > 0 ? recordings[recordings.length - 1] : null;
+    const updateData = {
+      recordingUrl: latestRecording?.recordingUrl ?? recordingUrl,
+      recordingSid: latestRecording?.recordingSid ?? recordingSid,
+      recordingDuration: latestRecording?.recordingDuration ?? (recordingDuration ? parseInt(recordingDuration) : null),
+      recordings: recordings,
       transcriptionText,
       transcriptionSid,
       twilioData: {

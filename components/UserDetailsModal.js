@@ -805,16 +805,36 @@ export default function UserDetailsModal({ user, onClose }) {
                                   </p>
                                 </div>
                               )}
-                              {callLog.recordingUrl && (
+                              {((callLog.recordings && callLog.recordings.length > 0) || callLog.recordingUrl) && (
                                 <div className="mt-2">
-                                  <a
-                                    href={callLog.recordingUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs text-blue-600 hover:text-blue-800 underline"
-                                  >
-                                    🎵 Listen to Recording
-                                  </a>
+                                  <span className="text-xs font-medium text-gray-500 block mb-1">
+                                    {(callLog.recordings?.length || 1) > 1 ? 'Recordings:' : 'Recording:'}
+                                  </span>
+                                  {callLog.recordings && callLog.recordings.length > 0 ? (
+                                    <div className="space-y-1">
+                                      {callLog.recordings.map((rec, idx) => (
+                                        <a
+                                          key={rec.recordingSid || idx}
+                                          href={rec.recordingUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="block text-xs text-blue-600 hover:text-blue-800 underline"
+                                        >
+                                          🎵 Recording {callLog.recordings.length > 1 ? idx + 1 : ''}
+                                          {rec.recordingDuration ? ` (${Math.floor(rec.recordingDuration / 60)}m ${rec.recordingDuration % 60}s)` : ''}
+                                        </a>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <a
+                                      href={callLog.recordingUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                    >
+                                      🎵 Listen to Recording
+                                    </a>
+                                  )}
                                 </div>
                               )}
                             </div>

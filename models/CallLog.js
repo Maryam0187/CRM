@@ -81,6 +81,11 @@ module.exports = (sequelize) => {
       allowNull: true,
       field: 'recording_sid'
     },
+    recordings: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: 'Array of recordings: [{ recordingSid, recordingUrl, recordingDuration, createdAt }]'
+    },
     transcriptionText: {
       type: DataTypes.TEXT,
       allowNull: true,
