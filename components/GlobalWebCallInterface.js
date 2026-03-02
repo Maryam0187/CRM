@@ -88,6 +88,9 @@ export default function GlobalWebCallInterface() {
   const [isMinimized, setIsMinimized] = useState(false);
   const [showKeypad, setShowKeypad] = useState(false);
   const [keypadDigits, setKeypadDigits] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [activeRecordingSid, setActiveRecordingSid] = useState(null);
+  const [recordingControlLoading, setRecordingControlLoading] = useState(false);
   
   // Track known CallSids for matching conference participants
   const [knownSids, setKnownSids] = useState({
@@ -997,6 +1000,47 @@ export default function GlobalWebCallInterface() {
     }
   }, [isConnected]);
 
+  // Start/stop call recording
+  const toggleRecording = useCallback(async () => {
+    if (!conferenceName) return;
+    setRecordingControlLoading(true);
+    try {
+      if (isRecording && activeRecordingSid) {
+        const res = await apiClient.post('/api/calls/recording-control', {
+          action: 'stop',
+          conferenceName,
+          recordingSid: activeRecordingSid
+        });
+        const data = await res.json();
+        if (data?.success) {
+          setIsRecording(false);
+          setActiveRecordingSid(null);
+          console.log('🎙️ Recording stopped');
+        } else {
+          setError(data?.message || 'Failed to stop recording');
+        }
+      } else {
+        const res = await apiClient.post('/api/calls/recording-control', {
+          action: 'start',
+          conferenceName
+        });
+        const data = await res.json();
+        if (data?.success && data?.data?.recordingSid) {
+          setIsRecording(true);
+          setActiveRecordingSid(data.data.recordingSid);
+          console.log('🎙️ Recording started');
+        } else {
+          setError(data?.message || 'Failed to start recording');
+        }
+      }
+    } catch (err) {
+      console.error('❌ Recording control error:', err);
+      setError(err?.message || 'Recording control failed');
+    } finally {
+      setRecordingControlLoading(false);
+    }
+  }, [conferenceName, isRecording, activeRecordingSid]);
+
   // Cleanup function for call state
   const cleanupCallState = useCallback((reason = 'unknown') => {
     console.log('🧹 [CLEANUP] Call cleanup:', { reason, conferenceName, currentCallSid });
@@ -1556,11 +1600,13 @@ export default function GlobalWebCallInterface() {
       });
     }
     
-    // Clear participants when call ends
+    // Clear participants and recording state when call ends
     const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
     if (callStatus && endedStatuses.includes(callStatus)) {
       setParticipants([]);
       setKnownSids({ customerCallSid: null, agentCallSid: null });
+      setIsRecording(false);
+      setActiveRecordingSid(null);
     }
   }, [callStatus]);
 
@@ -2010,6 +2056,43 @@ export default function GlobalWebCallInterface() {
                   </>
                 )}
               </button>
+            )}
+
+            {/* Record/Stop Recording Button */}
+            {(isWebCallConnected || isConnected) && displayCallStatus === 'in-progress' && (
+              <button
+                onClick={toggleRecording}
+                disabled={recordingControlLoading}
+                className={`w-full px-4 py-2 font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 mb-3 ${
+                  isRecording 
+                    ? 'bg-red-600 hover:bg-red-700 text-white' 
+                    : 'bg-gray-600 hover:bg-gray-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'
+                }`}
+              >
+                {recordingControlLoading ? (
+                  <span className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></span>
+                ) : isRecording ? (
+                  <>
+                    <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
+                    <span>Stop Recording</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="6" />
+                    </svg>
+                    <span>Start Recording</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Recording indicator */}
+            {isRecording && (isWebCallConnected || isConnected) && (
+              <div className="flex items-center justify-center gap-2 text-xs text-red-600 bg-red-50 p-2 rounded mb-3">
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                <span>Recording in progress</span>
+              </div>
             )}
 
             {/* Mute Status Indicator */}

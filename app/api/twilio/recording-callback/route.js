@@ -12,6 +12,7 @@ export async function POST(request) {
     
     // Extract recording data from Twilio webhook
     const callSid = formData.get('CallSid');
+    const conferenceSid = formData.get('ConferenceSid');
     const recordingUrl = formData.get('RecordingUrl');
     const recordingSid = formData.get('RecordingSid');
     const recordingDuration = formData.get('RecordingDuration');
@@ -26,6 +27,7 @@ export async function POST(request) {
 
     console.log('🎙️ Recording callback received:', {
       callSid,
+      conferenceSid,
       recordingUrl,
       recordingSid,
       recordingDuration,
@@ -37,13 +39,21 @@ export async function POST(request) {
       transcriptionStatus
     });
 
-    // Find the call log by call SID
-    const callLog = await sequelizeDb.CallLog.findOne({
-      where: { callSid }
-    });
+    // Find the call log - by call SID (single-call recordings) or conference SID (conference recordings)
+    let callLog = null;
+    if (callSid) {
+      callLog = await sequelizeDb.CallLog.findOne({
+        where: { callSid }
+      });
+    }
+    if (!callLog && conferenceSid) {
+      callLog = await sequelizeDb.CallLog.findOne({
+        where: { conferenceSid }
+      });
+    }
 
     if (!callLog) {
-      console.error('Call log not found for SID:', callSid);
+      console.error('Call log not found for:', { callSid, conferenceSid });
       return NextResponse.json(
         { success: false, message: 'Call log not found' },
         { status: 404 }
