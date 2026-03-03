@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
 import apiClient from '../lib/apiClient';
 import { SALES_STATUSES, SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName, getTagDisplayName, getTagBadgeClasses, SALE_TAGS, DISPLAY_TAGS, hasTag } from '../lib/salesStatuses';
+import { formatLandline, formatPhoneNumber } from '../lib/validation';
 import { downloadSaleDoc, buildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
 
 export default function Home() {
@@ -474,7 +475,7 @@ export default function Home() {
       key: 'customer',
       render: (customer) => (
         <span className="text-gray-500">
-          {customer?.landline || 'N/A'}
+          {customer?.landline ? formatLandline(customer.landline) : 'N/A'}
         </span>
       )
     },
@@ -483,7 +484,7 @@ export default function Home() {
       key: 'customer',
       render: (customer) => (
         <span className="text-gray-500">
-          {customer?.phone || 'N/A'}
+          {customer?.phone ? formatPhoneNumber(customer.phone) : 'N/A'}
         </span>
       )
     },

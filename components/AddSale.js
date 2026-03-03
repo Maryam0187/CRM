@@ -233,8 +233,8 @@ export default function AddSale() {
 
       const customerRows = [
         { label: 'First Name', value: customer.firstName },
-        { label: 'Landline', value: customer.landline },
-        { label: 'Phone', value: customer.phone },
+        { label: 'Landline', value: customer.landline ? formatLandline(customer.landline) : customer.landline },
+        { label: 'Phone', value: customer.phone ? formatCellNumber(customer.phone) : customer.phone },
         { label: 'Address', value: customer.address },
         { label: 'City', value: customer.city },
         { label: 'State', value: customer.state },
@@ -499,8 +499,8 @@ export default function AddSale() {
           setCustomer({
             id: customerId, // Use sale.customerId or customer.id
             firstName: sale.customer.firstName || '',
-            landline: sale.customer.landline || '',
-            phone: sale.customer.phone || '',
+            landline: sale.customer.landline ? formatLandline(sale.customer.landline) : '',
+            phone: sale.customer.phone ? formatCellNumber(sale.customer.phone) : '',
             address: sale.address || sale.customer.address || '',
             state: sale.customer.state || '',
             city: sale.customer.city || '',
@@ -5623,8 +5623,8 @@ Room: `;
                     <h4 className="text-lg font-semibold text-green-800 mb-3">👤 Customer Information</h4>
                     <div className="space-y-2 text-sm">
                       <p><span className="font-medium">Name:</span> {`${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'N/A'}</p>
-                      <p><span className="font-medium">Phone:</span> {customer.phone || 'N/A'}</p>
-                      <p><span className="font-medium">Landline:</span> {customer.landline || 'N/A'}</p>
+                      <p><span className="font-medium">Phone:</span> {customer.phone ? formatCellNumber(customer.phone) : 'N/A'}</p>
+                      <p><span className="font-medium">Landline:</span> {customer.landline ? formatLandline(customer.landline) : 'N/A'}</p>
                       <p><span className="font-medium">Email:</span> {customer.email || 'N/A'}</p>
                       <p><span className="font-medium">Address:</span> {customer.address || 'N/A'}</p>
                       <p><span className="font-medium">Customer ID:</span> {checkedCustomer.customerId}</p>
