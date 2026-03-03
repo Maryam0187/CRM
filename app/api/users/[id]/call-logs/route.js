@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { requireJWTAuth } from '../../../../../lib/jwtAuth';
 import { CallLog, Customer, Sale, Sequelize } from '../../../../../models';
+import { SupervisorAgentService } from '../../../../../lib/sequelize-db';
 
 const { Op } = Sequelize;
 
 /**
  * Get user call logs.
- * Admin: any user's call logs. Agent: only their own (params.id === current user id).
+ * Admin: any user's call logs. Supervisor: supervised agents' call logs. Agent: only their own.
  * GET /api/users/[id]/call-logs?limit=50&offset=0&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
  */
 export async function GET(request, { params }) {
@@ -21,12 +22,23 @@ export async function GET(request, { params }) {
     const currentUser = authResult.user;
     const userId = parseInt(params.id);
 
-    // Admin can view any user's call logs; others only their own
+    // Admin can view any user's call logs; agent only their own; supervisor only supervised agents'
     if (currentUser.role !== 'admin' && currentUser.id !== userId) {
-      return NextResponse.json(
-        { error: 'You can only view your own call logs' },
-        { status: 403 }
-      );
+      if (currentUser.role === 'supervisor') {
+        const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(currentUser.id);
+        const agentIds = supervisedAgents.map((a) => a.id);
+        if (!agentIds.includes(userId)) {
+          return NextResponse.json(
+            { error: 'You can only view your own or your supervised agents\' call logs' },
+            { status: 403 }
+          );
+        }
+      } else {
+        return NextResponse.json(
+          { error: 'You can only view your own call logs' },
+          { status: 403 }
+        );
+      }
     }
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get('limit')) || 50;

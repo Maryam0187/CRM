@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getClient, getWebhookUrl, validatePhoneNumber } from '../../../../lib/twilio';
 import sequelizeDb from '../../../../lib/sequelize-db';
+import { SupervisorAgentService } from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
+import { isSupervisor } from '../../../../lib/roleUtils';
 
 export async function POST(request) {
   let phoneNumber = null;
@@ -213,6 +215,16 @@ export async function GET(request) {
     if (agentId) where.agentId = agentId;
     if (saleId) where.saleId = saleId;
 
+    const supervisedAgentIds = currentUser.role === 'supervisor'
+      ? (await SupervisorAgentService.getSupervisedAgents(currentUser.id)).map((a) => a.id)
+      : [];
+    if (currentUser.role === 'supervisor' && agentId && !supervisedAgentIds.includes(parseInt(agentId, 10))) {
+      return NextResponse.json(
+        { success: false, message: 'You can only view call history for your supervised agents' },
+        { status: 403 }
+      );
+    }
+
     const calls = await sequelizeDb.CallLog.findAndCountAll({
       where,
       include: [
@@ -237,16 +249,18 @@ export async function GET(request) {
       offset
     });
 
-    // Include recording data for admin, or for the agent's own calls
+    // Include recording data for admin, agent's own calls, or supervisor viewing supervised agent's calls
     const callsData = calls.rows.map((call) => {
       const c = call.toJSON ? call.toJSON() : call;
       const isOwnCall = call.agentId === currentUser.id;
-      if (!isAdmin && !isOwnCall) {
+      const isSupervisedCall = isSupervisor(currentUser) && supervisedAgentIds.includes(call.agentId);
+      const canSeeRecordingMetadata = isAdmin || isOwnCall || isSupervisedCall;
+      if (!canSeeRecordingMetadata) {
         const { recordingUrl, recordings, recordingSid, recordingDuration, ...rest } = c;
         return rest;
       }
-      // For agents' own calls, omit raw Twilio URLs from response; frontend will use proxy
-      if (!isAdmin && isOwnCall && c.recordings) {
+      // For non-admin (agent own or supervisor viewing supervised), omit raw Twilio URLs; frontend uses proxy
+      if (!isAdmin && c.recordings) {
         const safeRecordings = c.recordings.map((r) => ({
           recordingSid: r.recordingSid,
           recordingDuration: r.recordingDuration,
@@ -254,7 +268,7 @@ export async function GET(request) {
         }));
         return { ...c, recordings: safeRecordings, recordingUrl: undefined };
       }
-      if (!isAdmin && isOwnCall && c.recordingUrl) {
+      if (!isAdmin && c.recordingUrl) {
         return {
           ...c,
           recordings: [{ recordingSid: c.recordingSid, recordingDuration: c.recordingDuration, createdAt: c.updated_at }],

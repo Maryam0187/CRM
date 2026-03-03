@@ -4,14 +4,17 @@ import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../lib/apiClient';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
-import { isAdmin } from '../lib/roleUtils';
+import { isAdmin, isSupervisor } from '../lib/roleUtils';
 import RecordingPlayer from './RecordingPlayer';
 import { getStatusBadgeClasses } from '../lib/salesStatuses';
 
 export default function UserDetailsModal({ user, onClose }) {
   const { user: currentUser } = useAuth();
   const { socket, isConnected } = useSocket();
-  const canViewRecordings = isAdmin(currentUser) || (user?.id === currentUser?.id);
+  const canViewRecordings =
+    isAdmin(currentUser) ||
+    user?.id === currentUser?.id ||
+    (isSupervisor(currentUser) && currentUser.supervisedAgents?.some((a) => a.id === user?.id));
   const [activeTab, setActiveTab] = useState('activities');
   const [activities, setActivities] = useState([]);
   const [timeLogs, setTimeLogs] = useState([]);

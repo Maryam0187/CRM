@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { isAdmin } from '../lib/roleUtils';
+import { isAdmin, isSupervisor } from '../lib/roleUtils';
 import apiClient from '../lib/apiClient';
 import RecordingPlayer from './RecordingPlayer';
 
@@ -52,7 +52,10 @@ const CallHistory = ({
   className = ''
 }) => {
   const { user } = useAuth();
-  const canViewRecordingsForCall = (call) => isAdmin(user) || call.agentId === user?.id;
+  const canViewRecordingsForCall = (call) =>
+    isAdmin(user) ||
+    call.agentId === user?.id ||
+    (isSupervisor(user) && user.supervisedAgents?.some((a) => a.id === call.agentId));
   const [calls, setCalls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);

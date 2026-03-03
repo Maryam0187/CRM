@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { requireJWTAuth } from '../../../../../lib/jwtAuth';
 import sequelizeDb from '../../../../../lib/sequelize-db';
 import jwt from 'jsonwebtoken';
-import { isAdmin } from '../../../../../lib/roleUtils';
+import { isAdmin, isSupervisor } from '../../../../../lib/roleUtils';
+import { SupervisorAgentService } from '../../../../../lib/sequelize-db';
 
 const STREAM_TOKEN_EXPIRY_SEC = 5 * 60; // 5 minutes
 
@@ -44,10 +45,21 @@ export async function GET(request) {
 
     const agentId = callLog.agentId;
     if (!isAdmin(user) && agentId !== userId) {
-      return NextResponse.json(
-        { error: 'You can only access recordings for your own calls' },
-        { status: 403 }
-      );
+      if (isSupervisor(user)) {
+        const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(userId);
+        const supervisedAgentIds = supervisedAgents.map((a) => a.id);
+        if (!supervisedAgentIds.includes(agentId)) {
+          return NextResponse.json(
+            { error: 'You can only access recordings for your own or your supervised agents\' calls' },
+            { status: 403 }
+          );
+        }
+      } else {
+        return NextResponse.json(
+          { error: 'You can only access recordings for your own calls' },
+          { status: 403 }
+        );
+      }
     }
 
     const recordings = Array.isArray(callLog.recordings) ? callLog.recordings : [];
