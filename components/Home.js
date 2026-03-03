@@ -95,8 +95,8 @@ export default function Home() {
         { label: 'Status', value: getStatusDisplayName(sale?.status) || sale?.status },
         { label: 'Agent ID', value: sale?.agentId },
         { label: 'Customer ID', value: sale?.customerId },
-        { label: 'Created At', value: sale?.created_at ? new Date(sale.created_at).toLocaleString() : 'N/A' },
-        { label: 'Updated At', value: sale?.updated_at ? new Date(sale.updated_at).toLocaleString() : 'N/A' },
+        { label: 'Created At', value: sale?.created_at || sale?.createdAt ? formatDateTimeShort(sale.created_at ?? sale.createdAt) : 'N/A' },
+        { label: 'Updated At', value: sale?.updated_at || sale?.updatedAt ? formatDateTimeShort(sale.updated_at ?? sale.updatedAt) : 'N/A' },
         { label: 'Spoke To', value: sale?.spokeTo || sale?.spoke_to },
         { label: 'PIN Code', value: sale?.pinCode || sale?.pin_code },
         { label: 'Carrier', value: sale?.carrier },
@@ -488,6 +488,41 @@ export default function Home() {
         </span>
       )
     },
+    ...(user?.role === 'admin'
+      ? [{
+          header: 'Agent Name',
+          key: 'agent',
+          render: (agent) => (
+            <span className="text-gray-700">
+              {agent ? `${agent.firstName || ''} ${agent.lastName || ''}`.trim() || 'N/A' : 'N/A'}
+            </span>
+          )
+        }]
+      : []),
+    {
+      header: 'Created',
+      key: 'createdAt',
+      render: (value, row) => {
+        const dateVal = value ?? row?.created_at;
+        return (
+          <span className="text-gray-500 text-sm whitespace-nowrap">
+            {formatDateTimeShort(dateVal)}
+          </span>
+        );
+      }
+    },
+    {
+      header: 'Updated',
+      key: 'updatedAt',
+      render: (value, row) => {
+        const dateVal = value ?? row?.updated_at;
+        return (
+          <span className="text-gray-500 text-sm whitespace-nowrap">
+            {formatDateTimeShort(dateVal)}
+          </span>
+        );
+      }
+    },
     {
       header: 'Tags',
       key: 'tags',
@@ -676,6 +711,17 @@ export default function Home() {
     return date.toLocaleDateString(undefined, options);
   };
 
+  // Last-seen style: "2 Feb, 26, 2:30 PM"
+  const formatDateTimeShort = (dateVal) => {
+    if (!dateVal) return 'N/A';
+    const d = new Date(dateVal);
+    const day = d.getDate();
+    const month = d.toLocaleString('en-US', { month: 'short' });
+    const year = d.toLocaleString('en-US', { year: '2-digit' });
+    const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    return `${day} ${month}, ${year}, ${timeStr}`;
+  };
+
   // Format sales data for display
   const formatSalesData = (data) => {
     return data.map(sale => ({
@@ -694,7 +740,7 @@ export default function Home() {
       <div className="min-h-screen bg-gray-50">
       {/* Header Section */}
       <div className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">My Sales Dashboard</h1>
@@ -720,7 +766,7 @@ export default function Home() {
       </div>
 
         {/* Main Content */}
-        <div className="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
 
         {/* Appointment Summary */}
         <div className="mb-8">

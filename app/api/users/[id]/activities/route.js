@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { requireJWTAdmin } from '../../../../../lib/jwtAuth';
-import { UserActivityLog } from '../../../../../models';
+import { UserActivityLog, Sequelize } from '../../../../../models';
 const UserTimeTracker = require('../../../../../lib/userTimeTracker');
+
+const { Op } = Sequelize;
 
 /**
  * Get user activities and time logs (Admin only)
@@ -25,14 +27,25 @@ export async function GET(request, { params }) {
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
 
+    // Build where clause for activities (optionally filter by date range)
+    const activitiesWhere = { userId };
+    if (startDate && endDate) {
+      activitiesWhere.created_at = {
+        [Op.between]: [
+          new Date(startDate + 'T00:00:00.000Z'),
+          new Date(endDate + 'T23:59:59.999Z')
+        ]
+      };
+    }
+
     // Get total count of activity logs
     const totalActivities = await UserActivityLog.count({
-      where: { userId }
+      where: activitiesWhere
     });
 
     // Get activity logs with pagination
     const activityLogs = await UserActivityLog.findAll({
-      where: { userId },
+      where: activitiesWhere,
       order: [['created_at', 'DESC']],
       limit,
       offset,
