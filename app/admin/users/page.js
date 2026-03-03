@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
 import { useSocket } from '../../../contexts/SocketContext';
@@ -11,6 +11,47 @@ import UserDetailsModal from '../../../components/UserDetailsModal';
 import ConfirmModal from '../../../components/ConfirmModal';
 import { apiClient } from '../../../lib/apiClient';
 
+const COLUMNS_STORAGE_KEY = 'crm-user-mgmt-columns';
+
+const DEFAULT_COLUMNS = [
+  { id: 'user', label: 'User', key: 'user', visible: true },
+  { id: 'email', label: 'Email', key: 'email', visible: true },
+  { id: 'role', label: 'Role', key: 'role', visible: true },
+  { id: 'extension', label: 'Extension', key: 'extension', visible: true },
+  { id: 'supervisor', label: 'Supervisor', key: 'supervisor', visible: true },
+  { id: 'account_status', label: 'Account Status', key: 'account_status', visible: true },
+  { id: 'online_status', label: 'Online Status', key: 'online_status', visible: true },
+  { id: 'last_seen', label: 'Last seen', key: 'last_seen', visible: true },
+  { id: 'created', label: 'Created', key: 'created', visible: true },
+  { id: 'actions', label: 'Actions', key: 'actions', visible: true },
+];
+
+function loadColumnConfig() {
+  if (typeof window === 'undefined') return DEFAULT_COLUMNS;
+  try {
+    const stored = localStorage.getItem(COLUMNS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      const ids = parsed.order || DEFAULT_COLUMNS.map(c => c.id);
+      const visibility = parsed.visibility || {};
+      return ids.map(id => {
+        const def = DEFAULT_COLUMNS.find(c => c.id === id) || { id, label: id, key: id, visible: true };
+        return { ...def, visible: visibility[id] !== undefined ? visibility[id] : def.visible };
+      }).concat(DEFAULT_COLUMNS.filter(c => !ids.includes(c.id)).map(c => ({ ...c, visible: visibility[c.id] !== undefined ? visibility[c.id] : c.visible })));
+    }
+  } catch (_) {}
+  return [...DEFAULT_COLUMNS];
+}
+
+function saveColumnConfig(columns) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify({
+      order: columns.map(c => c.id),
+      visibility: columns.reduce((acc, c) => ({ ...acc, [c.id]: c.visible }), {}),
+    }));
+  } catch (_) {}
+}
 
 export default function AdminUsersPage() {
   const { user } = useAuth();
@@ -23,7 +64,13 @@ export default function AdminUsersPage() {
   const [selectedUser, setSelectedUser] = useState(null);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, userId: null, userName: null });
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [columnConfig, setColumnConfig] = useState([]);
+  const [showColumnConfig, setShowColumnConfig] = useState(false);
   const { socket, isConnected } = useSocket();
+
+  useEffect(() => {
+    setColumnConfig(loadColumnConfig());
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -106,12 +153,13 @@ export default function AdminUsersPage() {
       const data = await response.json();
       
       if (data.success) {
+        showSuccess(data.message || `User ${currentStatus ? 'deactivated' : 'activated'} successfully`);
         fetchUsers(); // Refresh the users list
       } else {
-        setError(data.error || 'Failed to update user status');
+        showError(data.error || 'Failed to update user status');
       }
     } catch (err) {
-      setError('Failed to update user status');
+      showError('Failed to update user status');
       console.error('Error updating user status:', err);
     }
   };
@@ -185,7 +233,31 @@ export default function AdminUsersPage() {
     setConfirmModal({ isOpen: false, userId: null, userName: null });
   };
 
+  const visibleColumns = columnConfig.filter(c => c.visible);
 
+  const moveColumn = useCallback((index, direction) => {
+    const next = index + direction;
+    if (next < 0 || next >= columnConfig.length) return;
+    const nextConfig = [...columnConfig];
+    [nextConfig[index], nextConfig[next]] = [nextConfig[next], nextConfig[index]];
+    setColumnConfig(nextConfig);
+    saveColumnConfig(nextConfig);
+  }, [columnConfig]);
+
+  const toggleColumnVisibility = useCallback((id) => {
+    const next = columnConfig.map(c => c.id === id ? { ...c, visible: !c.visible } : c);
+    setColumnConfig(next);
+    saveColumnConfig(next);
+  }, [columnConfig]);
+
+  const resetColumns = useCallback(() => {
+    setColumnConfig([...DEFAULT_COLUMNS]);
+    saveColumnConfig(DEFAULT_COLUMNS);
+  }, []);
+
+  const closeColumnConfig = useCallback(() => {
+    setShowColumnConfig(false);
+  }, []);
 
   if (loading) {
     return (
@@ -210,12 +282,24 @@ export default function AdminUsersPage() {
                 <h1 className="text-3xl font-bold text-gray-900">User Management</h1>
                 <p className="mt-2 text-gray-600">Manage system users and their roles</p>
               </div>
-              <button
-                onClick={handleAddUser}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
-              >
-                Add New User
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowColumnConfig(true)}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+                  title="Configure columns"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                  </svg>
+                  Configure columns
+                </button>
+                <button
+                  onClick={handleAddUser}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                >
+                  Add New User
+                </button>
+              </div>
             </div>
           </div>
 
@@ -232,42 +316,17 @@ export default function AdminUsersPage() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      User
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Email
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Role
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Extension
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Supervisor
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Account Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Online Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Last seen
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Created
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
+                    {visibleColumns.map((col) => (
+                      <th key={col.id} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        {col.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {users.length === 0 ? (
                     <tr>
-                      <td colSpan="10" className="px-6 py-4 text-center text-gray-500">
+                      <td colSpan={visibleColumns.length} className="px-6 py-4 text-center text-gray-500">
                         No users found
                       </td>
                     </tr>
@@ -278,115 +337,112 @@ export default function AdminUsersPage() {
                         className="hover:bg-gray-50 cursor-pointer"
                         onClick={() => setSelectedUser(userItem)}
                       >
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0 h-10 w-10">
-                              <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
-                                <span className="text-sm font-medium text-gray-700">
-                                  {userItem.first_name.charAt(0)}{userItem.last_name.charAt(0)}
+                        {visibleColumns.map((col) => {
+                          const key = col.key;
+                          const cellClass = 'px-6 py-4 whitespace-nowrap text-sm';
+                          if (key === 'user') {
+                            return (
+                              <td key={col.id} className={cellClass}>
+                                <div className="flex items-center">
+                                  <div className="flex-shrink-0 h-10 w-10">
+                                    <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
+                                      <span className="text-sm font-medium text-gray-700">
+                                        {userItem.first_name.charAt(0)}{userItem.last_name.charAt(0)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="ml-4">
+                                    <div className="text-sm font-medium text-gray-900">
+                                      {userItem.first_name} {userItem.last_name}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                            );
+                          }
+                          if (key === 'email') return <td key={col.id} className={`${cellClass} text-gray-900`}>{userItem.email}</td>;
+                          if (key === 'role') {
+                            return (
+                              <td key={col.id} className={cellClass}>
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                  userItem.role === 'admin' ? 'bg-red-100 text-red-800' :
+                                  userItem.role === 'supervisor' ? 'bg-blue-100 text-blue-800' :
+                                  userItem.role === 'agent' ? 'bg-green-100 text-green-800' :
+                                  userItem.role === 'processor' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-purple-100 text-purple-800'
+                                }`}>
+                                  {userItem.role_display}
                                 </span>
-                              </div>
-                            </div>
-                            <div className="ml-4">
-                              <div className="text-sm font-medium text-gray-900">
-                                {userItem.first_name} {userItem.last_name}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {userItem.email}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            userItem.role === 'admin' ? 'bg-red-100 text-red-800' :
-                            userItem.role === 'supervisor' ? 'bg-blue-100 text-blue-800' :
-                            userItem.role === 'agent' ? 'bg-green-100 text-green-800' :
-                            userItem.role === 'processor' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-purple-100 text-purple-800'
-                          }`}>
-                            {userItem.role_display}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {userItem.extension ? (
-                            <span className="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-                              {userItem.extension}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400">-</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {userItem.supervisor_name || '-'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            userItem.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {userItem.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            userItem.status === 'online' ? 'bg-green-100 text-green-800' :
-                            userItem.status === 'away' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-gray-100 text-gray-800'
-                          }`}>
-                            {userItem.status === 'online' ? '🟢 Online' :
-                             userItem.status === 'away' ? '🟡 Away' :
-                             '⚫ Offline'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {userItem.last_seen_at
-                            ? new Date(userItem.last_seen_at).toLocaleString()
-                            : '—'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {new Date(userItem.created_at).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <div className="flex space-x-2" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              onClick={() => handleEditUser(userItem)}
-                              className="text-blue-600 hover:text-blue-900"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleForceLogoutClick(userItem.id, `${userItem.first_name} ${userItem.last_name}`)}
-                              className="text-orange-600 hover:text-orange-900"
-                              title="Force logout user from all devices"
-                            >
-                              Force Logout
-                            </button>
-                            <button
-                              onClick={() => handleToggleUserStatus(userItem.id, userItem.is_active)}
-                              className={`${
-                                userItem.is_active ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'
-                              }`}
-                            >
-                              {userItem.is_active ? 'Deactivate' : 'Activate'}
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleTwilio(userItem.id, userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true);
-                              }}
-                              className={`${
-                                (userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) 
-                                  ? 'text-orange-600 hover:text-orange-900' 
-                                  : 'text-blue-600 hover:text-blue-900'
-                              }`}
-                              title={(userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) 
-                                ? 'Disable Twilio calling' 
-                                : 'Enable Twilio calling'}
-                            >
-                              {(userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) ? '📞 Disable Twilio' : '📞 Enable Twilio'}
-                            </button>
-                          </div>
-                        </td>
+                              </td>
+                            );
+                          }
+                          if (key === 'extension') {
+                            return (
+                              <td key={col.id} className={cellClass}>
+                                {userItem.extension ? (
+                                  <span className="inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                                    {userItem.extension}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </td>
+                            );
+                          }
+                          if (key === 'supervisor') return <td key={col.id} className={`${cellClass} text-gray-900`}>{userItem.supervisor_name || '-'}</td>;
+                          if (key === 'account_status') {
+                            return (
+                              <td key={col.id} className={cellClass}>
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                  userItem.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                }`}>
+                                  {userItem.is_active ? 'Active' : 'Inactive'}
+                                </span>
+                              </td>
+                            );
+                          }
+                          if (key === 'online_status') {
+                            return (
+                              <td key={col.id} className={cellClass}>
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                  userItem.status === 'online' ? 'bg-green-100 text-green-800' :
+                                  userItem.status === 'away' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {userItem.status === 'online' ? '🟢 Online' :
+                                   userItem.status === 'away' ? '🟡 Away' :
+                                   '⚫ Offline'}
+                                </span>
+                              </td>
+                            );
+                          }
+                          if (key === 'last_seen') {
+                            const d = new Date(userItem.last_seen_at);
+                            const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+                            const timeStr = d.toLocaleTimeString();
+                            return <td key={col.id} className={`${cellClass} text-gray-500`}>{userItem.last_seen_at ? `${dateStr}, ${timeStr}` : '—'}</td>;
+                          }
+                          if (key === 'created') return <td key={col.id} className={`${cellClass} text-gray-500`}>{new Date(userItem.created_at).toLocaleDateString()}</td>;
+                          if (key === 'actions') {
+                            return (
+                              <td key={col.id} className={`${cellClass} font-medium`}>
+                                <div className="flex space-x-2 flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+                                  <button onClick={() => handleEditUser(userItem)} className="text-blue-600 hover:text-blue-900">Edit</button>
+                                  <button onClick={() => handleForceLogoutClick(userItem.id, `${userItem.first_name} ${userItem.last_name}`)} className="text-orange-600 hover:text-orange-900" title="Force logout user from all devices">Force Logout</button>
+                                  <button onClick={() => handleToggleUserStatus(userItem.id, userItem.is_active)} className={userItem.is_active ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'}>{userItem.is_active ? 'Deactivate' : 'Activate'}</button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleToggleTwilio(userItem.id, userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true); }}
+                                    className={(userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) ? 'text-orange-600 hover:text-orange-900' : 'text-blue-600 hover:text-blue-900'}
+                                    title={(userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) ? 'Disable Twilio calling' : 'Enable Twilio calling'}
+                                  >
+                                    {(userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) ? '📞 Disable Twilio' : '📞 Enable Twilio'}
+                                  </button>
+                                </div>
+                              </td>
+                            );
+                          }
+                          return <td key={col.id} className={cellClass}>—</td>;
+                        })}
                       </tr>
                     ))
                   )}
@@ -394,6 +450,78 @@ export default function AdminUsersPage() {
               </table>
             </div>
           </div>
+
+          {/* Column configuration modal */}
+          {showColumnConfig && (
+            <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="column-config-title" role="dialog" aria-modal="true">
+              <div className="flex min-h-screen items-center justify-center p-4">
+                <div className="fixed inset-0 bg-black/50 transition-opacity" onClick={closeColumnConfig} aria-hidden="true" />
+                <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 id="column-config-title" className="text-lg font-semibold text-gray-900">Configure columns</h2>
+                    <button onClick={closeColumnConfig} className="text-gray-400 hover:text-gray-600 p-1 rounded" aria-label="Close">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  </div>
+                  <p className="text-sm text-gray-500 mb-4">Toggle visibility and use arrows to reorder columns.</p>
+                  <ul className="space-y-2">
+                    {columnConfig.map((col, index) => (
+                      <li key={col.id} className="flex items-center gap-2 py-2 border-b border-gray-100 last:border-0">
+                        <input
+                          type="checkbox"
+                          id={`col-${col.id}`}
+                          checked={col.visible}
+                          onChange={() => toggleColumnVisibility(col.id)}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <label htmlFor={`col-${col.id}`} className="flex-1 text-sm font-medium text-gray-700 cursor-pointer">
+                          {col.label}
+                        </label>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => moveColumn(index, -1)}
+                            disabled={index === 0}
+                            className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed text-gray-600"
+                            title="Move left"
+                            aria-label="Move left"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveColumn(index, 1)}
+                            disabled={index === columnConfig.length - 1}
+                            className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed text-gray-600"
+                            title="Move right"
+                            aria-label="Move right"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={resetColumns}
+                      className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
+                    >
+                      Reset to default
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeColumnConfig}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* User Form Modal */}

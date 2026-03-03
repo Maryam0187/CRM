@@ -252,14 +252,18 @@ export default function Home() {
       const result = await response.json();
       
       if (result.success && result.data) {
-        const users = result.data.map(u => ({
-          id: u.id,
-          firstName: u.firstName || u.first_name || '',
-          lastName: u.lastName || u.last_name || '',
-          email: u.email,
-          role: u.role
-        }));
+        const users = result.data
+          .filter(u => u.is_active === true)
+          .map(u => ({
+            id: u.id,
+            firstName: u.firstName || u.first_name || '',
+            lastName: u.lastName || u.last_name || '',
+            email: u.email,
+            role: u.role
+          }));
         setAllUsers(users);
+        // Clear selected user if they are no longer active
+        setSelectedUserId(prev => (prev && users.some(u => u.id === prev) ? prev : null));
       }
     } catch (error) {
       console.error('Error fetching users for admin filter:', error);
