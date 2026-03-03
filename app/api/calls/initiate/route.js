@@ -237,12 +237,29 @@ export async function GET(request) {
       offset
     });
 
-    // Strip recording data for non-admin users
+    // Include recording data for admin, or for the agent's own calls
     const callsData = calls.rows.map((call) => {
       const c = call.toJSON ? call.toJSON() : call;
-      if (!isAdmin) {
+      const isOwnCall = call.agentId === currentUser.id;
+      if (!isAdmin && !isOwnCall) {
         const { recordingUrl, recordings, recordingSid, recordingDuration, ...rest } = c;
         return rest;
+      }
+      // For agents' own calls, omit raw Twilio URLs from response; frontend will use proxy
+      if (!isAdmin && isOwnCall && c.recordings) {
+        const safeRecordings = c.recordings.map((r) => ({
+          recordingSid: r.recordingSid,
+          recordingDuration: r.recordingDuration,
+          createdAt: r.createdAt
+        }));
+        return { ...c, recordings: safeRecordings, recordingUrl: undefined };
+      }
+      if (!isAdmin && isOwnCall && c.recordingUrl) {
+        return {
+          ...c,
+          recordings: [{ recordingSid: c.recordingSid, recordingDuration: c.recordingDuration, createdAt: c.updated_at }],
+          recordingUrl: undefined
+        };
       }
       return c;
     });

@@ -1,25 +1,33 @@
 import { NextResponse } from 'next/server';
-import { requireJWTAdmin } from '../../../../../lib/jwtAuth';
+import { requireJWTAuth } from '../../../../../lib/jwtAuth';
 import { CallLog, Customer, Sale, Sequelize } from '../../../../../models';
 
 const { Op } = Sequelize;
 
 /**
- * Get user call logs (Admin only)
+ * Get user call logs.
+ * Admin: any user's call logs. Agent: only their own (params.id === current user id).
  * GET /api/users/[id]/call-logs?limit=50&offset=0&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
  */
 export async function GET(request, { params }) {
   try {
-    // Check authentication and admin access
-    const authResult = await requireJWTAdmin(request);
+    const authResult = await requireJWTAuth(request);
     if (authResult.error) {
       return NextResponse.json(
         { error: authResult.error },
         { status: authResult.status }
       );
     }
-
+    const currentUser = authResult.user;
     const userId = parseInt(params.id);
+
+    // Admin can view any user's call logs; others only their own
+    if (currentUser.role !== 'admin' && currentUser.id !== userId) {
+      return NextResponse.json(
+        { error: 'You can only view your own call logs' },
+        { status: 403 }
+      );
+    }
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get('limit')) || 50;
     const offset = parseInt(searchParams.get('offset')) || 0;
@@ -58,35 +66,42 @@ export async function GET(request, { params }) {
       offset
     });
 
-    // Format call logs data (call-logs API is admin-only via requireJWTAdmin, so include recordings)
-    const formattedCallLogs = callLogs.map(callLog => ({
-      id: callLog.id,
-      callSid: callLog.callSid,
-      direction: callLog.direction,
-      fromNumber: callLog.fromNumber,
-      toNumber: callLog.toNumber,
-      status: callLog.status,
-      duration: callLog.duration,
-      callPurpose: callLog.callPurpose,
-      callNotes: callLog.callNotes,
-      recordingUrl: callLog.recordingUrl,
-      recordings: callLog.recordings || (callLog.recordingUrl ? [{ recordingSid: callLog.recordingSid, recordingUrl: callLog.recordingUrl, recordingDuration: callLog.recordingDuration, createdAt: (callLog.updatedAt || callLog.updated_at)?.toISOString?.() || new Date().toISOString() }] : []),
-      transcriptionText: callLog.transcriptionText,
-      createdAt: callLog.created_at,
-      updatedAt: callLog.updated_at,
-      customer: callLog.customer ? {
-        id: callLog.customer.id,
-        firstName: callLog.customer.firstName,
-        lastName: callLog.customer.lastName,
-        phone: callLog.customer.phone,
-        email: callLog.customer.email
-      } : null,
-      sale: callLog.sale ? {
-        id: callLog.sale.id,
-        status: callLog.sale.status,
-        customerName: callLog.sale.customerName
-      } : null
-    }));
+    // Format call logs: include recording metadata; for non-admin omit raw Twilio URLs (use proxy in UI)
+    const isAdmin = currentUser.role === 'admin';
+    const formattedCallLogs = callLogs.map(callLog => {
+      const rawRecordings = callLog.recordings || (callLog.recordingUrl ? [{ recordingSid: callLog.recordingSid, recordingUrl: callLog.recordingUrl, recordingDuration: callLog.recordingDuration, createdAt: (callLog.updatedAt || callLog.updated_at)?.toISOString?.() || new Date().toISOString() }] : []);
+      const recordings = isAdmin
+        ? rawRecordings
+        : rawRecordings.map((r) => ({ recordingSid: r.recordingSid, recordingDuration: r.recordingDuration, createdAt: r.createdAt }));
+      return {
+        id: callLog.id,
+        callSid: callLog.callSid,
+        direction: callLog.direction,
+        fromNumber: callLog.fromNumber,
+        toNumber: callLog.toNumber,
+        status: callLog.status,
+        duration: callLog.duration,
+        callPurpose: callLog.callPurpose,
+        callNotes: callLog.callNotes,
+        recordingUrl: isAdmin ? callLog.recordingUrl : undefined,
+        recordings,
+        transcriptionText: callLog.transcriptionText,
+        createdAt: callLog.created_at,
+        updatedAt: callLog.updated_at,
+        customer: callLog.customer ? {
+          id: callLog.customer.id,
+          firstName: callLog.customer.firstName,
+          lastName: callLog.customer.lastName,
+          phone: callLog.customer.phone,
+          email: callLog.customer.email
+        } : null,
+        sale: callLog.sale ? {
+          id: callLog.sale.id,
+          status: callLog.sale.status,
+          customerName: callLog.sale.customerName
+        } : null
+      };
+    });
 
     return NextResponse.json({
       success: true,

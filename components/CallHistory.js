@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { isAdmin } from '../lib/roleUtils';
 import apiClient from '../lib/apiClient';
+import RecordingPlayer from './RecordingPlayer';
 
 // Utility functions (moved from twilio.js to avoid client-side import)
 const formatCallDuration = (seconds) => {
@@ -51,7 +52,7 @@ const CallHistory = ({
   className = ''
 }) => {
   const { user } = useAuth();
-  const canViewRecordings = isAdmin(user);
+  const canViewRecordingsForCall = (call) => isAdmin(user) || call.agentId === user?.id;
   const [calls, setCalls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -248,7 +249,7 @@ const CallHistory = ({
                   )}
                 </div>
 
-                {canViewRecordings && ((call.recordings && call.recordings.length > 0) || call.recordingUrl) && (
+                {canViewRecordingsForCall(call) && ((call.recordings && call.recordings.length > 0) || call.recordingUrl) && (
                   <div className="mt-3">
                     <div className="mb-2">
                       <span className="font-medium text-sm">
@@ -265,18 +266,16 @@ const CallHistory = ({
                                 {rec.recordingDuration ? ` (${Math.floor(rec.recordingDuration / 60)}m ${rec.recordingDuration % 60}s)` : ''}
                               </span>
                             )}
-                            <audio controls className="w-full max-w-md">
-                              <source src={rec.recordingUrl} type="audio/wav" />
-                              Your browser does not support the audio element.
-                            </audio>
+                            <RecordingPlayer
+                              callLogId={call.id}
+                              index={idx}
+                              recordingDuration={rec.recordingDuration}
+                            />
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <audio controls className="w-full max-w-md">
-                        <source src={call.recordingUrl} type="audio/wav" />
-                        Your browser does not support the audio element.
-                      </audio>
+                      <RecordingPlayer callLogId={call.id} index={0} />
                     )}
                   </div>
                 )}

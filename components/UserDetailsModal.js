@@ -5,12 +5,13 @@ import { apiClient } from '../lib/apiClient';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 import { isAdmin } from '../lib/roleUtils';
+import RecordingPlayer from './RecordingPlayer';
 import { getStatusBadgeClasses } from '../lib/salesStatuses';
 
 export default function UserDetailsModal({ user, onClose }) {
   const { user: currentUser } = useAuth();
   const { socket, isConnected } = useSocket();
-  const canViewRecordings = isAdmin(currentUser);
+  const canViewRecordings = isAdmin(currentUser) || (user?.id === currentUser?.id);
   const [activeTab, setActiveTab] = useState('activities');
   const [activities, setActivities] = useState([]);
   const [timeLogs, setTimeLogs] = useState([]);
@@ -815,29 +816,26 @@ export default function UserDetailsModal({ user, onClose }) {
                                     {(callLog.recordings?.length || 1) > 1 ? 'Recordings:' : 'Recording:'}
                                   </span>
                                   {callLog.recordings && callLog.recordings.length > 0 ? (
-                                    <div className="space-y-1">
+                                    <div className="space-y-2">
                                       {callLog.recordings.map((rec, idx) => (
-                                        <a
-                                          key={rec.recordingSid || idx}
-                                          href={rec.recordingUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="block text-xs text-blue-600 hover:text-blue-800 underline"
-                                        >
-                                          🎵 Recording {callLog.recordings.length > 1 ? idx + 1 : ''}
-                                          {rec.recordingDuration ? ` (${Math.floor(rec.recordingDuration / 60)}m ${rec.recordingDuration % 60}s)` : ''}
-                                        </a>
+                                        <div key={rec.recordingSid || idx}>
+                                          {callLog.recordings.length > 1 && (
+                                            <span className="text-xs text-gray-500 block mb-1">
+                                              Recording {idx + 1}
+                                              {rec.recordingDuration ? ` (${Math.floor(rec.recordingDuration / 60)}m ${rec.recordingDuration % 60}s)` : ''}
+                                            </span>
+                                          )}
+                                          <RecordingPlayer
+                                            callLogId={callLog.id}
+                                            index={idx}
+                                            recordingDuration={rec.recordingDuration}
+                                            className="max-w-md"
+                                          />
+                                        </div>
                                       ))}
                                     </div>
                                   ) : (
-                                    <a
-                                      href={callLog.recordingUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-xs text-blue-600 hover:text-blue-800 underline"
-                                    >
-                                      🎵 Listen to Recording
-                                    </a>
+                                    <RecordingPlayer callLogId={callLog.id} index={0} className="max-w-md" />
                                   )}
                                 </div>
                               )}
