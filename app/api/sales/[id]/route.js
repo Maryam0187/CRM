@@ -1,4 +1,4 @@
-import { SaleService, CustomerService, getCustomerIdsWithPayments } from '../../../../lib/sequelize-db.js';
+import { SaleService, CustomerService, SupervisorAgentService, getCustomerIdsWithPayments } from '../../../../lib/sequelize-db.js';
 import { NotificationManager } from '../../../../lib/notificationService';
 import socketManager from '../../../../lib/socket';
 import { requireJWTAuth } from '../../../../lib/jwtAuth';
@@ -133,14 +133,19 @@ export async function PUT(request, { params }) {
           oldStatus: originalSale.status,
           newStatus: sale.status
         };
-        // Send to supervisors via Socket.IO (only if server is ready)
-        if (socketManager.isReady()) {
-          socketManager.sendNotificationToSupervisors(notification);
-        } else {
+        // Send to only this agent's supervisor(s) via Socket.IO — exclude the updater (they don't need a notification for their own action)
+        if (socketManager.isReady() && sale.agentId) {
+          const supervisorsOfAgent = await SupervisorAgentService.getSupervisors(sale.agentId);
+          for (const sup of supervisorsOfAgent) {
+            if (sup.id !== user.id) {
+              socketManager.sendNotificationToUser(sup.id, notification);
+            }
+          }
+        } else if (!socketManager.isReady()) {
           console.warn('⚠️ Socket.IO server not ready, skipping real-time notification');
         }
         
-        // Also send to database for persistence
+        // Also send to database for persistence (exclude updater so they don't get a notification for their own action)
         await NotificationManager.notifySaleStatusUpdated({
           agentId: sale.agentId,
           agentName,
@@ -148,8 +153,38 @@ export async function PUT(request, { params }) {
           saleId: sale.id,
           oldStatus: originalSale.status,
           newStatus: sale.status,
-          customerName
+          customerName,
+          excludeUserId: user.id
         });
+
+        // When admin or supervisor updates the sale, notify the agent (not the updater)
+        if ((user.role === 'admin' || user.role === 'supervisor') && sale.agentId && sale.agentId !== user.id) {
+          const agentNotification = {
+            id: `sale-update-agent-${sale.id}-${Date.now()}`,
+            title: 'Your sale was updated',
+            message: `Sale status changed from ${originalSale.status} to ${sale.status} for ${customerName}`,
+            time: new Date().toISOString(),
+            isRead: false,
+            type: 'sale_status_updated',
+            saleId: sale.id,
+            customerId: sale.customerId,
+            agentId: sale.agentId,
+            customerName,
+            oldStatus: originalSale.status,
+            newStatus: sale.status
+          };
+          if (socketManager.isReady()) {
+            socketManager.sendNotificationToUser(sale.agentId, agentNotification);
+          }
+          await NotificationManager.notifyUser(sale.agentId, {
+            type: 'sale_status_updated',
+            title: agentNotification.title,
+            message: agentNotification.message,
+            isRead: false,
+            relatedId: sale.id,
+            relatedType: 'sale'
+          });
+        }
       }
     } catch (notificationError) {
       console.error('Error sending sale update notification:', notificationError);

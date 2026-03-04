@@ -260,10 +260,13 @@ export async function POST(request) {
           status: sale.status
         };
 
-        // Send to supervisors via Socket.IO (only if server is ready)
-        if (socketManager.isReady()) {
-          socketManager.sendNotificationToSupervisors(notification);
-        } else {
+        // Send to only this agent's supervisor(s) via Socket.IO (only if server is ready)
+        if (socketManager.isReady() && sale.agentId) {
+          const supervisorsOfAgent = await SupervisorAgentService.getSupervisors(sale.agentId);
+          for (const sup of supervisorsOfAgent) {
+            socketManager.sendNotificationToUser(sup.id, notification);
+          }
+        } else if (!socketManager.isReady()) {
           console.warn('⚠️ Socket.IO server not ready, skipping real-time notification');
         }
         

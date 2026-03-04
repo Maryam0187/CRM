@@ -347,9 +347,6 @@ export default function NotificationBell() {
                         <span className="text-xs text-gray-400">
                           {notification.time}
                         </span>
-                        <span className="text-xs text-gray-300 font-mono">
-                          ID: {notification.id}
-                        </span>
                       </div>
                     </div>
                   </div>
