@@ -53,7 +53,10 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
       'lead_call': '🎯',
       'second_call': '🔄',
       'customer_agree': '✅',
+      // Payment-related actions (same icon — card/bank/cheque/email added)
       'payment_info': '💳',
+      'payment_info_added': '💳',
+      'payment_collected': '💳',
       'process': '⚙️',
       'verification': '🔍',
       'charge': '💰',
@@ -75,7 +78,10 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
       'lead_call': 'Initial lead contact',
       'second_call': 'Follow-up call made',
       'customer_agree': 'Customer agreed to proceed',
-      'payment_info': 'Payment information collected',
+      // Payment-related: same meaning (payment method added)
+      'payment_info': 'Payment added',
+      'payment_info_added': 'Payment added',
+      'payment_collected': 'Payment added',
       'process': 'Sale processing started',
       'verification': 'Information verification',
       'charge': 'Payment charged',

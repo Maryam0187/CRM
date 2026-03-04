@@ -886,10 +886,10 @@ export default function AddSale() {
     
     setSuccessMessage(`${paymentTypeName} payment information added successfully!`);
     
-    // Log the payment collection action to sales logs
-    // Payment-info tag is now automatically shown based on payment methods existence, no need to update tag
+    // Single payment log with note (e.g. "Payment added with Card") — same pattern as other logs
     if (saleForm.id || editId) {
-      logSalesAction('payment_collected', saleForm.status, {
+      logSalesAction('payment_info_added', saleForm.status, {
+        note: `Payment added with ${paymentTypeName}`,
         paymentType: type,
         paymentData: data
       });
@@ -2470,7 +2470,7 @@ Room: `;
             ...additionalData
           },
           breakdown: saleForm.breakdown || '',
-          note: saleForm.notes || '',
+          note: additionalData.note !== undefined && additionalData.note !== null ? additionalData.note : (saleForm.notes || ''),
           appointment_datetime: additionalData.appointmentDateTime || saleForm.appointmentDateTime || null
         };
        
