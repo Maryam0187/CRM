@@ -697,8 +697,10 @@ export default function Home() {
   };
 
   const handleViewPayment = (saleId, customerId) => {
-    // Redirect to payments page: by customer (all payments for customer) when we have customerId
-    if (customerId) {
+    // Redirect to payments page with both sale and customer so page can show "this sale" or "all customer payments"
+    if (customerId && saleId) {
+      router.push(`/payments?customerId=${customerId}&saleId=${saleId}`);
+    } else if (customerId) {
       router.push(`/payments?customerId=${customerId}`);
     } else {
       router.push(`/payments?saleId=${saleId}`);

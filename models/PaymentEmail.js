@@ -47,6 +47,15 @@ module.exports = (sequelize) => {
     status: {
       type: DataTypes.ENUM('active', 'pending', 'sent', 'opened', 'paid'),
       defaultValue: 'active'
+    },
+    addedByUserId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: 'added_by_user_id',
+      references: {
+        model: 'users',
+        key: 'id'
+      }
     }
   }, {
     tableName: 'payment_emails',
@@ -63,6 +72,11 @@ module.exports = (sequelize) => {
     PaymentEmail.belongsTo(models.Customer, {
       foreignKey: 'customerId',
       as: 'customer'
+    });
+
+    PaymentEmail.belongsTo(models.User, {
+      foreignKey: 'addedByUserId',
+      as: 'addedByUser'
     });
   };
 

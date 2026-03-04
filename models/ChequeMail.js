@@ -48,6 +48,15 @@ module.exports = (sequelize) => {
     status: {
       type: DataTypes.ENUM('active', 'pending', 'sent', 'received', 'processed'),
       defaultValue: 'active'
+    },
+    addedByUserId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: 'added_by_user_id',
+      references: {
+        model: 'users',
+        key: 'id'
+      }
     }
   }, {
     tableName: 'cheques_mail',
@@ -87,6 +96,11 @@ module.exports = (sequelize) => {
     ChequeMail.belongsTo(models.Customer, {
       foreignKey: 'customerId',
       as: 'customer'
+    });
+
+    ChequeMail.belongsTo(models.User, {
+      foreignKey: 'addedByUserId',
+      as: 'addedByUser'
     });
   };
 

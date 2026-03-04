@@ -36,6 +36,8 @@ export async function POST(request) {
       if (sale?.customerId) emailData.customerId = sale.customerId;
     }
 
+    emailData.addedByUserId = user.id;
+
     const paymentEmail = await PaymentEmail.create(emailData);
     if (paymentEmail.saleId) {
       await addPaymentInfoTagToSale(paymentEmail.saleId, user?.id || 1, {

@@ -3533,7 +3533,13 @@ Room: `;
                   {(sale?.customerHasPayments === true || customerHasPayments === true) && (saleForm.customerId || customer?.id || checkedCustomer?.customerId || checkedCustomer?.id) && (
                     <button
                       type="button"
-                      onClick={() => router.push(`/payments?customerId=${saleForm.customerId || customer?.id || checkedCustomer?.customerId || checkedCustomer?.id}`)}
+                      onClick={() => {
+                        const cid = saleForm.customerId || customer?.id || checkedCustomer?.customerId || checkedCustomer?.id;
+                        const sid = saleForm.id || editId;
+                        const q = new URLSearchParams({ customerId: cid });
+                        if (sid) q.set('saleId', sid);
+                        router.push(`/payments?${q.toString()}`);
+                      }}
                       className="bg-purple-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-purple-700 transition-colors duration-200"
                     >
                       View Payment

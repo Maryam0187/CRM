@@ -281,19 +281,29 @@ export default function PaymentView() {
             </button>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
-                {customerId ? 'Payment Information - Customer' : `Payment Information - Sale #${saleId}`}
+                {customerId && saleId
+                  ? `Payment Information - Sale #${saleId}`
+                  : customerId
+                    ? 'Payment Information - Customer'
+                    : `Payment Information - Sale #${saleId}`}
               </h1>
               <p className="text-gray-600 mt-1">
-                {customerId ? 'View all payment details for this customer' : 'View payment details for this sale'}
+                {customerId && saleId
+                  ? 'View payment for this sale or all payments for this customer'
+                  : customerId
+                    ? 'View all payment details for this customer'
+                    : 'View payment details for this sale'}
               </p>
             </div>
-            {/* Show All Payments button - customer view: toggle consolidated cards/banks view */}
-            {customerId && payments.length > 0 && (
+            {/* Toggle: view by sale (this sale only) or all customer payments. Agents only see their own sales in "all". */}
+            {customerId && (payments.length > 0 || saleId) && (
               <button
                 onClick={() => setShowAllPaymentsView(!showAllPaymentsView)}
                 className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition-colors duration-200"
               >
-                {showAllPaymentsView ? 'View by Sale' : 'Show All Payments'}
+                {showAllPaymentsView
+                  ? (saleId ? 'This sale only' : 'View by Sale')
+                  : (saleId ? 'All customer payments' : 'Show All Payments')}
               </button>
             )}
           </div>
@@ -336,17 +346,16 @@ export default function PaymentView() {
             </div>
           )}
 
-          {/* Role-based information display */}
+          {/* Role-based information display - show on icon hover */}
           {!isAdmin(user) && (
-            <div className="flex items-center space-x-2">
-              <svg className="h-5 w-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-sm text-blue-600">
-                {isAgent(user) && "Limited view - Showing masked payment information"}
-                {isSupervisor(user) && "Limited view - Showing masked payment information"}
-                {isProcessor(user) && "Limited view - Showing masked payment information"}
-                {isVerification(user) && "Limited view - Showing masked payment information"}
+            <div className="flex items-center">
+              <span
+                title="Limited view - Showing masked payment information"
+                className="cursor-help inline-flex"
+              >
+                <svg className="h-5 w-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
               </span>
             </div>
           )}
@@ -418,6 +427,12 @@ export default function PaymentView() {
                     <span className="text-gray-600">Added:</span>
                     <span className="text-gray-500 text-xs">{card.createdDate ? formatDisplayDate(card.createdDate) : card.created_at ? formatDisplayDate(card.created_at) : 'N/A'}</span>
                   </div>
+                  {isAdmin(user) && card.addedByUserName && (
+                    <div className="flex justify-between text-sm mt-1">
+                      <span className="text-gray-600">Added by:</span>
+                      <span className="text-gray-700 text-xs">{card.addedByUserName}{card.addedByUserRole ? ` (${card.addedByUserRole})` : ''}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -441,6 +456,9 @@ export default function PaymentView() {
               <div className="flex justify-between text-sm"><span className="text-gray-600">Driver License:</span><span className="font-mono">{bank.driverLicense}</span></div>
               <div className="mt-2 pt-2 border-t border-gray-200">
                 <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{bank.createdDate || formatDisplayDate(bank.created_at) || 'N/A'}</span></div>
+{isAdmin(user) && bank.addedByUserName && (
+                <div className="flex justify-between text-sm mt-1"><span className="text-gray-600">Added by:</span><span className="text-gray-700 text-xs">{bank.addedByUserName}{bank.addedByUserRole ? ` (${bank.addedByUserRole})` : ''}</span></div>
+                )}
               </div>
             </div>
           </div>
@@ -463,6 +481,9 @@ export default function PaymentView() {
               <div className="flex justify-between text-sm"><span className="text-gray-600">State:</span><span>{cheque.state || 'N/A'}</span></div>
               <div className="mt-2 pt-2 border-t border-gray-200">
                 <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{cheque.createdDate || formatDisplayDate(cheque.created_at) || 'N/A'}</span></div>
+                {isAdmin(user) && cheque.addedByUserName && (
+                  <div className="flex justify-between text-sm mt-1"><span className="text-gray-600">Added by:</span><span className="text-gray-700 text-xs">{cheque.addedByUserName}{cheque.addedByUserRole ? ` (${cheque.addedByUserRole})` : ''}</span></div>
+                )}
               </div>
             </div>
           </div>
@@ -483,6 +504,9 @@ export default function PaymentView() {
               <div className="flex justify-between text-sm"><span className="text-gray-600">Bank Name:</span><span>{cheque.bankName || 'N/A'}</span></div>
               <div className="mt-2 pt-2 border-t border-gray-200">
                 <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{cheque.createdDate || formatDisplayDate(cheque.created_at) || 'N/A'}</span></div>
+                {isAdmin(user) && cheque.addedByUserName && (
+                  <div className="flex justify-between text-sm mt-1"><span className="text-gray-600">Added by:</span><span className="text-gray-700 text-xs">{cheque.addedByUserName}{cheque.addedByUserRole ? ` (${cheque.addedByUserRole})` : ''}</span></div>
+                )}
               </div>
             </div>
           </div>
@@ -503,6 +527,9 @@ export default function PaymentView() {
               {email.sentAt && <div className="flex justify-between text-sm"><span className="text-gray-600">Sent At:</span><span className="text-gray-500 text-xs">{formatDisplayDate(email.sentAt)}</span></div>}
               <div className="mt-2 pt-2 border-t border-gray-200">
                 <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{email.createdDate || formatDisplayDate(email.created_at) || 'N/A'}</span></div>
+                {isAdmin(user) && email.addedByUserName && (
+                  <div className="flex justify-between text-sm mt-1"><span className="text-gray-600">Added by:</span><span className="text-gray-700 text-xs">{email.addedByUserName}{email.addedByUserRole ? ` (${email.addedByUserRole})` : ''}</span></div>
+                )}
               </div>
             </div>
           </div>
@@ -526,7 +553,7 @@ export default function PaymentView() {
                   <svg className="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <span className="text-sm text-blue-600">Limited view - Showing masked payment information</span>
+                  {/* <span className="text-sm text-blue-600">Limited view - Showing masked payment information</span> */}
                 </div>
               )}
             </div>
@@ -856,6 +883,14 @@ export default function PaymentView() {
                                     </div>
                                       </div>
                                     )}
+                                    {isAdmin(user) && card.addedByUserName && (
+                                      <div className="mt-2 pt-2 border-t border-gray-200">
+                                        <div className="flex justify-between text-sm">
+                                          <span className="text-gray-600">Added by:</span>
+                                          <span className="text-gray-700 text-xs">{card.addedByUserName}{card.addedByUserRole ? ` (${card.addedByUserRole})` : ''}</span>
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               );
@@ -918,6 +953,12 @@ export default function PaymentView() {
                                       {bank.createdDate || formatDisplayDate(bank.created_at) || 'N/A'}
                                     </span>
                                   </div>
+                                  {isAdmin(user) && bank.addedByUserName && (
+                                    <div className="flex justify-between text-sm mt-1">
+                                      <span className="text-gray-600">Added by:</span>
+                                      <span className="text-gray-700 text-xs">{bank.addedByUserName}{bank.addedByUserRole ? ` (${bank.addedByUserRole})` : ''}</span>
+                                    </div>
+                                  )}
                                     </div>
                                 </div>
                               </div>
@@ -973,6 +1014,12 @@ export default function PaymentView() {
                                         {cheque.createdDate || formatDisplayDate(cheque.created_at) || 'N/A'}
                                       </span>
                                     </div>
+                                    {isAdmin(user) && cheque.addedByUserName && (
+                                      <div className="flex justify-between text-sm mt-1">
+                                        <span className="text-gray-600">Added by:</span>
+                                        <span className="text-gray-700 text-xs">{cheque.addedByUserName}{cheque.addedByUserRole ? ` (${cheque.addedByUserRole})` : ''}</span>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1022,6 +1069,12 @@ export default function PaymentView() {
                                         {cheque.createdDate || formatDisplayDate(cheque.created_at) || 'N/A'}
                                       </span>
                                     </div>
+                                    {isAdmin(user) && cheque.addedByUserName && (
+                                      <div className="flex justify-between text-sm mt-1">
+                                        <span className="text-gray-600">Added by:</span>
+                                        <span className="text-gray-700 text-xs">{cheque.addedByUserName}{cheque.addedByUserRole ? ` (${cheque.addedByUserRole})` : ''}</span>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1079,6 +1132,12 @@ export default function PaymentView() {
                                         {email.createdDate || formatDisplayDate(email.created_at) || 'N/A'}
                                       </span>
                                     </div>
+                                    {isAdmin(user) && email.addedByUserName && (
+                                      <div className="flex justify-between text-sm mt-1">
+                                        <span className="text-gray-600">Added by:</span>
+                                        <span className="text-gray-700 text-xs">{email.addedByUserName}{email.addedByUserRole ? ` (${email.addedByUserRole})` : ''}</span>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               </div>

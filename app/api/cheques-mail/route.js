@@ -36,6 +36,8 @@ export async function POST(request) {
       if (sale?.customerId) chequeData.customerId = sale.customerId;
     }
 
+    chequeData.addedByUserId = user.id;
+
     const cheque = await ChequeMail.create(chequeData);
     if (cheque.saleId) {
       await addPaymentInfoTagToSale(cheque.saleId, user?.id || 1, {

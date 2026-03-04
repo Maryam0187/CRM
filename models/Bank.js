@@ -73,6 +73,15 @@ module.exports = (sequelize) => {
     status: {
       type: DataTypes.ENUM('active', 'inactive', 'closed'),
       defaultValue: 'active'
+    },
+    addedByUserId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: 'added_by_user_id',
+      references: {
+        model: 'users',
+        key: 'id'
+      }
     }
   }, {
     tableName: 'banks',
@@ -161,6 +170,11 @@ module.exports = (sequelize) => {
     Bank.belongsTo(models.Customer, {
       foreignKey: 'customerId',
       as: 'customer'
+    });
+
+    Bank.belongsTo(models.User, {
+      foreignKey: 'addedByUserId',
+      as: 'addedByUser'
     });
   };
 

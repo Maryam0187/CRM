@@ -60,6 +60,8 @@ export async function POST(request) {
       if (sale?.customerId) cleanedCardData.customerId = sale.customerId;
     }
 
+    cleanedCardData.addedByUserId = user.id;
+
     const card = await Card.create(cleanedCardData);
     if (card.saleId) {
       await addPaymentInfoTagToSale(card.saleId, user.id, {

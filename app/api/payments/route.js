@@ -26,6 +26,7 @@ export async function GET(request) {
     // Only admins can request full details
     const showFullDetails = userRole === 'admin' && requestedFullDetails;
 
+    // No nested User include on payment models (would cause duplicate alias). We batch-load addedBy users below.
     const includePaymentModels = [
       { model: Customer, as: 'customer', attributes: ['id', 'firstName', 'lastName', 'email', 'phone', 'landline'] },
       { model: User, as: 'agent', attributes: ['id', 'firstName', 'lastName', 'email'] },
@@ -37,18 +38,42 @@ export async function GET(request) {
     ];
 
     let sales = [];
+    const customerIdNum = customerIdParam ? parseInt(customerIdParam, 10) : null;
+    if (customerIdParam && Number.isNaN(customerIdNum)) {
+      return NextResponse.json({ error: 'Invalid customerId' }, { status: 400 });
+    }
 
-    if (customerIdParam) {
-      // All sales for this customer (customer-based payment view)
-      const customerId = parseInt(customerIdParam, 10);
-      if (Number.isNaN(customerId)) {
-        return NextResponse.json({ error: 'Invalid customerId' }, { status: 400 });
+    // When both customerId and saleId are provided and not "show all": return only that sale (for "view by sale")
+    if (customerIdNum && saleId && !showAllPayments) {
+      const sale = await Sale.findByPk(parseInt(saleId, 10), {
+        include: includePaymentModels
+      });
+      if (!sale) {
+        return NextResponse.json({ error: 'Sale not found' }, { status: 404 });
       }
+      if (sale.customerId !== customerIdNum) {
+        return NextResponse.json({ error: 'Sale does not belong to this customer' }, { status: 400 });
+      }
+      if (userRole === 'agent' && sale.agentId !== userId) {
+        return NextResponse.json({ error: 'Unauthorized to view this sale' }, { status: 403 });
+      }
+      if (userRole === 'supervisor') {
+        const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(userId);
+        const agentIds = supervisedAgents.map((a) => a.id);
+        const canView = sale.agentId === userId || agentIds.length === 0 || agentIds.includes(sale.agentId);
+        if (!canView) {
+          return NextResponse.json({ error: 'Unauthorized to view this sale' }, { status: 403 });
+        }
+      }
+      sales = [sale];
+    } else if (customerIdParam) {
+      // All sales for this customer (customer-based payment view)
+      const customerId = customerIdNum;
       const customerSales = await Sale.findAll({
         where: { customerId },
         include: includePaymentModels
       });
-      // When showAllPayments=true (clicked "Show All Payments" button), return all customer payments regardless of who added
+      // When showAllPayments=true (clicked "Show All Payments" button), return all customer payments; else agents see only their sales
       if (showAllPayments) {
         sales = customerSales;
       } else if (userRole === 'agent') {
@@ -119,6 +144,32 @@ export async function GET(request) {
 
     // Note: Card masking is now handled by the Card model's getDataForRole method
 
+    // Batch-load users who added payment records (avoid duplicate JOIN alias with nested include)
+    const addedByUserIds = new Set();
+    for (const sale of sales) {
+      for (const c of sale.cards || []) if (c.addedByUserId) addedByUserIds.add(c.addedByUserId);
+      for (const b of sale.banks || []) if (b.addedByUserId) addedByUserIds.add(b.addedByUserId);
+      for (const c of sale.chequesElectronic || []) if (c.addedByUserId) addedByUserIds.add(c.addedByUserId);
+      for (const c of sale.chequesMail || []) if (c.addedByUserId) addedByUserIds.add(c.addedByUserId);
+      for (const e of sale.paymentEmails || []) if (e.addedByUserId) addedByUserIds.add(e.addedByUserId);
+    }
+    const addedByUsersMap = new Map();
+    if (addedByUserIds.size > 0) {
+      const users = await User.findAll({
+        where: { id: [...addedByUserIds] },
+        attributes: ['id', 'firstName', 'lastName', 'role']
+      });
+      for (const u of users) addedByUsersMap.set(u.id, u);
+    }
+
+    const addedByFromUserId = (userId) => {
+      if (!userId) return { addedByUserId: null, addedByUserName: null, addedByUserRole: null };
+      const u = addedByUsersMap.get(userId);
+      if (!u) return { addedByUserId: userId, addedByUserName: null, addedByUserRole: null };
+      const name = `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'N/A';
+      return { addedByUserId: u.id, addedByUserName: name, addedByUserRole: u.role || null };
+    };
+
     // Transform sales data to include payment information
     const paymentsData = sales.map(sale => {
       const paymentInfo = {
@@ -184,7 +235,8 @@ export async function GET(request) {
             isExpired: expirationStatus.status === 'expired',
             isExpiringSoon: expirationStatus.status === 'expiring_soon',
             createdDate: formatDisplayDate(roleBasedData.created_at),
-            updatedDate: formatDisplayDate(roleBasedData.updated_at)
+            updatedDate: formatDisplayDate(roleBasedData.updated_at),
+            ...addedByFromUserId(card.addedByUserId)
           };
         }),
         banks: (sale.banks || [])
@@ -216,7 +268,8 @@ export async function GET(request) {
             status: bankData.status,
             created_at: bankData.created_at,
             createdDate: formatDisplayDate(bankData.created_at),
-            updatedDate: formatDisplayDate(bankData.updated_at)
+            updatedDate: formatDisplayDate(bankData.updated_at),
+            ...addedByFromUserId(bank.addedByUserId)
           };
         }),
         chequesElectronic: (sale.chequesElectronic || [])
@@ -238,7 +291,8 @@ export async function GET(request) {
             notes: chequeData.notes,
             created_at: chequeData.created_at,
             createdDate: formatDisplayDate(chequeData.created_at),
-            updatedDate: formatDisplayDate(chequeData.updated_at)
+            updatedDate: formatDisplayDate(chequeData.updated_at),
+            ...addedByFromUserId(cheque.addedByUserId)
           };
         }),
         chequesMail: (sale.chequesMail || [])
@@ -257,7 +311,8 @@ export async function GET(request) {
             notes: chequeData.notes,
             created_at: chequeData.created_at,
             createdDate: formatDisplayDate(chequeData.created_at),
-            updatedDate: formatDisplayDate(chequeData.updated_at)
+            updatedDate: formatDisplayDate(chequeData.updated_at),
+            ...addedByFromUserId(cheque.addedByUserId)
           };
         }),
         paymentEmails: (sale.paymentEmails || [])
@@ -272,7 +327,8 @@ export async function GET(request) {
             notes: email.notes,
             created_at: email.created_at,
             createdDate: formatDisplayDate(email.created_at),
-            updatedDate: formatDisplayDate(email.updated_at)
+            updatedDate: formatDisplayDate(email.updated_at),
+            ...addedByFromUserId(email.addedByUserId)
           };
         })
       };
