@@ -190,7 +190,18 @@ export async function PUT(request, { params }) {
       console.error('Error sending sale update notification:', notificationError);
       // Don't fail the sale update if notification fails
     }
-    
+
+    // Emit sale_updated so agent and supervisors can refresh sales table in real time (no loader)
+    try {
+      if (socketManager.isReady() && sale.agentId) {
+        const supervisorsOfAgent = await SupervisorAgentService.getSupervisors(sale.agentId);
+        const supervisorIds = supervisorsOfAgent.map(s => s.id);
+        socketManager.emitSaleUpdated(sale.id, sale.agentId, supervisorIds);
+      }
+    } catch (emitError) {
+      console.error('Error emitting sale_updated:', emitError);
+    }
+
     return Response.json({
       success: true,
       message: 'Sale updated successfully',

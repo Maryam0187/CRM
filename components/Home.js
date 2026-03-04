@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import Table from './Table';
 import DateFilter from './DateFilter';
 import ProtectedRoute from './ProtectedRoute';
 import SalesTimeline from './SalesTimeline';
 import AppointmentSummary from './AppointmentSummary';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
 import apiClient from '../lib/apiClient';
 import { SALES_STATUSES, SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName, getTagDisplayName, getTagBadgeClasses, SALE_TAGS, DISPLAY_TAGS, hasTag } from '../lib/salesStatuses';
@@ -17,7 +18,9 @@ import { downloadSaleDoc, buildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } 
 
 export default function Home() {
   const router = useRouter();
+  const pathname = usePathname();
   const { user } = useAuth();
+  const { socket, isConnected } = useSocket();
 
   const buildPaymentSections = (sale) => {
     const cards = Array.isArray(sale?.cards) ? sale.cards : [];
@@ -272,9 +275,13 @@ export default function Home() {
   };
 
   // Fetch sales data from API
-  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage, dateFieldValue = dateField, numberSearchValue = numberSearch, searchLastFourValue = searchLastFour) => {
-    setLoading(true);
-    setError(null);
+  // options.silent = true: refresh without showing loader (e.g. real-time update from socket)
+  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage, dateFieldValue = dateField, numberSearchValue = numberSearch, searchLastFourValue = searchLastFour, options = {}) => {
+    const { silent = false } = options;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       console.log('fetchSalesData called with user:', user?.role, 'showingSupervisorSales:', showingSupervisorSales, 'selectedAgent:', selectedAgent?.id);
       
@@ -332,10 +339,10 @@ export default function Home() {
         setError(result.message || 'Failed to fetch sales data');
       }
     } catch (err) {
-      setError('Network error: Unable to fetch sales data');
+      if (!silent) setError('Network error: Unable to fetch sales data');
       console.error('Error fetching sales:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -370,6 +377,29 @@ export default function Home() {
       clearTimeout(timer);
     };
   }, [numberSearch]);
+
+  // Listen for sale_updated from socket: refresh sales table without loader when on home and the update is relevant
+  useEffect(() => {
+    if (!socket || !isConnected || !user?.id) return;
+
+    const handleSaleUpdated = (payload) => {
+      const { agentId } = payload || {};
+      if (pathname !== '/') return;
+
+      const isAgentView = user.role === 'agent' && agentId === user.id;
+      const isSupervisorOnAgentTab = user.role === 'supervisor' && !showingSupervisorSales && selectedAgent?.id === agentId;
+
+      if (isAgentView || isSupervisorOnAgentTab) {
+        fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, { silent: true });
+      }
+    };
+
+    socket.on('sale_updated', handleSaleUpdated);
+    return () => {
+      socket.off('sale_updated', handleSaleUpdated);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, isConnected, pathname, user?.id, user?.role, showingSupervisorSales, selectedAgent?.id, status, dateFilter, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour]);
 
   // Load sales data when user, filters, pagination, or supervisor view changes
   useEffect(() => {
