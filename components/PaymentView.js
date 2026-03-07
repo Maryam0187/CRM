@@ -19,13 +19,13 @@ export default function PaymentView() {
   const [error, setError] = useState(null);
   const [showFullDetails, setShowFullDetails] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
-  const [showAllPaymentsView, setShowAllPaymentsView] = useState(false); // Consolidated view + API fetches all payments when true
+  const [updatingRefs, setUpdatingRefs] = useState(false);
 
   useEffect(() => {
     if (user) {
       fetchPayments();
     }
-  }, [user, saleId, customerId, showFullDetails, showAllPaymentsView]);
+  }, [user, saleId, customerId, showFullDetails]);
 
   const fetchPayments = async () => {
     try {
@@ -33,7 +33,6 @@ export default function PaymentView() {
       const params = new URLSearchParams();
       if (saleId) params.append('saleId', saleId);
       if (customerId) params.append('customerId', customerId);
-      if (customerId && showAllPaymentsView) params.append('showAllPayments', 'true');
       if (isAdmin(user) && showFullDetails) params.append('showFullDetails', 'true');
       
       const url = `/api/payments?${params.toString()}`;
@@ -50,6 +49,46 @@ export default function PaymentView() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Sort so current sale (from URL) is first when viewing a specific sale
+  const sortedPayments = (() => {
+    if (!saleId || payments.length <= 1) return payments;
+    const currentId = parseInt(saleId, 10);
+    const current = payments.find((p) => p.saleId === currentId);
+    const others = payments.filter((p) => p.saleId !== currentId);
+    return current ? [current, ...others] : payments;
+  })();
+
+  const handleUsedOldPaymentRefs = async (newRefs) => {
+    if (!saleId) return;
+    setUpdatingRefs(true);
+    setError(null);
+    try {
+      const response = await apiClient.put(`/api/sales/${saleId}`, { usedOldPaymentRefs: newRefs });
+      const result = await response.json();
+      if (result.success) await fetchPayments();
+      else setError(result.message || 'Failed to update');
+    } catch (err) {
+      setError(err.message || 'Failed to update');
+    } finally {
+      setUpdatingRefs(false);
+    }
+  };
+
+  const addOldPaymentRef = (paymentType, paymentId, originalSaleId) => {
+    const current = payments.find((p) => p.saleId === parseInt(saleId, 10));
+    const refs = current?.saleInfo?.usedOldPaymentRefs || [];
+    if (refs.some((r) => r.paymentType === paymentType && r.paymentId === paymentId && r.originalSaleId === originalSaleId)) return;
+    handleUsedOldPaymentRefs([...refs, { paymentType, paymentId, originalSaleId }]);
+  };
+
+  const removeOldPaymentRef = (paymentType, paymentId) => {
+    const current = payments.find((p) => p.saleId === parseInt(saleId, 10));
+    const refs = (current?.saleInfo?.usedOldPaymentRefs || []).filter(
+      (r) => !(r.paymentType === paymentType && r.paymentId === paymentId)
+    );
+    handleUsedOldPaymentRefs(refs);
   };
 
   const handleAdminAction = async (action, status, saleIdToUpdate) => {
@@ -289,23 +328,12 @@ export default function PaymentView() {
               </h1>
               <p className="text-gray-600 mt-1">
                 {customerId && saleId
-                  ? 'View payment for this sale or all payments for this customer'
+                  ? 'Payments for this sale first, then other sales below. You can use an old payment from another sale for this sale.'
                   : customerId
                     ? 'View all payment details for this customer'
                     : 'View payment details for this sale'}
               </p>
             </div>
-            {/* Toggle: view by sale (this sale only) or all customer payments. Agents only see their own sales in "all". */}
-            {customerId && (payments.length > 0 || saleId) && (
-              <button
-                onClick={() => setShowAllPaymentsView(!showAllPaymentsView)}
-                className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 transition-colors duration-200"
-              >
-                {showAllPaymentsView
-                  ? (saleId ? 'This sale only' : 'View by Sale')
-                  : (saleId ? 'All customer payments' : 'Show All Payments')}
-              </button>
-            )}
           </div>
           
           {/* Admin Toggle */}
@@ -363,242 +391,10 @@ export default function PaymentView() {
 
       </div>
 
-      {/* Consolidated All Payments View (customerId only) */}
-      {customerId && showAllPaymentsView && (() => {
-        const allCards = payments.flatMap((p) => (p.cards || []).map((c) => ({ ...c, saleId: p.saleId })));
-        const allBanks = payments.flatMap((p) => (p.banks || []).map((b) => ({ ...b, saleId: p.saleId })));
-        const allChequesElectronic = payments.flatMap((p) => (p.chequesElectronic || []).map((c) => ({ ...c, saleId: p.saleId })));
-        const allChequesMail = payments.flatMap((p) => (p.chequesMail || []).map((c) => ({ ...c, saleId: p.saleId })));
-        const allPaymentEmails = payments.flatMap((p) => (p.paymentEmails || []).map((e) => ({ ...e, saleId: p.saleId })));
-        const hasAny = allCards.length > 0 || allBanks.length > 0 || allChequesElectronic.length > 0 || allChequesMail.length > 0 || allPaymentEmails.length > 0;
-
-        const cardBlock = (card, idx) => {
-          const getCardBgClass = () => {
-            if (card.isExpired) return 'bg-red-50 border-l-4 border-red-500 rounded-lg p-4';
-            if (card.isExpiringSoon) return 'bg-yellow-50 border-l-4 border-yellow-500 rounded-lg p-4';
-            return 'bg-green-50 border-l-4 border-green-500 rounded-lg p-4';
-          };
-          const getExpiryTextClass = () => {
-            if (card.isExpired) return 'text-red-700 font-bold';
-            if (card.isExpiringSoon) return 'text-yellow-700 font-bold';
-            return 'text-green-700';
-          };
-          const getStatusBadgeClass = () => {
-            if (card.isExpired) return 'bg-red-100 text-red-800';
-            if (card.isExpiringSoon) return 'bg-yellow-100 text-yellow-800';
-            return 'bg-green-100 text-green-800';
-          };
-          return (
-            <div key={idx} className={getCardBgClass()}>
-              <div className="flex justify-between items-start mb-3">
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm font-medium text-gray-900">{card.provider ? card.provider.toUpperCase() : 'N/A'}</span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">Sale #{card.saleId}</span>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusBadgeClass()}`}>
-                    {card.isExpired && '❌ Expired'}
-                    {card.isExpiringSoon && '⚠️ Expiring Soon'}
-                    {!card.isExpired && !card.isExpiringSoon && '✅ Valid'}
-                  </span>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Card Number:</span>
-                  <span className="font-mono">{card.cardNumber}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">CVV:</span>
-                  <span className="font-mono">{card.cvv}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Expiry:</span>
-                  <span className={`font-mono ${getExpiryTextClass()}`}>{card.expiryDate && card.expiryDate.trim() !== '' ? card.expiryDate : 'N/A'}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Name on Card:</span>
-                  <span>{card.customerName || 'N/A'}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Type:</span>
-                  <span className="capitalize">{card.cardType || 'N/A'}</span>
-                </div>
-                <div className="mt-2 pt-2 border-t border-gray-200">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Added:</span>
-                    <span className="text-gray-500 text-xs">{card.createdDate ? formatDisplayDate(card.createdDate) : card.created_at ? formatDisplayDate(card.created_at) : 'N/A'}</span>
-                  </div>
-                  {isAdmin(user) && card.addedByUserName && (
-                    <div className="flex justify-between text-sm mt-1">
-                      <span className="text-gray-600">Added by:</span>
-                      <span className="text-gray-700 text-xs">{card.addedByUserName}{card.addedByUserRole ? ` (${card.addedByUserRole})` : ''}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        };
-
-        const bankBlock = (bank, idx) => (
-          <div key={idx} className="bg-gray-50 rounded-lg p-4">
-            <div className="flex justify-between items-start mb-2">
-              <div className="flex items-center space-x-2">
-                <span className="text-sm font-medium text-gray-900">{bank.bankName || 'N/A'}</span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">Sale #{bank.saleId}</span>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${bank.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{bank.status}</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Account Number:</span><span className="font-mono">{bank.accountNumber}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Routing Number:</span><span className="font-mono">{bank.routingNumber}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Check Number:</span><span className="font-mono">{bank.checkNumber || 'N/A'}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Account Holder:</span><span>{bank.accountHolder || 'N/A'}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Driver License:</span><span className="font-mono">{bank.driverLicense}</span></div>
-              <div className="mt-2 pt-2 border-t border-gray-200">
-                <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{bank.createdDate || formatDisplayDate(bank.created_at) || 'N/A'}</span></div>
-{isAdmin(user) && bank.addedByUserName && (
-                <div className="flex justify-between text-sm mt-1"><span className="text-gray-600">Added by:</span><span className="text-gray-700 text-xs">{bank.addedByUserName}{bank.addedByUserRole ? ` (${bank.addedByUserRole})` : ''}</span></div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-
-        const chequeElectronicBlock = (cheque, idx) => (
-          <div key={idx} className="bg-blue-50 rounded-lg p-4 border-l-4 border-blue-500">
-            <div className="flex justify-between items-start mb-2">
-              <div className="flex items-center space-x-2">
-                <span className="text-sm font-medium text-gray-900">{cheque.bankName || 'N/A'}</span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">Sale #{cheque.saleId}</span>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cheque.status === 'active' ? 'bg-green-100 text-green-800' : cheque.status === 'processed' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>{cheque.status}</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Routing Number:</span><span className="font-mono">{cheque.routingNumber || 'N/A'}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Account Number:</span><span className="font-mono">{cheque.accountNumber || 'N/A'}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Cheque Number:</span><span className="font-mono">{cheque.chequeNumber || 'N/A'}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Name on Cheque:</span><span>{cheque.nameOnCheque || 'N/A'}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">State:</span><span>{cheque.state || 'N/A'}</span></div>
-              <div className="mt-2 pt-2 border-t border-gray-200">
-                <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{cheque.createdDate || formatDisplayDate(cheque.created_at) || 'N/A'}</span></div>
-                {isAdmin(user) && cheque.addedByUserName && (
-                  <div className="flex justify-between text-sm mt-1"><span className="text-gray-600">Added by:</span><span className="text-gray-700 text-xs">{cheque.addedByUserName}{cheque.addedByUserRole ? ` (${cheque.addedByUserRole})` : ''}</span></div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-
-        const chequeMailBlock = (cheque, idx) => (
-          <div key={idx} className="bg-purple-50 rounded-lg p-4 border-l-4 border-purple-500">
-            <div className="flex justify-between items-start mb-2">
-              <div className="flex items-center space-x-2">
-                <span className="text-sm font-medium text-gray-900">{cheque.bankName || 'N/A'}</span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">Sale #{cheque.saleId}</span>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cheque.status === 'active' ? 'bg-green-100 text-green-800' : cheque.status === 'sent' ? 'bg-blue-100 text-blue-800' : cheque.status === 'received' ? 'bg-green-100 text-green-800' : cheque.status === 'processed' ? 'bg-purple-100 text-purple-800' : 'bg-yellow-100 text-yellow-800'}`}>{cheque.status}</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Cheque Number:</span><span className="font-mono">{cheque.chequeNumber || 'N/A'}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Name on Cheque:</span><span>{cheque.nameOnCheque || 'N/A'}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Bank Name:</span><span>{cheque.bankName || 'N/A'}</span></div>
-              <div className="mt-2 pt-2 border-t border-gray-200">
-                <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{cheque.createdDate || formatDisplayDate(cheque.created_at) || 'N/A'}</span></div>
-                {isAdmin(user) && cheque.addedByUserName && (
-                  <div className="flex justify-between text-sm mt-1"><span className="text-gray-600">Added by:</span><span className="text-gray-700 text-xs">{cheque.addedByUserName}{cheque.addedByUserRole ? ` (${cheque.addedByUserRole})` : ''}</span></div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-
-        const paymentEmailBlock = (email, idx) => (
-          <div key={idx} className="bg-indigo-50 rounded-lg p-4 border-l-4 border-indigo-500">
-            <div className="flex justify-between items-start mb-2">
-              <div className="flex items-center space-x-2">
-                <span className="text-sm font-medium text-gray-900">📧 Email Invoice</span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-800">Sale #{email.saleId}</span>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${email.status === 'active' ? 'bg-green-100 text-green-800' : email.status === 'sent' ? 'bg-blue-100 text-blue-800' : email.status === 'opened' ? 'bg-green-100 text-green-800' : email.status === 'paid' ? 'bg-green-200 text-green-900' : 'bg-yellow-100 text-yellow-800'}`}>{email.status}</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Email Address:</span><span className="font-mono">{email.emailAddress || 'N/A'}</span></div>
-              {email.invoiceLink && <div className="flex justify-between text-sm"><span className="text-gray-600">Invoice Link:</span><a href={email.invoiceLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View Link</a></div>}
-              {email.sentAt && <div className="flex justify-between text-sm"><span className="text-gray-600">Sent At:</span><span className="text-gray-500 text-xs">{formatDisplayDate(email.sentAt)}</span></div>}
-              <div className="mt-2 pt-2 border-t border-gray-200">
-                <div className="flex justify-between text-sm"><span className="text-gray-600">Added:</span><span className="text-gray-500 text-xs">{email.createdDate || formatDisplayDate(email.created_at) || 'N/A'}</span></div>
-                {isAdmin(user) && email.addedByUserName && (
-                  <div className="flex justify-between text-sm mt-1"><span className="text-gray-600">Added by:</span><span className="text-gray-700 text-xs">{email.addedByUserName}{email.addedByUserRole ? ` (${email.addedByUserRole})` : ''}</span></div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-
-        if (!hasAny) {
-          return (
-            <div className="bg-white shadow rounded-lg p-6 mb-6">
-              <p className="text-sm text-gray-500 text-center">No payment methods found for this customer.</p>
-            </div>
-          );
-        }
-
-        return (
-          <div className="bg-white shadow rounded-lg overflow-hidden mb-6">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">All Payment Methods (Consolidated)</h2>
-              <p className="text-sm text-gray-600">All cards, banks, cheques, and payment emails for this customer across all sales</p>
-              {!isAdmin(user) && (
-                <div className="mt-3 flex items-center space-x-2">
-                  <svg className="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  {/* <span className="text-sm text-blue-600">Limited view - Showing masked payment information</span> */}
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-4">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {allCards.length > 0 && (
-                  <div>
-                    <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">All Cards ({allCards.length})</h5>
-                    <div className="space-y-3">{allCards.map((c, i) => cardBlock(c, i))}</div>
-                  </div>
-                )}
-                {allBanks.length > 0 && (
-                  <div>
-                    <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">All Bank Accounts ({allBanks.length})</h5>
-                    <div className="space-y-3">{allBanks.map((b, i) => bankBlock(b, i))}</div>
-                  </div>
-                )}
-                {allChequesElectronic.length > 0 && (
-                  <div>
-                    <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">All Electronic Cheques ({allChequesElectronic.length})</h5>
-                    <div className="space-y-3">{allChequesElectronic.map((c, i) => chequeElectronicBlock(c, i))}</div>
-                  </div>
-                )}
-                {allChequesMail.length > 0 && (
-                  <div>
-                    <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">All Cheques to Mail ({allChequesMail.length})</h5>
-                    <div className="space-y-3">{allChequesMail.map((c, i) => chequeMailBlock(c, i))}</div>
-                  </div>
-                )}
-                {allPaymentEmails.length > 0 && (
-                  <div>
-                    <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">All Payment Emails ({allPaymentEmails.length})</h5>
-                    <div className="space-y-3">{allPaymentEmails.map((e, i) => paymentEmailBlock(e, i))}</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Payment Cards (by sale) - hidden when showing consolidated view */}
-      {!(customerId && showAllPaymentsView) && (
+      {/* Payment Cards (by sale): current sale first, then other sales. All payments on one page. */}
+      {(
       <div className="grid gap-6">
-        {payments.length === 0 ? (
+        {sortedPayments.length === 0 ? (
           <div className="text-center py-12">
             <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -609,7 +405,12 @@ export default function PaymentView() {
             </p>
           </div>
         ) : (
-          payments.map((payment) => (
+          sortedPayments.map((payment) => {
+            const isCurrentSale = saleId && payment.saleId === parseInt(saleId, 10);
+            const usedRefs = (payment.saleInfo?.usedOldPaymentRefs || []).filter(Boolean);
+            const canShowSaleInfo = isAdmin(user) || (isSupervisor(user) && (payment.agent?.id === user?.id || user?.supervisedAgents?.some((a) => a.id === payment.agent?.id)));
+            const canShowAgentName = !isAgent(user) || payment.agent?.id === user?.id;
+            return (
             <div key={payment.saleId} className="bg-white shadow rounded-lg overflow-hidden">
               {/* Sale Header */}
               <div className="px-6 py-4 border-b border-gray-200">
@@ -619,7 +420,8 @@ export default function PaymentView() {
                       Sale #{payment.saleId}
                     </h3>
                     <p className="text-sm text-gray-600">
-                      Customer: {payment.customer.name} • Agent: {payment.agent.name}
+                      Customer: {payment.customer.name}
+                      {canShowAgentName && payment.agent?.name && ` • Agent: ${payment.agent.name}`}
                     </p>
                   </div>
                   <div className="text-right">
@@ -739,7 +541,8 @@ export default function PaymentView() {
               {/* Payment Details */}
               <div className="px-6 py-4">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Sale Information */}
+                  {/* Sale Information - admin always; supervisor only if sale is from them or their agent */}
+                  {canShowSaleInfo && (
                   <div>
                     <h4 className="text-sm font-medium text-gray-900 mb-3">Sale Information</h4>
                     <div className="space-y-2">
@@ -765,6 +568,7 @@ export default function PaymentView() {
                       </div>
                     </div>
                   </div>
+                  )}
 
                   {/* Customer Information */}
                   <div>
@@ -785,6 +589,72 @@ export default function PaymentView() {
                     </div>
                   </div>
                 </div>
+
+                {/* Old payments used for this sale (from other sales) */}
+                {isCurrentSale && usedRefs.length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-gray-200">
+                    <h4 className="text-sm font-medium text-gray-900 mb-2">Old payments used for this sale</h4>
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-4">
+                      These payment methods were added for another sale and are shown here for use with Sale #{payment.saleId}.
+                    </p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                      {usedRefs.map((ref, refIdx) => {
+                        const origSale = payments.find((p) => p.saleId === ref.originalSaleId);
+                        if (!origSale) return null;
+                        const type = ref.paymentType;
+                        const id = ref.paymentId;
+                        let item = null;
+                        if (type === 'card') item = (origSale.cards || []).find((c) => c.id === id);
+                        else if (type === 'bank') item = (origSale.banks || []).find((b) => b.id === id);
+                        else if (type === 'cheque_electronic') item = (origSale.chequesElectronic || []).find((c) => c.id === id);
+                        else if (type === 'cheque_mail') item = (origSale.chequesMail || []).find((c) => c.id === id);
+                        else if (type === 'payment_email') item = (origSale.paymentEmails || []).find((e) => e.id === id);
+                        if (!item) return null;
+                        return (
+                          <div key={`ref-${refIdx}-${type}-${id}`} className="relative rounded-lg p-4 bg-amber-50 border border-amber-200">
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="text-xs font-medium text-amber-800">Old payment — from Sale #{ref.originalSaleId}</span>
+                              <button
+                                type="button"
+                                onClick={() => removeOldPaymentRef(type, id)}
+                                disabled={updatingRefs}
+                                className="text-xs text-amber-700 hover:text-amber-900 underline disabled:opacity-50"
+                              >
+                                Remove from this sale
+                              </button>
+                            </div>
+                            {type === 'card' && (
+                              <div className="text-sm space-y-1">
+                                <div className="flex justify-between"><span className="text-gray-600">Card:</span><span className="font-mono">{item.provider?.toUpperCase()} ****{item.cardNumber?.slice(-4)}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Expiry:</span><span>{item.expiryDate || 'N/A'}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Name:</span><span>{item.customerName || 'N/A'}</span></div>
+                              </div>
+                            )}
+                            {type === 'bank' && (
+                              <div className="text-sm space-y-1">
+                                <div className="flex justify-between"><span className="text-gray-600">Bank:</span><span>{item.bankName || 'N/A'}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Account:</span><span className="font-mono">{item.accountNumber}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Holder:</span><span>{item.accountHolder || 'N/A'}</span></div>
+                              </div>
+                            )}
+                            {(type === 'cheque_electronic' || type === 'cheque_mail') && (
+                              <div className="text-sm space-y-1">
+                                <div className="flex justify-between"><span className="text-gray-600">Bank:</span><span>{item.bankName || 'N/A'}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Cheque #:</span><span className="font-mono">{item.chequeNumber || 'N/A'}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Name:</span><span>{item.nameOnCheque || 'N/A'}</span></div>
+                              </div>
+                            )}
+                            {type === 'payment_email' && (
+                              <div className="text-sm space-y-1">
+                                <div className="flex justify-between"><span className="text-gray-600">Email:</span><span className="font-mono">{item.emailAddress || 'N/A'}</span></div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Payment Methods */}
                 {(payment.cards.length > 0 || payment.banks.length > 0 || 
@@ -831,6 +701,16 @@ export default function PaymentView() {
                                         {!card.isExpired && !card.isExpiringSoon && '✅ Valid'}
                                       </span>
                                     </div>
+                                    {saleId && !isCurrentSale && (
+                                      <button
+                                        type="button"
+                                        onClick={() => addOldPaymentRef('card', card.id, payment.saleId)}
+                                        disabled={updatingRefs}
+                                        className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                      >
+                                        Add to this sale
+                                      </button>
+                                    )}
                                   </div>
                                   <div className="space-y-1">
                                     <div className="flex justify-between text-sm">
@@ -915,6 +795,16 @@ export default function PaymentView() {
                                       {bank.status}
                                     </span>
                                   </div>
+                                  {saleId && !isCurrentSale && (
+                                    <button
+                                      type="button"
+                                      onClick={() => addOldPaymentRef('bank', bank.id, payment.saleId)}
+                                      disabled={updatingRefs}
+                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                    >
+                                      Add to this sale
+                                    </button>
+                                  )}
                                 </div>
                                 <div className="space-y-1">
                                   <div className="flex justify-between text-sm">
@@ -985,6 +875,16 @@ export default function PaymentView() {
                                       {cheque.status}
                                     </span>
                                   </div>
+                                  {saleId && !isCurrentSale && (
+                                    <button
+                                      type="button"
+                                      onClick={() => addOldPaymentRef('cheque_electronic', cheque.id, payment.saleId)}
+                                      disabled={updatingRefs}
+                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                    >
+                                      Add to this sale
+                                    </button>
+                                  )}
                                 </div>
                                 <div className="space-y-1">
                                   <div className="flex justify-between text-sm">
@@ -1048,6 +948,16 @@ export default function PaymentView() {
                                       {cheque.status}
                                     </span>
                                   </div>
+                                  {saleId && !isCurrentSale && (
+                                    <button
+                                      type="button"
+                                      onClick={() => addOldPaymentRef('cheque_mail', cheque.id, payment.saleId)}
+                                      disabled={updatingRefs}
+                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                    >
+                                      Add to this sale
+                                    </button>
+                                  )}
                                 </div>
                                 <div className="space-y-1">
                                   <div className="flex justify-between text-sm">
@@ -1103,6 +1013,16 @@ export default function PaymentView() {
                                       {email.status}
                                     </span>
                                   </div>
+                                  {saleId && !isCurrentSale && (
+                                    <button
+                                      type="button"
+                                      onClick={() => addOldPaymentRef('payment_email', email.id, payment.saleId)}
+                                      disabled={updatingRefs}
+                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                    >
+                                      Add to this sale
+                                    </button>
+                                  )}
                                 </div>
                                 <div className="space-y-1">
                                   <div className="flex justify-between text-sm">
@@ -1165,7 +1085,8 @@ export default function PaymentView() {
                 )}
               </div>
             </div>
-          ))
+          );
+          })
         )}
       </div>
       )}

@@ -20,7 +20,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const saleId = searchParams.get('saleId');
     const customerIdParam = searchParams.get('customerId');
-    const showAllPayments = searchParams.get('showAllPayments') === 'true';
+    // showAllPayments no longer used: when customerId present we always return all customer sales
     const requestedFullDetails = searchParams.get('showFullDetails') === 'true';
     
     // Only admins can request full details
@@ -43,41 +43,15 @@ export async function GET(request) {
       return NextResponse.json({ error: 'Invalid customerId' }, { status: 400 });
     }
 
-    // When both customerId and saleId are provided and not "show all": return only that sale (for "view by sale")
-    if (customerIdNum && saleId && !showAllPayments) {
-      const sale = await Sale.findByPk(parseInt(saleId, 10), {
-        include: includePaymentModels
-      });
-      if (!sale) {
-        return NextResponse.json({ error: 'Sale not found' }, { status: 404 });
-      }
-      if (sale.customerId !== customerIdNum) {
-        return NextResponse.json({ error: 'Sale does not belong to this customer' }, { status: 400 });
-      }
-      if (userRole === 'agent' && sale.agentId !== userId) {
-        return NextResponse.json({ error: 'Unauthorized to view this sale' }, { status: 403 });
-      }
-      if (userRole === 'supervisor') {
-        const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(userId);
-        const agentIds = supervisedAgents.map((a) => a.id);
-        const canView = sale.agentId === userId || agentIds.length === 0 || agentIds.includes(sale.agentId);
-        if (!canView) {
-          return NextResponse.json({ error: 'Unauthorized to view this sale' }, { status: 403 });
-        }
-      }
-      sales = [sale];
-    } else if (customerIdParam) {
-      // All sales for this customer (customer-based payment view)
+    // When customerId is present, return all sales for this customer so agent/supervisor can see all customer payments
+    if (customerIdParam) {
       const customerId = customerIdNum;
       const customerSales = await Sale.findAll({
         where: { customerId },
         include: includePaymentModels
       });
-      // When showAllPayments=true (clicked "Show All Payments" button), return all customer payments; else agents see only their sales
-      if (showAllPayments) {
+      if (userRole === 'agent') {
         sales = customerSales;
-      } else if (userRole === 'agent') {
-        sales = customerSales.filter((s) => s.agentId === userId);
       } else if (userRole === 'supervisor') {
         const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(userId);
         const agentIds = supervisedAgents.map((a) => a.id);
@@ -88,7 +62,7 @@ export async function GET(request) {
         sales = customerSales;
       }
     } else if (saleId) {
-      // EFFICIENT: Query only the specific sale when saleId is provided
+      // When only saleId is provided: load that sale then all sales for same customer (so page can show current sale first, others below)
       const sale = await Sale.findByPk(parseInt(saleId), {
         include: includePaymentModels
       });
@@ -97,26 +71,34 @@ export async function GET(request) {
         return NextResponse.json({ error: 'Sale not found' }, { status: 404 });
       }
 
-      // Check if user has permission to view this specific sale
       if (userRole === 'agent' && sale.agentId !== userId) {
         return NextResponse.json({ error: 'Unauthorized to view this sale' }, { status: 403 });
       }
       if (userRole === 'supervisor') {
         const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(userId);
         const agentIds = supervisedAgents.map(agent => agent.id);
-        
-        
-        // Supervisor can view their own sales OR sales from their supervised agents
-        const canViewSale = (sale.agentId === userId) || // Own sales
-                           (agentIds.length === 0) || // No supervised agents = view all
-                           (agentIds.length > 0 && agentIds.includes(sale.agentId)); // Supervised agents' sales
-        
+        const canViewSale = (sale.agentId === userId) || (agentIds.length === 0) || (agentIds.length > 0 && agentIds.includes(sale.agentId));
         if (!canViewSale) {
           return NextResponse.json({ error: 'Unauthorized to view this sale' }, { status: 403 });
         }
       }
 
-      sales = [sale];
+      const customerIdFromSale = sale.customerId;
+      const customerSales = await Sale.findAll({
+        where: { customerId: customerIdFromSale },
+        include: includePaymentModels
+      });
+      if (userRole === 'agent') {
+        sales = customerSales;
+      } else if (userRole === 'supervisor') {
+        const supervisedAgents = await SupervisorAgentService.getSupervisedAgents(userId);
+        const agentIds = supervisedAgents.map((a) => a.id);
+        sales = customerSales.filter(
+          (s) => s.agentId === userId || agentIds.length === 0 || agentIds.includes(s.agentId)
+        );
+      } else {
+        sales = customerSales;
+      }
     } else {
       // When no saleId provided, get all sales (for dashboard/list views)
       if (userRole === 'admin' && showFullDetails) {
@@ -199,7 +181,8 @@ export async function GET(request) {
           promotionalBill: sale.promotionalBill,
           lastPayment: sale.lastPayment,
           lastPaymentDate: sale.lastPaymentDate,
-          balance: sale.balance
+          balance: sale.balance,
+          usedOldPaymentRefs: Array.isArray(sale.usedOldPaymentRefs) ? sale.usedOldPaymentRefs : (sale.used_old_payment_refs || [])
         },
         cards: (sale.cards || [])
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) // Newest first

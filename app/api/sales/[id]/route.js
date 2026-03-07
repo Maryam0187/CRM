@@ -66,21 +66,32 @@ export async function PUT(request, { params }) {
     const sanitizeEnumField = (value) => {
       return (value === '' || value === null || value === undefined) ? null : value;
     };
-    
-    // Sanitize the update data (only set fields that are provided - omit tags when not sent to preserve existing tags)
-    const sanitizedData = {
-      ...updateData,
-      pinCodeStatus: sanitizeEnumField(updateData.pinCodeStatus),
-      ssnNumberStatus: sanitizeEnumField(updateData.ssnNumberStatus),
-      basicPackageStatus: sanitizeEnumField(updateData.basicPackageStatus),
-      bundle: sanitizeEnumField(updateData.bundle),
-      status: sanitizeEnumField(updateData.status)
-    };
+
+    // Only include fields that are actually in the request, so we don't overwrite e.g. status with null when only usedOldPaymentRefs is sent
+    const sanitizedData = { ...updateData };
+    if (updateData.pinCodeStatus !== undefined) {
+      sanitizedData.pinCodeStatus = sanitizeEnumField(updateData.pinCodeStatus);
+    }
+    if (updateData.ssnNumberStatus !== undefined) {
+      sanitizedData.ssnNumberStatus = sanitizeEnumField(updateData.ssnNumberStatus);
+    }
+    if (updateData.basicPackageStatus !== undefined) {
+      sanitizedData.basicPackageStatus = sanitizeEnumField(updateData.basicPackageStatus);
+    }
+    if (updateData.bundle !== undefined) {
+      sanitizedData.bundle = sanitizeEnumField(updateData.bundle);
+    }
+    if (updateData.status !== undefined) {
+      sanitizedData.status = sanitizeEnumField(updateData.status);
+    }
     if (updateData.tags !== undefined) {
       sanitizedData.tags = Array.isArray(updateData.tags) ? updateData.tags : (updateData.tags ? [updateData.tags] : []);
     }
-
-    // Map appointment_datetime to appointmentDateTime for the model
+    if (updateData.usedOldPaymentRefs !== undefined) {
+      sanitizedData.usedOldPaymentRefs = Array.isArray(updateData.usedOldPaymentRefs)
+        ? updateData.usedOldPaymentRefs
+        : [];
+    }
     if (updateData.appointment_datetime !== undefined) {
       sanitizedData.appointmentDateTime = updateData.appointment_datetime;
       delete sanitizedData.appointment_datetime;

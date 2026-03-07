@@ -210,6 +210,13 @@ module.exports = (sequelize) => {
       allowNull: true,
       field: 'processing_required',
       comment: 'Whether processing is required: null (unknown), true, or false'
+    },
+    usedOldPaymentRefs: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      field: 'used_old_payment_refs',
+      defaultValue: [],
+      comment: 'Payments from other sales used for this sale: [{ paymentType, paymentId, originalSaleId }]'
     }
   }, {
     tableName: 'sales',
