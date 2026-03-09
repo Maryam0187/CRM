@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient.js';
+import { getStatusBadgeClasses } from '../lib/salesStatuses';
 
 export default function SalesTimeline({ isOpen, onClose, saleId }) {
   const { user } = useAuth();
@@ -121,21 +122,6 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
              currentValue !== '' && 
              currentValue !== 'new';
     });
-  };
-
-  const getStatusColor = (status) => {
-    const colorMap = {
-      'active': 'bg-green-100 text-green-800',
-      'pending': 'bg-yellow-100 text-yellow-800',
-      'completed': 'bg-blue-100 text-blue-800',
-      'cancelled': 'bg-red-100 text-red-800',
-      'hang-up': 'bg-red-100 text-red-800',
-      'voicemail': 'bg-orange-100 text-orange-800',
-      'no_response': 'bg-gray-100 text-gray-800',
-      'lead': 'bg-blue-100 text-blue-800',
-      'appointment': 'bg-purple-100 text-purple-800'
-    };
-    return colorMap[status] || 'bg-gray-100 text-gray-800';
   };
 
   if (!isOpen) return null;
@@ -273,7 +259,7 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
                                 <p className="text-xs text-gray-500">{getActionDescription(log.action)}</p>
                               </div>
                             </div>
-                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(log.status)}`}>
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadgeClasses(log.status)}`}>
                               {log.status}
                             </span>
                           </div>
@@ -314,7 +300,7 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
                             <div className="text-sm text-gray-700">
                               <div><span className="font-medium">Sale ID:</span> {log.sale.id}</div>
                               <div><span className="font-medium">Status:</span> 
-                                <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(log.sale.status)}`}>
+                                <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClasses(log.sale.status)}`}>
                                   {log.sale.status}
                                 </span>
                               </div>

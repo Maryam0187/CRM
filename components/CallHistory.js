@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { isAdmin, isSupervisor } from '../lib/roleUtils';
 import apiClient from '../lib/apiClient';
 import RecordingPlayer from './RecordingPlayer';
+import { getCallStatusDisplayName, getCallStatusBadgeClasses } from '../lib/salesStatuses';
 
 // Utility functions (moved from twilio.js to avoid client-side import)
 const formatCallDuration = (seconds) => {
@@ -14,20 +15,7 @@ const formatCallDuration = (seconds) => {
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 };
 
-const getCallStatusDisplay = (status) => {
-  const statusMap = {
-    'queued': 'Queued',
-    'ringing': 'Ringing',
-    'in-progress': 'In Progress',
-    'completed': 'Completed',
-    'busy': 'Busy',
-    'failed': 'Failed',
-    'no-answer': 'No Answer',
-    'canceled': 'Canceled'
-  };
-  
-  return statusMap[status] || status;
-};
+const getCallStatusDisplay = getCallStatusDisplayName;
 
 const getCallPurposeDisplay = (purpose) => {
   const purposeMap = {
@@ -113,27 +101,6 @@ const CallHistory = ({
 
   const hasMore = calls.length < total;
 
-  const getStatusBadgeClasses = (status) => {
-    const baseClasses = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium';
-    
-    switch (status) {
-      case 'completed':
-        return `${baseClasses} bg-green-100 text-green-800`;
-      case 'in-progress':
-        return `${baseClasses} bg-blue-100 text-blue-800`;
-      case 'ringing':
-        return `${baseClasses} bg-yellow-100 text-yellow-800`;
-      case 'failed':
-      case 'busy':
-      case 'no-answer':
-        return `${baseClasses} bg-red-100 text-red-800`;
-      case 'canceled':
-        return `${baseClasses} bg-gray-100 text-gray-800`;
-      default:
-        return `${baseClasses} bg-gray-100 text-gray-800`;
-    }
-  };
-
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleString();
@@ -215,7 +182,7 @@ const CallHistory = ({
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="flex items-center gap-3 mb-2">
-                  <span className={getStatusBadgeClasses(call.status)}>
+                  <span className={getCallStatusBadgeClasses(call.status)}>
                     {getCallStatusDisplay(call.status)}
                   </span>
                   <span className="text-sm text-gray-500">

@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { isAdmin, isAgent, isSupervisor, isProcessor, isVerification } from '../lib/roleUtils';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { apiClient } from '../lib/apiClient';
-import { SALES_STATUSES, getStatusDisplayName } from '../lib/salesStatuses';
+import { SALES_STATUSES, getStatusDisplayName, getStatusColor, getPaymentOutcomeBadgeClasses } from '../lib/salesStatuses';
 
 const DEFAULT_DECLINE_REASONS = [
   'Insufficient funds',
@@ -357,28 +357,6 @@ export default function PaymentView() {
     });
   };
 
-  const getStatusColor = (status) => {
-    const colors = {
-      'lead': 'bg-yellow-100 text-yellow-800',
-      'active': 'bg-green-100 text-green-800',
-      'pending': 'bg-blue-100 text-blue-800',
-      'completed': 'bg-green-100 text-green-800',
-      'cancelled': 'bg-red-100 text-red-800',
-      'voicemail': 'bg-gray-100 text-gray-800',
-      'hang-up': 'bg-red-100 text-red-800',
-      'no_response': 'bg-orange-100 text-orange-800',
-      'appointment': 'bg-purple-100 text-purple-800',
-      'ready-for-payment': 'bg-green-100 text-green-800',
-      'charged': 'bg-pink-100 text-pink-800',
-      'declined': 'bg-red-100 text-red-800',
-      'chargeback': 'bg-red-200 text-red-900',
-      'lead-call': 'bg-blue-100 text-blue-800',
-      'sale-done': 'bg-green-200 text-green-900'
-    };
-    return colors[status] || 'bg-gray-100 text-gray-800';
-  };
-
-
   if (!user) {
     return (
       <div className="flex justify-center items-center min-h-64">
@@ -642,7 +620,7 @@ export default function PaymentView() {
                             <div className="flex justify-between items-start mb-2 flex-wrap gap-1">
                               <span className="text-xs font-medium text-amber-800">Old payment from Sale #{ref.originalSaleId} — used for this sale</span>
                               {refIsUsed && (
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getPaymentOutcomeBadgeClasses(usedOutcome.action)}`}>
                                   Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
                                 </span>
                               )}
@@ -802,7 +780,7 @@ export default function PaymentView() {
                                         {!card.isExpired && !card.isExpiringSoon && '✅ Valid'}
                                       </span>
                                       {cardIsUsed && (
-                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getPaymentOutcomeBadgeClasses(usedOutcome.action)}`}>
                                           Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
                                         </span>
                                       )}
@@ -991,7 +969,7 @@ export default function PaymentView() {
                                       {bank.status}
                                     </span>
                                     {bankIsUsed && (
-                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getPaymentOutcomeBadgeClasses(usedOutcome.action)}`}>
                                         Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
                                       </span>
                                     )}
@@ -1122,7 +1100,7 @@ export default function PaymentView() {
                                       {cheque.status}
                                     </span>
                                     {eqIsUsed && (
-                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getPaymentOutcomeBadgeClasses(usedOutcome.action)}`}>
                                         Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
                                       </span>
                                     )}
@@ -1236,7 +1214,7 @@ export default function PaymentView() {
                                       {cheque.status}
                                     </span>
                                     {mailIsUsed && (
-                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getPaymentOutcomeBadgeClasses(usedOutcome.action)}`}>
                                         Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
                                       </span>
                                     )}
@@ -1342,7 +1320,7 @@ export default function PaymentView() {
                                       {email.status}
                                     </span>
                                     {emailIsUsed && (
-                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getPaymentOutcomeBadgeClasses(usedOutcome.action)}`}>
                                         Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
                                       </span>
                                     )}

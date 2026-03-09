@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient';
+import { getCallStatusDisplayName, getCallStatusBadgeClasses } from '../lib/salesStatuses';
 
 /**
  * IVR Call History Component
@@ -77,43 +78,7 @@ export default function IVRCallHistory({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getCallStatusDisplay = (status) => {
-    const statusMap = {
-      'queued': 'Queued',
-      'ringing': 'Ringing',
-      'in-progress': 'In Progress',
-      'completed': 'Completed',
-      'busy': 'Busy',
-      'failed': 'Failed',
-      'no-answer': 'No Answer',
-      'canceled': 'Canceled',
-      'voicemail': 'Voicemail'
-    };
-    return statusMap[status] || status;
-  };
-
-  const getStatusBadgeClasses = (status) => {
-    const baseClasses = 'px-2 py-1 text-xs font-semibold rounded-full';
-    switch (status) {
-      case 'completed':
-        return `${baseClasses} bg-green-100 text-green-800`;
-      case 'in-progress':
-        return `${baseClasses} bg-blue-100 text-blue-800`;
-      case 'ringing':
-      case 'queued':
-        return `${baseClasses} bg-yellow-100 text-yellow-800`;
-      case 'failed':
-      case 'canceled':
-        return `${baseClasses} bg-red-100 text-red-800`;
-      case 'no-answer':
-      case 'busy':
-        return `${baseClasses} bg-orange-100 text-orange-800`;
-      case 'voicemail':
-        return `${baseClasses} bg-purple-100 text-purple-800`;
-      default:
-        return `${baseClasses} bg-gray-100 text-gray-800`;
-    }
-  };
+  const getCallStatusDisplay = getCallStatusDisplayName;
 
   const handlePageChange = (newPage) => {
     setPagination(prev => ({ ...prev, page: newPage }));
@@ -176,7 +141,7 @@ export default function IVRCallHistory({
                   <div className="flex items-start justify-between gap-2 mb-1.5">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className={getStatusBadgeClasses(call.status)}>
+                        <span className={getCallStatusBadgeClasses(call.status)}>
                           {getCallStatusDisplay(call.status)}
                         </span>
                         <span className="text-xs font-medium text-gray-800 truncate">
@@ -297,7 +262,7 @@ export default function IVRCallHistory({
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
-                      <span className={getStatusBadgeClasses(call.status)}>
+                      <span className={getCallStatusBadgeClasses(call.status)}>
                         {call.status}
                       </span>
                       <span className="text-sm font-medium text-gray-800">
