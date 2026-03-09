@@ -219,6 +219,7 @@ export async function GET(request) {
             isExpiringSoon: expirationStatus.status === 'expiring_soon',
             createdDate: formatDisplayDate(roleBasedData.created_at),
             updatedDate: formatDisplayDate(roleBasedData.updated_at),
+            comments: Array.isArray(roleBasedData.comments) ? roleBasedData.comments : [],
             ...addedByFromUserId(card.addedByUserId)
           };
         }),
@@ -252,6 +253,7 @@ export async function GET(request) {
             created_at: bankData.created_at,
             createdDate: formatDisplayDate(bankData.created_at),
             updatedDate: formatDisplayDate(bankData.updated_at),
+            comments: Array.isArray(bankData.comments) ? bankData.comments : [],
             ...addedByFromUserId(bank.addedByUserId)
           };
         }),
@@ -275,6 +277,7 @@ export async function GET(request) {
             created_at: chequeData.created_at,
             createdDate: formatDisplayDate(chequeData.created_at),
             updatedDate: formatDisplayDate(chequeData.updated_at),
+            comments: Array.isArray(chequeData.comments) ? chequeData.comments : [],
             ...addedByFromUserId(cheque.addedByUserId)
           };
         }),
@@ -295,6 +298,7 @@ export async function GET(request) {
             created_at: chequeData.created_at,
             createdDate: formatDisplayDate(chequeData.created_at),
             updatedDate: formatDisplayDate(chequeData.updated_at),
+            comments: Array.isArray(chequeData.comments) ? chequeData.comments : [],
             ...addedByFromUserId(cheque.addedByUserId)
           };
         }),
@@ -311,6 +315,7 @@ export async function GET(request) {
             created_at: email.created_at,
             createdDate: formatDisplayDate(email.created_at),
             updatedDate: formatDisplayDate(email.updated_at),
+            comments: Array.isArray(email.comments) ? email.comments : [],
             ...addedByFromUserId(email.addedByUserId)
           };
         })

@@ -8,6 +8,17 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { apiClient } from '../lib/apiClient';
 import { SALES_STATUSES, getStatusDisplayName } from '../lib/salesStatuses';
 
+const DEFAULT_DECLINE_REASONS = [
+  'Insufficient funds',
+  'Pick up card',
+  'Do not honor',
+  'Card expired',
+  'Invalid card',
+  'Lost/stolen card',
+  'Restricted card',
+  'Transaction not permitted'
+];
+
 export default function PaymentView() {
   const { user } = useAuth();
   const router = useRouter();
@@ -20,12 +31,38 @@ export default function PaymentView() {
   const [showFullDetails, setShowFullDetails] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
   const [updatingRefs, setUpdatingRefs] = useState(false);
+  const [paymentLogsBySale, setPaymentLogsBySale] = useState({});
+  const [declineModal, setDeclineModal] = useState(null);
+  const [declineReason, setDeclineReason] = useState('');
+  const [addingCommentFor, setAddingCommentFor] = useState(null);
+  const [commentText, setCommentText] = useState('');
+  const [updatingComment, setUpdatingComment] = useState(false);
 
   useEffect(() => {
     if (user) {
       fetchPayments();
     }
   }, [user, saleId, customerId, showFullDetails]);
+
+  useEffect(() => {
+    const saleIds = [...new Set((payments || []).map((p) => p.saleId))];
+    if (saleIds.length === 0 || !user || !isAdmin(user)) return;
+    let cancelled = false;
+    (async () => {
+      const bySale = {};
+      await Promise.all(
+        saleIds.map(async (sid) => {
+          try {
+            const res = await apiClient.get(`/api/payment-logs?saleId=${sid}`);
+            const data = await res.json();
+            if (!cancelled && data.logs) bySale[sid] = data.logs;
+          } catch (_) {}
+        })
+      );
+      if (!cancelled) setPaymentLogsBySale((prev) => ({ ...prev, ...bySale }));
+    })();
+    return () => { cancelled = true; };
+  }, [payments, user]);
 
   const fetchPayments = async () => {
     try {
@@ -89,6 +126,82 @@ export default function PaymentView() {
       (r) => !(r.paymentType === paymentType && r.paymentId === paymentId)
     );
     handleUsedOldPaymentRefs(refs);
+  };
+
+  const handlePaymentCardAction = async (paymentType, paymentId, saleIdToUpdate, action, reason = null) => {
+    const effectiveSaleId = saleIdToUpdate ?? saleId;
+    if (!effectiveSaleId) return;
+    setSavingStatus(true);
+    setError(null);
+    setDeclineModal(null);
+    setDeclineReason('');
+    try {
+      const body = { saleId: effectiveSaleId, paymentType, paymentId, action };
+      if (reason && action === 'declined') body.reason = reason;
+      const response = await apiClient.post('/api/payment-logs', body);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to record action');
+      await fetchPayments();
+      setPaymentLogsBySale((prev) => {
+        const logs = prev[effectiveSaleId] || [];
+        const newLog = { ...data.log, userName: (user && (`${user.first_name || user.firstName || ''} ${user.last_name || user.lastName || ''}`.trim() || user.name || user.email)) || 'You' };
+        return { ...prev, [effectiveSaleId]: [newLog, ...logs] };
+      });
+    } catch (err) {
+      setError(err.message || 'Failed to record action');
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
+  const handleAddComment = async (paymentType, paymentId, currentComments) => {
+    if (!commentText.trim()) return;
+    setUpdatingComment(true);
+    setError(null);
+    try {
+      const newComment = {
+        id: Date.now(),
+        userId: user?.id,
+        userName: (user && (`${user.first_name || user.firstName || ''} ${user.last_name || user.lastName || ''}`.trim() || user.name || user.email)) || 'Unknown',
+        text: commentText.trim(),
+        createdAt: new Date().toISOString()
+      };
+      const updated = Array.isArray(currentComments) ? [...currentComments, newComment] : [newComment];
+      const response = await apiClient.patch('/api/payment-method', {
+        paymentType,
+        paymentId,
+        comments: updated
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to add comment');
+      setCommentText('');
+      setAddingCommentFor(null);
+      await fetchPayments();
+    } catch (err) {
+      setError(err.message || 'Failed to add comment');
+    } finally {
+      setUpdatingComment(false);
+    }
+  };
+
+  const handleRemoveComment = async (paymentType, paymentId, currentComments, commentId) => {
+    setUpdatingComment(true);
+    setError(null);
+    try {
+      const updated = (Array.isArray(currentComments) ? currentComments : []).filter((c) => c.id !== commentId);
+      const response = await apiClient.patch('/api/payment-method', {
+        paymentType,
+        paymentId,
+        comments: updated
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to remove comment');
+      await fetchPayments();
+    } catch (err) {
+      setError(err.message || 'Failed to remove comment');
+    } finally {
+      setUpdatingComment(false);
+    }
   };
 
   const handleAdminAction = async (action, status, saleIdToUpdate) => {
@@ -277,34 +390,38 @@ export default function PaymentView() {
     );
   }
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center min-h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-md p-4">
-        <div className="flex">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <div className="ml-3">
-            <h3 className="text-sm font-medium text-red-800">Error loading payments</h3>
-            <div className="mt-2 text-sm text-red-700">{error}</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const isBusy = loading || savingStatus || updatingRefs || updatingComment;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      {/* Loader overlay - above content when any action is in progress */}
+      {isBusy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/70" aria-hidden="true">
+          <div className="flex flex-col items-center gap-3">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <p className="text-sm font-medium text-gray-700">
+              {loading && payments.length === 0 ? 'Loading payments...' : 'Please wait...'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">Error</h3>
+              <div className="mt-2 text-sm text-red-700">{error}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white shadow rounded-lg p-6">
         <div className="flex justify-between items-center">
@@ -394,7 +511,12 @@ export default function PaymentView() {
       {/* Payment Cards (by sale): current sale first, then other sales. All payments on one page. */}
       {(
       <div className="grid gap-6">
-        {sortedPayments.length === 0 ? (
+        {loading && sortedPayments.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-3 text-sm text-gray-600">Loading payments...</p>
+          </div>
+        ) : sortedPayments.length === 0 ? (
           <div className="text-center py-12">
             <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -408,6 +530,9 @@ export default function PaymentView() {
           sortedPayments.map((payment) => {
             const isCurrentSale = saleId && payment.saleId === parseInt(saleId, 10);
             const usedRefs = (payment.saleInfo?.usedOldPaymentRefs || []).filter(Boolean);
+            const currentSaleUsedRefs = saleId ? (payments.find((p) => p.saleId === parseInt(saleId, 10))?.saleInfo?.usedOldPaymentRefs || []) : [];
+            const saleLogs = paymentLogsBySale[payment.saleId] || [];
+            const usedOutcome = isCurrentSale && saleLogs.filter((l) => ['charged', 'declined', 'chargeback'].includes(l.action)).sort((a, b) => new Date(b.createdAt || b.created_at || 0) - new Date(a.createdAt || a.created_at || 0))[0];
             const canShowSaleInfo = isAdmin(user) || (isSupervisor(user) && (payment.agent?.id === user?.id || user?.supervisedAgents?.some((a) => a.id === payment.agent?.id)));
             const canShowAgentName = !isAgent(user) || payment.agent?.id === user?.id;
             return (
@@ -434,109 +559,6 @@ export default function PaymentView() {
                   </div>
                 </div>
               </div>
-
-              {/* Action Buttons - Visible based on status rules */}
-              {(() => {
-                const currentStatus = (payment.saleInfo?.status || '').toLowerCase();
-                const isCharged = currentStatus === SALES_STATUSES.CHARGED.toLowerCase() || currentStatus === 'charged';
-                const isDeclined = currentStatus === SALES_STATUSES.DECLINED.toLowerCase() || currentStatus === 'declined';
-                const isChargeback = currentStatus === SALES_STATUSES.CHARGEBACK.toLowerCase() || currentStatus === 'chargeback';
-                const isReadyForPayment = currentStatus === SALES_STATUSES.READY_FOR_PAYMENT.toLowerCase() || currentStatus === 'ready-for-payment';
-                
-                // Determine which buttons to show based on status
-                let showButtons = false;
-                let showCharged = false;
-                let showDeclined = false;
-                let showChargeback = false;
-                let showCancelled = false;
-                let showReadyForPayment = false;
-                let sectionTitle = 'Admin Actions';
-                
-                if (isCharged) {
-                  // If charged: show only Chargeback button (admin only)
-                  if (isAdmin(user)) {
-                    showButtons = true;
-                    showChargeback = true; // Chargeback only shows when status is charged
-                  }
-                } else if (isDeclined) {
-                  // If declined: Charged (admin only), Declined (admin only), Ready for Payment (all users), Cancelled (all users)
-                  showButtons = true;
-                  showCharged = isAdmin(user);
-                  showDeclined = isAdmin(user);
-                  showReadyForPayment = true; // All users
-                  showCancelled = true; // All users
-                  sectionTitle = 'Status Actions';
-                } else if (isReadyForPayment) {
-                  // If ready-for-payment: show admin action buttons (only for admin)
-                  if (isAdmin(user)) {
-                    showButtons = true;
-                    showCharged = true;
-                    showDeclined = true;
-                    // Chargeback only shows when status is charged, not ready-for-payment
-                    showCancelled = true;
-                  }
-                } else if (isChargeback) {
-                  // If chargeback: show buttons (only for admin)
-                  if (isAdmin(user)) {
-                    showButtons = true;
-                    showCharged = true;
-                    showDeclined = true;
-                    // Don't show chargeback button when already in chargeback status
-                  }
-                } else if (isAdmin(user)) {
-                  // For other statuses, show admin buttons only for admin
-                  showButtons = true;
-                  showCharged = true;
-                  showDeclined = true;
-                  // Chargeback only shows when status is charged
-                }
-                
-                if (!showButtons) return null;
-                
-                return (
-                  <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                    <h4 className="text-sm font-medium text-gray-900 mb-3">{sectionTitle}</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      {showCharged && (
-                        <button
-                          onClick={() => handleAdminAction('charged', SALES_STATUSES.CHARGED, payment.saleId)}
-                          disabled={savingStatus}
-                          className="bg-pink-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-pink-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          💰 Charged
-                        </button>
-                      )}
-                      {showDeclined && (
-                        <button
-                          onClick={() => handleAdminAction('declined', SALES_STATUSES.DECLINED, payment.saleId)}
-                          disabled={savingStatus}
-                          className="bg-red-600 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          ❌ Declined
-                        </button>
-                      )}
-                      {showChargeback && (
-                        <button
-                          onClick={() => handleAdminAction('chargeback', SALES_STATUSES.CHARGEBACK, payment.saleId)}
-                          disabled={savingStatus}
-                          className="bg-red-800 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-900 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          🔄 Chargeback
-                        </button>
-                      )}
-                      {showCancelled && (
-                        <button
-                          onClick={() => handleAdminAction('cancelled', SALES_STATUSES.CANCELLED, payment.saleId)}
-                          disabled={savingStatus}
-                          className="bg-red-700 text-white font-medium rounded-lg text-xs px-3 py-2 hover:bg-red-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          ❌ Cancelled
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
 
               {/* Payment Details */}
               <div className="px-6 py-4">
@@ -610,45 +632,118 @@ export default function PaymentView() {
                         else if (type === 'cheque_mail') item = (origSale.chequesMail || []).find((c) => c.id === id);
                         else if (type === 'payment_email') item = (origSale.paymentEmails || []).find((e) => e.id === id);
                         if (!item) return null;
+                        const currentStatus = (payment.saleInfo?.status || '').toLowerCase();
+                        const refIsUsed = usedOutcome && usedOutcome.paymentType === type && usedOutcome.paymentId === id;
+                        const showRefChargeDecline = isAdmin(user) && currentStatus !== 'charged' && (payment.saleInfo?.status === SALES_STATUSES.READY_FOR_PAYMENT || payment.saleInfo?.status === SALES_STATUSES.DECLINED || payment.saleInfo?.status === SALES_STATUSES.ACTIVE);
+                        const showRefChargeback = isAdmin(user) && currentStatus === 'charged' && refIsUsed;
+                        const currentSaleIdNum = parseInt(saleId, 10);
                         return (
                           <div key={`ref-${refIdx}-${type}-${id}`} className="relative rounded-lg p-4 bg-amber-50 border border-amber-200">
-                            <div className="flex justify-between items-start mb-2">
-                              <span className="text-xs font-medium text-amber-800">Old payment — from Sale #{ref.originalSaleId}</span>
+                            <div className="flex justify-between items-start mb-2 flex-wrap gap-1">
+                              <span className="text-xs font-medium text-amber-800">Old payment from Sale #{ref.originalSaleId} — used for this sale</span>
+                              {refIsUsed && (
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                  Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
+                                </span>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => removeOldPaymentRef(type, id)}
                                 disabled={updatingRefs}
-                                className="text-xs text-amber-700 hover:text-amber-900 underline disabled:opacity-50"
+                                className="text-xs text-amber-700 hover:text-amber-900 underline disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                               >
                                 Remove from this sale
                               </button>
                             </div>
+                            {(showRefChargeDecline || showRefChargeback) && (
+                              <div className="mb-3 flex flex-wrap gap-2">
+                                {showRefChargeDecline && (
+                                  <>
+                                    <button type="button" onClick={() => handlePaymentCardAction(type, id, currentSaleIdNum, 'charged')} disabled={savingStatus} className="bg-pink-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-pink-700 disabled:opacity-50">Charge</button>
+                                    <button type="button" onClick={() => setDeclineModal({ paymentType: type, paymentId: id, saleId: currentSaleIdNum })} disabled={savingStatus} className="bg-red-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-700 disabled:opacity-50">Decline</button>
+                                  </>
+                                )}
+                                {showRefChargeback && <button type="button" onClick={() => handlePaymentCardAction(type, id, currentSaleIdNum, 'chargeback')} disabled={savingStatus} className="bg-red-800 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-900 disabled:opacity-50">Chargeback</button>}
+                              </div>
+                            )}
                             {type === 'card' && (
                               <div className="text-sm space-y-1">
-                                <div className="flex justify-between"><span className="text-gray-600">Card:</span><span className="font-mono">{item.provider?.toUpperCase()} ****{item.cardNumber?.slice(-4)}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Card:</span><span className="font-mono">{item.provider?.toUpperCase()} {item.cardNumber || '****'}</span></div>
                                 <div className="flex justify-between"><span className="text-gray-600">Expiry:</span><span>{item.expiryDate || 'N/A'}</span></div>
-                                <div className="flex justify-between"><span className="text-gray-600">Name:</span><span>{item.customerName || 'N/A'}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Name on Card:</span><span>{item.customerName || 'N/A'}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Type:</span><span className="capitalize">{item.cardType || 'N/A'}</span></div>
+                                {item.cvv != null && <div className="flex justify-between"><span className="text-gray-600">CVV:</span><span className="font-mono">{item.cvv}</span></div>}
                               </div>
                             )}
                             {type === 'bank' && (
                               <div className="text-sm space-y-1">
                                 <div className="flex justify-between"><span className="text-gray-600">Bank:</span><span>{item.bankName || 'N/A'}</span></div>
                                 <div className="flex justify-between"><span className="text-gray-600">Account:</span><span className="font-mono">{item.accountNumber}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Routing:</span><span className="font-mono">{item.routingNumber || 'N/A'}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Check #:</span><span className="font-mono">{item.checkNumber || 'N/A'}</span></div>
                                 <div className="flex justify-between"><span className="text-gray-600">Holder:</span><span>{item.accountHolder || 'N/A'}</span></div>
+                                {item.driverLicense != null && <div className="flex justify-between"><span className="text-gray-600">Driver License:</span><span className="font-mono">{item.driverLicense}</span></div>}
+                                {item.nameOnLicense != null && <div className="flex justify-between"><span className="text-gray-600">Name on License:</span><span>{item.nameOnLicense}</span></div>}
                               </div>
                             )}
                             {(type === 'cheque_electronic' || type === 'cheque_mail') && (
                               <div className="text-sm space-y-1">
                                 <div className="flex justify-between"><span className="text-gray-600">Bank:</span><span>{item.bankName || 'N/A'}</span></div>
                                 <div className="flex justify-between"><span className="text-gray-600">Cheque #:</span><span className="font-mono">{item.chequeNumber || 'N/A'}</span></div>
-                                <div className="flex justify-between"><span className="text-gray-600">Name:</span><span>{item.nameOnCheque || 'N/A'}</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Name on Cheque:</span><span>{item.nameOnCheque || 'N/A'}</span></div>
+                                {type === 'cheque_electronic' && item.routingNumber != null && <div className="flex justify-between"><span className="text-gray-600">Routing:</span><span className="font-mono">{item.routingNumber}</span></div>}
+                                {type === 'cheque_electronic' && item.accountNumber != null && <div className="flex justify-between"><span className="text-gray-600">Account:</span><span className="font-mono">{item.accountNumber}</span></div>}
+                                {type === 'cheque_electronic' && item.state != null && <div className="flex justify-between"><span className="text-gray-600">State:</span><span>{item.state}</span></div>}
                               </div>
                             )}
                             {type === 'payment_email' && (
                               <div className="text-sm space-y-1">
                                 <div className="flex justify-between"><span className="text-gray-600">Email:</span><span className="font-mono">{item.emailAddress || 'N/A'}</span></div>
+                                {item.invoiceLink && <div className="flex justify-between"><span className="text-gray-600">Invoice Link:</span><a href={item.invoiceLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View</a></div>}
+                                {item.sentAt && <div className="flex justify-between"><span className="text-gray-600">Sent:</span><span>{formatDisplayDate(item.sentAt)}</span></div>}
                               </div>
                             )}
+                            {isAdmin(user) && (() => {
+                              const origLogs = (paymentLogsBySale[ref.originalSaleId] || []).filter((l) => l.paymentType === type && l.paymentId === id);
+                              const currLogs = (paymentLogsBySale[currentSaleIdNum] || []).filter((l) => l.paymentType === type && l.paymentId === id);
+                              const refAllLogs = [...origLogs, ...currLogs].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+                              return (
+                                <div className="mt-2 pt-2 border-t border-gray-200">
+                                  <div className="text-xs font-medium text-gray-700 mb-1">Payment logs (all sales)</div>
+                                  {refAllLogs.length === 0 ? <p className="text-xs text-gray-500">No logs yet</p> : (
+                                    <ul className="text-xs space-y-1 max-h-24 overflow-y-auto">
+                                      {refAllLogs.map((log) => (
+                                        <li key={`${log.saleId}-${log.id}`} className="flex flex-wrap gap-1">
+                                          <span className="font-medium text-amber-800">Sale #{log.saleId}:</span>
+                                          <span className="font-medium">{log.action}</span>
+                                          {log.reason && <span className="text-gray-600">— {log.reason}</span>}
+                                          <span className="text-gray-500">{log.userName} · {formatDisplayDate(log.createdAt)}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                            <div className="mt-2 pt-2 border-t border-gray-200">
+                              <div className="text-xs font-medium text-gray-700 mb-1">Comments</div>
+                              {(item.comments || []).length > 0 && (
+                                <ul className="text-xs space-y-1 mb-2">
+                                  {(item.comments || []).map((c) => (
+                                    <li key={c.id}><span className="text-gray-600">{c.userName}:</span> {c.text} <span className="text-gray-400">({formatDisplayDate(c.createdAt)})</span></li>
+                                  ))}
+                                </ul>
+                              )}
+                              {addingCommentFor?.paymentType === type && addingCommentFor?.paymentId === id && addingCommentFor?.isRef ? (
+                                <div className="flex gap-1">
+                                  <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add comment..." className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs" />
+                                  <button type="button" onClick={() => handleAddComment(type, id, item.comments)} disabled={updatingComment} className="text-xs bg-blue-600 text-white px-2 rounded hover:bg-blue-700 disabled:opacity-50">Add</button>
+                                  <button type="button" onClick={() => { setAddingCommentFor(null); setCommentText(''); }} className="text-xs text-gray-600">Cancel</button>
+                                </div>
+                              ) : (
+                                <button type="button" onClick={() => setAddingCommentFor({ paymentType: type, paymentId: id, isRef: true })} className="text-xs text-blue-600 hover:underline">+ Add comment</button>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
@@ -690,28 +785,73 @@ export default function PaymentView() {
                                 return 'bg-green-100 text-green-800';
                               };
                               
+                              const cardLogsRaw = (paymentLogsBySale[payment.saleId] || []).filter((l) => l.paymentType === 'card' && l.paymentId === card.id);
+                              const cardLogsAllSales = isAdmin(user) ? Object.keys(paymentLogsBySale || {}).flatMap((sid) => (paymentLogsBySale[sid] || []).filter((l) => l.paymentType === 'card' && l.paymentId === card.id)).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)) : cardLogsRaw;
+                              const saleStatus = (payment.saleInfo?.status || '').toLowerCase();
+                              const cardIsUsed = usedOutcome && usedOutcome.paymentType === 'card' && usedOutcome.paymentId === card.id;
+                              const showChargeDecline = isAdmin(user) && isCurrentSale && saleStatus !== 'charged' && (payment.saleInfo?.status === SALES_STATUSES.READY_FOR_PAYMENT || payment.saleInfo?.status === SALES_STATUSES.DECLINED || payment.saleInfo?.status === SALES_STATUSES.ACTIVE);
+                              const showChargeback = isAdmin(user) && isCurrentSale && (saleStatus === 'charged') && cardIsUsed;
                               return (
                                 <div key={index} className={getCardBgClass()}>
                                   <div className="flex justify-between items-start mb-3">
-                                    <div className="flex items-center space-x-2">
+                                    <div className="flex items-center space-x-2 flex-wrap gap-1">
                                       <span className="text-sm font-medium text-gray-900">{card.provider ? card.provider.toUpperCase() : 'N/A'}</span>
                                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusBadgeClass()}`}>
                                         {card.isExpired && '❌ Expired'}
                                         {card.isExpiringSoon && '⚠️ Expiring Soon'}
                                         {!card.isExpired && !card.isExpiringSoon && '✅ Valid'}
                                       </span>
+                                      {cardIsUsed && (
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                          Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
+                                        </span>
+                                      )}
                                     </div>
                                     {saleId && !isCurrentSale && (
                                       <button
                                         type="button"
                                         onClick={() => addOldPaymentRef('card', card.id, payment.saleId)}
-                                        disabled={updatingRefs}
-                                        className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                        disabled={updatingRefs || currentSaleUsedRefs.some((r) => r.paymentType === 'card' && r.paymentId === card.id)}
+                                        className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                                       >
                                         Add to this sale
                                       </button>
                                     )}
                                   </div>
+                                  {(showChargeDecline || showChargeback) && (
+                                    <div className="mb-3 flex flex-wrap gap-2">
+                                      {showChargeDecline && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => handlePaymentCardAction('card', card.id, payment.saleId, 'charged')}
+                                            disabled={savingStatus}
+                                            className="bg-pink-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-pink-700 disabled:opacity-50"
+                                          >
+                                            Charge
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setDeclineModal({ paymentType: 'card', paymentId: card.id, saleId: payment.saleId })}
+                                            disabled={savingStatus}
+                                            className="bg-red-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-700 disabled:opacity-50"
+                                          >
+                                            Decline
+                                          </button>
+                                        </>
+                                      )}
+                                      {showChargeback && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePaymentCardAction('card', card.id, payment.saleId, 'chargeback')}
+                                          disabled={savingStatus}
+                                          className="bg-red-800 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-900 disabled:opacity-50"
+                                        >
+                                          Chargeback
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
                                   <div className="space-y-1">
                                     <div className="flex justify-between text-sm">
                                       <span className="text-gray-600">Card Number:</span>
@@ -771,6 +911,55 @@ export default function PaymentView() {
                                         </div>
                                       </div>
                                     )}
+                                    {isAdmin(user) && (
+                                    <div className="mt-2 pt-2 border-t border-gray-200">
+                                      <div className="text-xs font-medium text-gray-700 mb-1">Payment logs {cardLogsAllSales.length > cardLogsRaw.length ? '(all sales)' : ''}</div>
+                                      {cardLogsAllSales.length === 0 ? (
+                                        <p className="text-xs text-gray-500">No logs yet</p>
+                                      ) : (
+                                        <ul className="text-xs space-y-1 max-h-24 overflow-y-auto">
+                                          {cardLogsAllSales.map((log) => (
+                                            <li key={`${log.saleId}-${log.id}`} className="flex flex-wrap gap-1">
+                                              <span className="font-medium text-blue-700">Sale #{log.saleId}:</span>
+                                              <span className="font-medium">{log.action}</span>
+                                              {log.reason && <span className="text-gray-600">— {log.reason}</span>}
+                                              <span className="text-gray-500">{log.userName} · {formatDisplayDate(log.createdAt)}</span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                    </div>
+                                    )}
+                                    <div className="mt-2 pt-2 border-t border-gray-200">
+                                      <div className="text-xs font-medium text-gray-700 mb-1">Comments</div>
+                                      {(card.comments || []).length === 0 ? null : (
+                                        <ul className="text-xs space-y-1 mb-2">
+                                          {(card.comments || []).map((c) => (
+                                            <li key={c.id} className="flex items-center gap-1 flex-wrap">
+                                              <span className="text-gray-600">{c.userName}:</span> {c.text} <span className="text-gray-400">({formatDisplayDate(c.createdAt)})</span>
+                                              {isCurrentSale && (
+                                                <button type="button" onClick={() => handleRemoveComment('card', card.id, card.comments, c.id)} disabled={updatingComment} className="text-red-600 hover:text-red-800 cursor-pointer disabled:opacity-50" title="Remove comment">×</button>
+                                              )}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                      {addingCommentFor?.paymentType === 'card' && addingCommentFor?.paymentId === card.id && !addingCommentFor?.isRef ? (
+                                        <div className="flex gap-1">
+                                          <input
+                                            type="text"
+                                            value={commentText}
+                                            onChange={(e) => setCommentText(e.target.value)}
+                                            placeholder="Add comment..."
+                                            className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs"
+                                          />
+                                          <button type="button" onClick={() => handleAddComment('card', card.id, card.comments)} disabled={updatingComment} className="text-xs bg-blue-600 text-white px-2 rounded hover:bg-blue-700 disabled:opacity-50">Add</button>
+                                          <button type="button" onClick={() => { setAddingCommentFor(null); setCommentText(''); }} className="text-xs text-gray-600">Cancel</button>
+                                        </div>
+                                      ) : (
+                                        <button type="button" onClick={() => setAddingCommentFor({ paymentType: 'card', paymentId: card.id, isRef: false })} className="text-xs text-blue-600 hover:underline">+ Add comment</button>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               );
@@ -784,28 +973,51 @@ export default function PaymentView() {
                         <div>
                           <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">Bank Accounts</h5>
                           <div className="space-y-3">
-                            {payment.banks.map((bank, index) => (
+                            {payment.banks.map((bank, index) => {
+                              const bankLogsRaw = (paymentLogsBySale[payment.saleId] || []).filter((l) => l.paymentType === 'bank' && l.paymentId === bank.id);
+                              const bankLogsAllSales = isAdmin(user) ? Object.keys(paymentLogsBySale || {}).flatMap((sid) => (paymentLogsBySale[sid] || []).filter((l) => l.paymentType === 'bank' && l.paymentId === bank.id)).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)) : bankLogsRaw;
+                              const saleStatusBank = (payment.saleInfo?.status || '').toLowerCase();
+                              const bankIsUsed = usedOutcome && usedOutcome.paymentType === 'bank' && usedOutcome.paymentId === bank.id;
+                              const showChargeDeclineBank = isAdmin(user) && isCurrentSale && saleStatusBank !== 'charged' && (payment.saleInfo?.status === SALES_STATUSES.READY_FOR_PAYMENT || payment.saleInfo?.status === SALES_STATUSES.DECLINED || payment.saleInfo?.status === SALES_STATUSES.ACTIVE);
+                              const showChargebackBank = isAdmin(user) && isCurrentSale && (saleStatusBank === 'charged') && bankIsUsed;
+                              return (
                               <div key={index} className="bg-gray-50 rounded-lg p-4">
-                                <div className="flex justify-between items-start mb-2">
-                                  <div className="flex items-center space-x-2">
+                                <div className="flex justify-between items-start mb-2 flex-wrap gap-1">
+                                  <div className="flex items-center space-x-2 flex-wrap gap-1">
                                     <span className="text-sm font-medium text-gray-900">{bank.bankName || 'N/A'}</span>
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                                       bank.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
                                     }`}>
                                       {bank.status}
                                     </span>
+                                    {bankIsUsed && (
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                        Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
+                                      </span>
+                                    )}
                                   </div>
                                   {saleId && !isCurrentSale && (
                                     <button
                                       type="button"
                                       onClick={() => addOldPaymentRef('bank', bank.id, payment.saleId)}
-                                      disabled={updatingRefs}
-                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                      disabled={updatingRefs || currentSaleUsedRefs.some((r) => r.paymentType === 'bank' && r.paymentId === bank.id)}
+                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                                     >
                                       Add to this sale
                                     </button>
                                   )}
                                 </div>
+                                {(showChargeDeclineBank || showChargebackBank) && (
+                                  <div className="mb-3 flex flex-wrap gap-2">
+                                    {showChargeDeclineBank && (
+                                      <>
+                                        <button type="button" onClick={() => handlePaymentCardAction('bank', bank.id, payment.saleId, 'charged')} disabled={savingStatus} className="bg-pink-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-pink-700 disabled:opacity-50">Charge</button>
+                                        <button type="button" onClick={() => setDeclineModal({ paymentType: 'bank', paymentId: bank.id, saleId: payment.saleId })} disabled={savingStatus} className="bg-red-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-700 disabled:opacity-50">Decline</button>
+                                      </>
+                                    )}
+                                    {showChargebackBank && <button type="button" onClick={() => handlePaymentCardAction('bank', bank.id, payment.saleId, 'chargeback')} disabled={savingStatus} className="bg-red-800 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-900 disabled:opacity-50">Chargeback</button>}
+                                  </div>
+                                )}
                                 <div className="space-y-1">
                                   <div className="flex justify-between text-sm">
                                     <span className="text-gray-600">Account Number:</span>
@@ -850,9 +1062,37 @@ export default function PaymentView() {
                                     </div>
                                   )}
                                     </div>
+                                    {isAdmin(user) && (
+                                    <div className="mt-2 pt-2 border-t border-gray-200">
+                                      <div className="text-xs font-medium text-gray-700 mb-1">Payment logs {bankLogsAllSales.length > bankLogsRaw.length ? '(all sales)' : ''}</div>
+                                      {bankLogsAllSales.length === 0 ? <p className="text-xs text-gray-500">No logs yet</p> : (
+                                        <ul className="text-xs space-y-1 max-h-24 overflow-y-auto">{bankLogsAllSales.map((log) => (
+                                          <li key={`${log.saleId}-${log.id}`} className="flex flex-wrap gap-1"><span className="font-medium text-blue-700">Sale #{log.saleId}:</span><span className="font-medium">{log.action}</span>{log.reason && <span className="text-gray-600">— {log.reason}</span>}<span className="text-gray-500">{log.userName} · {formatDisplayDate(log.createdAt)}</span></li>
+                                        ))}</ul>
+                                      )}
+                                    </div>
+                                    )}
+                                    <div className="mt-2 pt-2 border-t border-gray-200">
+                                      <div className="text-xs font-medium text-gray-700 mb-1">Comments</div>
+                                      {(bank.comments || []).length > 0 && (
+                                        <ul className="text-xs space-y-1 mb-2">{(bank.comments || []).map((c) => (
+                                          <li key={c.id} className="flex items-center gap-1 flex-wrap"><span className="text-gray-600">{c.userName}:</span> {c.text} <span className="text-gray-400">({formatDisplayDate(c.createdAt)})</span>{isCurrentSale && (<button type="button" onClick={() => handleRemoveComment('bank', bank.id, bank.comments, c.id)} disabled={updatingComment} className="text-red-600 hover:text-red-800 cursor-pointer disabled:opacity-50" title="Remove comment">×</button>)}</li>
+                                        ))}</ul>
+                                      )}
+                                      {addingCommentFor?.paymentType === 'bank' && addingCommentFor?.paymentId === bank.id ? (
+                                        <div className="flex gap-1">
+                                          <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add comment..." className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs" />
+                                          <button type="button" onClick={() => handleAddComment('bank', bank.id, bank.comments)} disabled={updatingComment} className="text-xs bg-blue-600 text-white px-2 rounded hover:bg-blue-700 disabled:opacity-50">Add</button>
+                                          <button type="button" onClick={() => { setAddingCommentFor(null); setCommentText(''); }} className="text-xs text-gray-600">Cancel</button>
+                                        </div>
+                                      ) : (
+                                        <button type="button" onClick={() => setAddingCommentFor({ paymentType: 'bank', paymentId: bank.id })} className="text-xs text-blue-600 hover:underline">+ Add comment</button>
+                                      )}
+                                    </div>
                                 </div>
                               </div>
-                            ))}
+                            );
+                            })}
                           </div>
                         </div>
                       )}
@@ -862,10 +1102,17 @@ export default function PaymentView() {
                         <div>
                           <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">Electronic Cheques</h5>
                           <div className="space-y-3">
-                            {payment.chequesElectronic.map((cheque, index) => (
+                            {payment.chequesElectronic.map((cheque, index) => {
+                              const eqLogsRaw = (paymentLogsBySale[payment.saleId] || []).filter((l) => l.paymentType === 'cheque_electronic' && l.paymentId === cheque.id);
+                              const eqLogsAllSales = isAdmin(user) ? Object.keys(paymentLogsBySale || {}).flatMap((sid) => (paymentLogsBySale[sid] || []).filter((l) => l.paymentType === 'cheque_electronic' && l.paymentId === cheque.id)).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)) : eqLogsRaw;
+                              const eqStatus = (payment.saleInfo?.status || '').toLowerCase();
+                              const eqIsUsed = usedOutcome && usedOutcome.paymentType === 'cheque_electronic' && usedOutcome.paymentId === cheque.id;
+                              const showCE = isAdmin(user) && isCurrentSale && eqStatus !== 'charged' && (payment.saleInfo?.status === SALES_STATUSES.READY_FOR_PAYMENT || payment.saleInfo?.status === SALES_STATUSES.DECLINED || payment.saleInfo?.status === SALES_STATUSES.ACTIVE);
+                              const showCB = isAdmin(user) && isCurrentSale && eqStatus === 'charged' && eqIsUsed;
+                              return (
                               <div key={index} className="bg-blue-50 rounded-lg p-4 border-l-4 border-blue-500">
-                                <div className="flex justify-between items-start mb-2">
-                                  <div className="flex items-center space-x-2">
+                                <div className="flex justify-between items-start mb-2 flex-wrap gap-1">
+                                  <div className="flex items-center space-x-2 flex-wrap gap-1">
                                     <span className="text-sm font-medium text-gray-900">{cheque.bankName || 'N/A'}</span>
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                                       cheque.status === 'active' ? 'bg-green-100 text-green-800' : 
@@ -874,18 +1121,34 @@ export default function PaymentView() {
                                     }`}>
                                       {cheque.status}
                                     </span>
+                                    {eqIsUsed && (
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                        Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
+                                      </span>
+                                    )}
                                   </div>
                                   {saleId && !isCurrentSale && (
                                     <button
                                       type="button"
                                       onClick={() => addOldPaymentRef('cheque_electronic', cheque.id, payment.saleId)}
-                                      disabled={updatingRefs}
-                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                      disabled={updatingRefs || currentSaleUsedRefs.some((r) => r.paymentType === 'cheque_electronic' && r.paymentId === cheque.id)}
+                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                                     >
                                       Add to this sale
                                     </button>
                                   )}
                                 </div>
+                                {(showCE || showCB) && (
+                                  <div className="mb-3 flex flex-wrap gap-2">
+                                    {showCE && (
+                                      <>
+                                        <button type="button" onClick={() => handlePaymentCardAction('cheque_electronic', cheque.id, payment.saleId, 'charged')} disabled={savingStatus} className="bg-pink-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-pink-700 disabled:opacity-50">Charge</button>
+                                        <button type="button" onClick={() => setDeclineModal({ paymentType: 'cheque_electronic', paymentId: cheque.id, saleId: payment.saleId })} disabled={savingStatus} className="bg-red-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-700 disabled:opacity-50">Decline</button>
+                                      </>
+                                    )}
+                                    {showCB && <button type="button" onClick={() => handlePaymentCardAction('cheque_electronic', cheque.id, payment.saleId, 'chargeback')} disabled={savingStatus} className="bg-red-800 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-900 disabled:opacity-50">Chargeback</button>}
+                                  </div>
+                                )}
                                 <div className="space-y-1">
                                   <div className="flex justify-between text-sm">
                                     <span className="text-gray-600">Routing Number:</span>
@@ -921,9 +1184,27 @@ export default function PaymentView() {
                                       </div>
                                     )}
                                   </div>
+                                  {isAdmin(user) && (
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <div className="text-xs font-medium text-gray-700 mb-1">Payment logs {eqLogsAllSales.length > eqLogsRaw.length ? '(all sales)' : ''}</div>
+                                    {eqLogsAllSales.length === 0 ? <p className="text-xs text-gray-500">No logs yet</p> : (
+                                      <ul className="text-xs space-y-1 max-h-24 overflow-y-auto">{eqLogsAllSales.map((log) => (
+                                        <li key={`${log.saleId}-${log.id}`}><span className="font-medium text-blue-700">Sale #{log.saleId}:</span> <span className="font-medium">{log.action}</span>{log.reason && ` — ${log.reason}`} <span className="text-gray-500">{log.userName} · {formatDisplayDate(log.createdAt)}</span></li>
+                                      ))}</ul>
+                                    )}
+                                  </div>
+                                  )}
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <div className="text-xs font-medium text-gray-700 mb-1">Comments</div>
+                                    {(cheque.comments || []).length > 0 && <ul className="text-xs space-y-1 mb-2">{(cheque.comments || []).map((c) => <li key={c.id} className="flex items-center gap-1 flex-wrap">{c.userName}: {c.text} <span className="text-gray-400">({formatDisplayDate(c.createdAt)})</span>{isCurrentSale && (<button type="button" onClick={() => handleRemoveComment('cheque_electronic', cheque.id, cheque.comments, c.id)} disabled={updatingComment} className="text-red-600 hover:text-red-800 cursor-pointer disabled:opacity-50" title="Remove comment">×</button>)}</li>)}</ul>}
+                                    {addingCommentFor?.paymentType === 'cheque_electronic' && addingCommentFor?.paymentId === cheque.id ? (
+                                      <div className="flex gap-1"><input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add comment..." className="flex-1 border rounded px-2 py-1 text-xs" /><button type="button" onClick={() => handleAddComment('cheque_electronic', cheque.id, cheque.comments)} disabled={updatingComment} className="text-xs bg-blue-600 text-white px-2 rounded">Add</button><button type="button" onClick={() => { setAddingCommentFor(null); setCommentText(''); }} className="text-xs text-gray-600">Cancel</button></div>
+                                    ) : <button type="button" onClick={() => setAddingCommentFor({ paymentType: 'cheque_electronic', paymentId: cheque.id })} className="text-xs text-blue-600 hover:underline">+ Add comment</button>}
+                                  </div>
                                 </div>
                               </div>
-                            ))}
+                            );
+                            })}
                           </div>
                         </div>
                       )}
@@ -933,10 +1214,17 @@ export default function PaymentView() {
                         <div>
                           <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">Cheques to Mail</h5>
                           <div className="space-y-3">
-                            {payment.chequesMail.map((cheque, index) => (
+                            {payment.chequesMail.map((cheque, index) => {
+                              const mailLogsRaw = (paymentLogsBySale[payment.saleId] || []).filter((l) => l.paymentType === 'cheque_mail' && l.paymentId === cheque.id);
+                              const mailLogsAllSales = isAdmin(user) ? Object.keys(paymentLogsBySale || {}).flatMap((sid) => (paymentLogsBySale[sid] || []).filter((l) => l.paymentType === 'cheque_mail' && l.paymentId === cheque.id)).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)) : mailLogsRaw;
+                              const mailStatus = (payment.saleInfo?.status || '').toLowerCase();
+                              const mailIsUsed = usedOutcome && usedOutcome.paymentType === 'cheque_mail' && usedOutcome.paymentId === cheque.id;
+                              const showMailCE = isAdmin(user) && isCurrentSale && mailStatus !== 'charged' && (payment.saleInfo?.status === SALES_STATUSES.READY_FOR_PAYMENT || payment.saleInfo?.status === SALES_STATUSES.DECLINED || payment.saleInfo?.status === SALES_STATUSES.ACTIVE);
+                              const showMailCB = isAdmin(user) && isCurrentSale && mailStatus === 'charged' && mailIsUsed;
+                              return (
                               <div key={index} className="bg-purple-50 rounded-lg p-4 border-l-4 border-purple-500">
-                                <div className="flex justify-between items-start mb-2">
-                                  <div className="flex items-center space-x-2">
+                                <div className="flex justify-between items-start mb-2 flex-wrap gap-1">
+                                  <div className="flex items-center space-x-2 flex-wrap gap-1">
                                     <span className="text-sm font-medium text-gray-900">{cheque.bankName || 'N/A'}</span>
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                                       cheque.status === 'active' ? 'bg-green-100 text-green-800' :
@@ -947,18 +1235,34 @@ export default function PaymentView() {
                                     }`}>
                                       {cheque.status}
                                     </span>
+                                    {mailIsUsed && (
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                        Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
+                                      </span>
+                                    )}
                                   </div>
                                   {saleId && !isCurrentSale && (
                                     <button
                                       type="button"
                                       onClick={() => addOldPaymentRef('cheque_mail', cheque.id, payment.saleId)}
-                                      disabled={updatingRefs}
-                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                      disabled={updatingRefs || currentSaleUsedRefs.some((r) => r.paymentType === 'cheque_mail' && r.paymentId === cheque.id)}
+                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                                     >
                                       Add to this sale
                                     </button>
                                   )}
                                 </div>
+                                {(showMailCE || showMailCB) && (
+                                  <div className="mb-3 flex flex-wrap gap-2">
+                                    {showMailCE && (
+                                      <>
+                                        <button type="button" onClick={() => handlePaymentCardAction('cheque_mail', cheque.id, payment.saleId, 'charged')} disabled={savingStatus} className="bg-pink-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-pink-700 disabled:opacity-50">Charge</button>
+                                        <button type="button" onClick={() => setDeclineModal({ paymentType: 'cheque_mail', paymentId: cheque.id, saleId: payment.saleId })} disabled={savingStatus} className="bg-red-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-700 disabled:opacity-50">Decline</button>
+                                      </>
+                                    )}
+                                    {showMailCB && <button type="button" onClick={() => handlePaymentCardAction('cheque_mail', cheque.id, payment.saleId, 'chargeback')} disabled={savingStatus} className="bg-red-800 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-900 disabled:opacity-50">Chargeback</button>}
+                                  </div>
+                                )}
                                 <div className="space-y-1">
                                   <div className="flex justify-between text-sm">
                                     <span className="text-gray-600">Cheque Number:</span>
@@ -986,9 +1290,27 @@ export default function PaymentView() {
                                       </div>
                                     )}
                                   </div>
+                                  {isAdmin(user) && (
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <div className="text-xs font-medium text-gray-700 mb-1">Payment logs {mailLogsAllSales.length > mailLogsRaw.length ? '(all sales)' : ''}</div>
+                                    {mailLogsAllSales.length === 0 ? <p className="text-xs text-gray-500">No logs yet</p> : (
+                                      <ul className="text-xs space-y-1 max-h-24 overflow-y-auto">{mailLogsAllSales.map((log) => (
+                                        <li key={`${log.saleId}-${log.id}`}><span className="font-medium text-blue-700">Sale #{log.saleId}:</span> <span className="font-medium">{log.action}</span>{log.reason && ` — ${log.reason}`} <span className="text-gray-500">{log.userName} · {formatDisplayDate(log.createdAt)}</span></li>
+                                      ))}</ul>
+                                    )}
+                                  </div>
+                                  )}
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <div className="text-xs font-medium text-gray-700 mb-1">Comments</div>
+                                    {(cheque.comments || []).length > 0 && <ul className="text-xs space-y-1 mb-2">{(cheque.comments || []).map((c) => <li key={c.id} className="flex items-center gap-1 flex-wrap">{c.userName}: {c.text} <span className="text-gray-400">({formatDisplayDate(c.createdAt)})</span>{isCurrentSale && (<button type="button" onClick={() => handleRemoveComment('cheque_mail', cheque.id, cheque.comments, c.id)} disabled={updatingComment} className="text-red-600 hover:text-red-800 cursor-pointer disabled:opacity-50" title="Remove comment">×</button>)}</li>)}</ul>}
+                                    {addingCommentFor?.paymentType === 'cheque_mail' && addingCommentFor?.paymentId === cheque.id ? (
+                                      <div className="flex gap-1"><input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add comment..." className="flex-1 border rounded px-2 py-1 text-xs" /><button type="button" onClick={() => handleAddComment('cheque_mail', cheque.id, cheque.comments)} disabled={updatingComment} className="text-xs bg-blue-600 text-white px-2 rounded">Add</button><button type="button" onClick={() => { setAddingCommentFor(null); setCommentText(''); }} className="text-xs text-gray-600">Cancel</button></div>
+                                    ) : <button type="button" onClick={() => setAddingCommentFor({ paymentType: 'cheque_mail', paymentId: cheque.id })} className="text-xs text-blue-600 hover:underline">+ Add comment</button>}
+                                  </div>
                                 </div>
                               </div>
-                            ))}
+                            );
+                            })}
                           </div>
                         </div>
                       )}
@@ -998,10 +1320,17 @@ export default function PaymentView() {
                         <div>
                           <h5 className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-3">Payment Emails</h5>
                           <div className="space-y-3">
-                            {payment.paymentEmails.map((email, index) => (
+                            {payment.paymentEmails.map((email, index) => {
+                              const emailLogsRaw = (paymentLogsBySale[payment.saleId] || []).filter((l) => l.paymentType === 'payment_email' && l.paymentId === email.id);
+                              const emailLogsAllSales = isAdmin(user) ? Object.keys(paymentLogsBySale || {}).flatMap((sid) => (paymentLogsBySale[sid] || []).filter((l) => l.paymentType === 'payment_email' && l.paymentId === email.id)).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)) : emailLogsRaw;
+                              const emailStatus = (payment.saleInfo?.status || '').toLowerCase();
+                              const emailIsUsed = usedOutcome && usedOutcome.paymentType === 'payment_email' && usedOutcome.paymentId === email.id;
+                              const showEmailCE = isAdmin(user) && isCurrentSale && emailStatus !== 'charged' && (payment.saleInfo?.status === SALES_STATUSES.READY_FOR_PAYMENT || payment.saleInfo?.status === SALES_STATUSES.DECLINED || payment.saleInfo?.status === SALES_STATUSES.ACTIVE);
+                              const showEmailCB = isAdmin(user) && isCurrentSale && emailStatus === 'charged' && emailIsUsed;
+                              return (
                               <div key={index} className="bg-indigo-50 rounded-lg p-4 border-l-4 border-indigo-500">
-                                <div className="flex justify-between items-start mb-2">
-                                  <div className="flex items-center space-x-2">
+                                <div className="flex justify-between items-start mb-2 flex-wrap gap-1">
+                                  <div className="flex items-center space-x-2 flex-wrap gap-1">
                                     <span className="text-sm font-medium text-gray-900">📧 Email Invoice</span>
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                                       email.status === 'active' ? 'bg-green-100 text-green-800' :
@@ -1012,18 +1341,34 @@ export default function PaymentView() {
                                     }`}>
                                       {email.status}
                                     </span>
+                                    {emailIsUsed && (
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${usedOutcome.action === 'charged' ? 'bg-pink-100 text-pink-800' : usedOutcome.action === 'chargeback' ? 'bg-red-200 text-red-900' : 'bg-red-100 text-red-800'}`}>
+                                        Used — {usedOutcome.action.charAt(0).toUpperCase() + usedOutcome.action.slice(1)}
+                                      </span>
+                                    )}
                                   </div>
                                   {saleId && !isCurrentSale && (
                                     <button
                                       type="button"
                                       onClick={() => addOldPaymentRef('payment_email', email.id, payment.saleId)}
-                                      disabled={updatingRefs}
-                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                                      disabled={updatingRefs || currentSaleUsedRefs.some((r) => r.paymentType === 'payment_email' && r.paymentId === email.id)}
+                                      className="text-xs font-medium text-purple-600 hover:text-purple-800 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                                     >
                                       Add to this sale
                                     </button>
                                   )}
                                 </div>
+                                {(showEmailCE || showEmailCB) && (
+                                  <div className="mb-3 flex flex-wrap gap-2">
+                                    {showEmailCE && (
+                                      <>
+                                        <button type="button" onClick={() => handlePaymentCardAction('payment_email', email.id, payment.saleId, 'charged')} disabled={savingStatus} className="bg-pink-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-pink-700 disabled:opacity-50">Charge</button>
+                                        <button type="button" onClick={() => setDeclineModal({ paymentType: 'payment_email', paymentId: email.id, saleId: payment.saleId })} disabled={savingStatus} className="bg-red-600 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-700 disabled:opacity-50">Decline</button>
+                                      </>
+                                    )}
+                                    {showEmailCB && <button type="button" onClick={() => handlePaymentCardAction('payment_email', email.id, payment.saleId, 'chargeback')} disabled={savingStatus} className="bg-red-800 text-white text-xs font-medium rounded px-2 py-1.5 hover:bg-red-900 disabled:opacity-50">Chargeback</button>}
+                                  </div>
+                                )}
                                 <div className="space-y-1">
                                   <div className="flex justify-between text-sm">
                                     <span className="text-gray-600">Email Address:</span>
@@ -1059,9 +1404,27 @@ export default function PaymentView() {
                                       </div>
                                     )}
                                   </div>
+                                  {isAdmin(user) && (
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <div className="text-xs font-medium text-gray-700 mb-1">Payment logs {emailLogsAllSales.length > emailLogsRaw.length ? '(all sales)' : ''}</div>
+                                    {emailLogsAllSales.length === 0 ? <p className="text-xs text-gray-500">No logs yet</p> : (
+                                      <ul className="text-xs space-y-1 max-h-24 overflow-y-auto">{emailLogsAllSales.map((log) => (
+                                        <li key={`${log.saleId}-${log.id}`}><span className="font-medium text-blue-700">Sale #{log.saleId}:</span> <span className="font-medium">{log.action}</span>{log.reason && ` — ${log.reason}`} <span className="text-gray-500">{log.userName} · {formatDisplayDate(log.createdAt)}</span></li>
+                                      ))}</ul>
+                                    )}
+                                  </div>
+                                  )}
+                                  <div className="mt-2 pt-2 border-t border-gray-200">
+                                    <div className="text-xs font-medium text-gray-700 mb-1">Comments</div>
+                                    {(email.comments || []).length > 0 && <ul className="text-xs space-y-1 mb-2">{(email.comments || []).map((c) => <li key={c.id} className="flex items-center gap-1 flex-wrap">{c.userName}: {c.text} <span className="text-gray-400">({formatDisplayDate(c.createdAt)})</span>{isCurrentSale && (<button type="button" onClick={() => handleRemoveComment('payment_email', email.id, email.comments, c.id)} disabled={updatingComment} className="text-red-600 hover:text-red-800 cursor-pointer disabled:opacity-50" title="Remove comment">×</button>)}</li>)}</ul>}
+                                    {addingCommentFor?.paymentType === 'payment_email' && addingCommentFor?.paymentId === email.id ? (
+                                      <div className="flex gap-1"><input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add comment..." className="flex-1 border rounded px-2 py-1 text-xs" /><button type="button" onClick={() => handleAddComment('payment_email', email.id, email.comments)} disabled={updatingComment} className="text-xs bg-blue-600 text-white px-2 rounded">Add</button><button type="button" onClick={() => { setAddingCommentFor(null); setCommentText(''); }} className="text-xs text-gray-600">Cancel</button></div>
+                                    ) : <button type="button" onClick={() => setAddingCommentFor({ paymentType: 'payment_email', paymentId: email.id })} className="text-xs text-blue-600 hover:underline">+ Add comment</button>}
+                                  </div>
                                 </div>
                               </div>
-                            ))}
+                            );
+                            })}
                           </div>
                         </div>
                       )}
@@ -1089,6 +1452,45 @@ export default function PaymentView() {
           })
         )}
       </div>
+      )}
+
+      {/* Decline reason modal */}
+      {declineModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDeclineModal(null)}>
+          <div className="bg-white rounded-lg shadow-xl p-4 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-sm font-medium text-gray-900 mb-2">Reason for decline (optional)</h4>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {DEFAULT_DECLINE_REASONS.map((reason) => (
+                <button
+                  key={reason}
+                  type="button"
+                  onClick={() => setDeclineReason(reason)}
+                  className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 cursor-pointer"
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={declineReason}
+              onChange={(e) => setDeclineReason(e.target.value)}
+              placeholder="Or type your own reason..."
+              className="w-full border border-gray-300 rounded px-2 py-2 text-sm mb-4 min-h-[80px]"
+              rows={3}
+            />
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => { setDeclineModal(null); setDeclineReason(''); }} className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50">Cancel</button>
+              <button
+                type="button"
+                onClick={() => handlePaymentCardAction(declineModal.paymentType, declineModal.paymentId, declineModal.saleId, 'declined', declineReason)}
+                disabled={savingStatus}
+                className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+              >
+                Confirm Decline
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

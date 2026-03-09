@@ -70,6 +70,12 @@ module.exports = (sequelize) => {
       type: DataTypes.TEXT,
       allowNull: true
     },
+    comments: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: [],
+      comment: 'Array of { id, userId, userName, text, createdAt } like notes'
+    },
     status: {
       type: DataTypes.ENUM('active', 'inactive', 'closed'),
       defaultValue: 'active'
