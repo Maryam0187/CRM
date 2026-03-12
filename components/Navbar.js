@@ -13,6 +13,8 @@ import IVRDialer, { openIVRDialer } from './IVRDialer';
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
+  const [isAdminMobileOpen, setIsAdminMobileOpen] = useState(false);
   const { user, logout, isAuthenticated } = useAuth();
   const router = useRouter();
   const { socket } = useSocket();
@@ -23,6 +25,10 @@ export default function Navbar() {
 
   const toggleUserMenu = () => {
     setIsUserMenuOpen(!isUserMenuOpen);
+  };
+
+  const toggleAdminMenu = () => {
+    setIsAdminMenuOpen(!isAdminMenuOpen);
   };
 
   const handleLogout = () => {
@@ -75,7 +81,7 @@ export default function Navbar() {
                   Dialing
                 </Link>
               )}
-              {isAuthenticated && (user?.role === 'agent' || user?.role === 'supervisor') && (
+              {isAuthenticated  && (
                 <>
                   <Link
                     href="/customers"
@@ -92,32 +98,52 @@ export default function Navbar() {
                 </>
               )}
               {isAuthenticated && isAdmin(user) && (
-                <>
-                  <Link
-                    href="/admin/users"
-                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                <div className="relative inline-block">
+                  <button
+                    onClick={toggleAdminMenu}
+                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 inline-flex items-center"
                   >
-                    User Management
-                  </Link>
-                  <Link
-                    href="/admin/customers"
-                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
-                  >
-                    Customer Management
-                  </Link>
-                  <Link
-                    href="/admin/carriers"
-                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
-                  >
-                    Carrier Management
-                  </Link>
-                  <Link
-                    href="/admin/receivers"
-                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
-                  >
-                    Receiver Management
-                  </Link>
-                </>
+                    Admin
+                    <svg className={`ml-1 w-4 h-4 transition-transform ${isAdminMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {isAdminMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setIsAdminMenuOpen(false)} aria-hidden="true" />
+                      <div className="origin-top-left absolute left-0 mt-1 w-56 rounded-md shadow-lg py-1 bg-white ring-1 ring-black ring-opacity-5 z-20">
+                        <Link
+                          href="/admin/users"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsAdminMenuOpen(false)}
+                        >
+                          User Management
+                        </Link>
+                        <Link
+                          href="/admin/customers"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsAdminMenuOpen(false)}
+                        >
+                          Customer Management
+                        </Link>
+                        <Link
+                          href="/admin/carriers"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsAdminMenuOpen(false)}
+                        >
+                          Carrier Management
+                        </Link>
+                        <Link
+                          href="/admin/receivers"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsAdminMenuOpen(false)}
+                        >
+                          Receiver Management
+                        </Link>
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -250,7 +276,7 @@ export default function Navbar() {
                 Dialing
               </Link>
             )}
-            {isAuthenticated && (user?.role === 'agent' || user?.role === 'supervisor') && (
+            {isAuthenticated  && (
               <>
                 <Link
                   href="/customers"
@@ -284,36 +310,49 @@ export default function Navbar() {
               </button>
             )}
             {isAuthenticated && isAdmin(user) && (
-              <>
-                <Link
-                  href="/admin/users"
-                  className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
-                  onClick={() => setIsMenuOpen(false)}
+              <div className="space-y-1">
+                <button
+                  onClick={() => setIsAdminMobileOpen(!isAdminMobileOpen)}
+                  className="text-gray-700 hover:text-blue-600 flex items-center justify-between w-full px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
                 >
-                  User Management
-                </Link>
-                <Link
-                  href="/admin/customers"
-                  className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  Customer Management
-                </Link>
-                <Link
-                  href="/admin/carriers"
-                  className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  Carrier Management
-                </Link>
-                <Link
-                  href="/admin/receivers"
-                  className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  Receiver Management
-                </Link>
-              </>
+                  Admin
+                  <svg className={`w-4 h-4 transition-transform ${isAdminMobileOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {isAdminMobileOpen && (
+                  <div className="pl-4 space-y-1">
+                    <Link
+                      href="/admin/users"
+                      className="text-gray-600 hover:text-blue-600 block px-3 py-2 rounded-md text-sm font-medium"
+                      onClick={() => { setIsMenuOpen(false); setIsAdminMobileOpen(false); }}
+                    >
+                      User Management
+                    </Link>
+                    <Link
+                      href="/admin/customers"
+                      className="text-gray-600 hover:text-blue-600 block px-3 py-2 rounded-md text-sm font-medium"
+                      onClick={() => { setIsMenuOpen(false); setIsAdminMobileOpen(false); }}
+                    >
+                      Customer Management
+                    </Link>
+                    <Link
+                      href="/admin/carriers"
+                      className="text-gray-600 hover:text-blue-600 block px-3 py-2 rounded-md text-sm font-medium"
+                      onClick={() => { setIsMenuOpen(false); setIsAdminMobileOpen(false); }}
+                    >
+                      Carrier Management
+                    </Link>
+                    <Link
+                      href="/admin/receivers"
+                      className="text-gray-600 hover:text-blue-600 block px-3 py-2 rounded-md text-sm font-medium"
+                      onClick={() => { setIsMenuOpen(false); setIsAdminMobileOpen(false); }}
+                    >
+                      Receiver Management
+                    </Link>
+                  </div>
+                )}
+              </div>
             )}
             <div className="border-t border-gray-200 pt-4 pb-3">
               {!isAuthenticated ? (
