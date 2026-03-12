@@ -25,6 +25,10 @@ export async function POST(request) {
       saleId,
       agentId = user.id,
       phoneNumber: phoneNum,
+      customerName,
+      state,
+      city,
+      zipcode,
       conferenceName,
       callPurpose = 'follow_up',
       customMessage
@@ -111,8 +115,8 @@ export async function POST(request) {
       });
 
       if (callLog) {
-        // Update existing call log with customer call SID
-        await callLog.update({
+        // Update existing call log with customer call SID and optional customerName
+        const updateData = {
           callSid: call.sid,
           customerCallSid: call.sid,
           status: 'queued',
@@ -121,9 +125,16 @@ export async function POST(request) {
             customerCallSid: call.sid,
             dialedAt: new Date().toISOString()
           }
-        });
+        };
+        if (customerName != null && customerName !== '') {
+          updateData.customerName = customerName;
+        }
+        if (state != null) updateData.state = state;
+        if (city != null) updateData.city = city;
+        if (zipcode != null) updateData.zipcode = zipcode;
+        await callLog.update(updateData);
       } else {
-        // Create new call log if not found
+        // Create new call log if not found (agentId, saleId null, customerId null for quick dial)
         callLog = await sequelizeDb.CallLog.create({
           callSid: call.sid,
           customerCallSid: call.sid,
@@ -131,6 +142,10 @@ export async function POST(request) {
           agentId: parseInt(agentId, 10),
           customerId: customerId ? parseInt(customerId, 10) : null,
           saleId: saleId ? parseInt(saleId, 10) : null,
+          customerName: customerName || null,
+          state: state || null,
+          city: city || null,
+          zipcode: zipcode || null,
           direction: 'outbound',
           fromNumber: fromNumber,
           toNumber: formattedNumber,

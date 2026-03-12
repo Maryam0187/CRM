@@ -198,6 +198,9 @@ export function CallProvider({ children }) {
       customerName,
       agentId,
       callPurpose = 'follow_up',
+      state,
+      city,
+      zipcode,
       onCallInitiated,
       onError
     } = callParams;
@@ -225,6 +228,10 @@ export function CallProvider({ children }) {
         saleId,
         agentId,
         phoneNumber,
+        customerName,
+        state,
+        city,
+        zipcode,
         conferenceName: confName,
         callPurpose,
         customMessage: `Hello ${customerName || 'there'}, this is a call from our CRM system.`

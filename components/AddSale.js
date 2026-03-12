@@ -32,6 +32,7 @@ import {
 import { useToast } from '../contexts/ToastContext';
 import { SALES_STATUSES, SALE_TAGS, DISPLAY_TAGS, getStepForStatus, getStatusDisplayName, getStatusColorClass, getStatusBadgeClasses, hasTag, toggleTag, getTagDisplayName, getTagBadgeClasses } from '../lib/salesStatuses.js';
 import { downloadSaleDoc, escapeHtml as docEscapeHtml, buildTableRows as docBuildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
+import { isAdmin, isSupervisor } from '../lib/roleUtils';
 
 // Helper function to calculate time ago
 const getTimeAgo = (dateString) => {
@@ -140,8 +141,11 @@ export default function AddSale() {
   const [isCheckingNumber, setIsCheckingNumber] = useState(false); // Loading state for check number
   const [showCustomerInfoModal, setShowCustomerInfoModal] = useState(false); // Show customer info popup
   const [lastSaleInfo, setLastSaleInfo] = useState(null); // Store last sale information
+  const [lastSaleCheckLoading, setLastSaleCheckLoading] = useState(false); // Loading when check-by-number from Create sale
+  const lastFetchedLandlineRef = useRef(null); // Prevent duplicate check-by-number when user loads after mount
   const [isCheckNumberMode, setIsCheckNumberMode] = useState(false); // Track if in check number mode
   const [hideCheckNumberSection, setHideCheckNumberSection] = useState(false); // Hide Check Number block after call button is clicked
+  const fromCreateSaleDialer = !editId && searchParams.get('fromCall') === '1' && !!searchParams.get('landline')?.trim(); // true when opened via Create Sale from dialer/call logs
   const [callJustEnded, setCallJustEnded] = useState(false); // Track if call just ended to highlight action buttons
   const [sale, setSale] = useState(null); // Store full sale data including cards/banks for tag checking
   const [customerHasPayments, setCustomerHasPayments] = useState(null); // Create mode: whether selected customer has any payment (any sale)
@@ -633,6 +637,105 @@ export default function AddSale() {
     fetchCarriers();
   }, []);
 
+  // Pre-fill from call: fromCall=1&landline=XXX&firstName=YYY (Create Sale during active call)
+  useEffect(() => {
+    const fromCall = searchParams.get('fromCall');
+    const landline = searchParams.get('landline');
+    const firstName = searchParams.get('firstName');
+    if (fromCall === '1' && landline && !editId) {
+      const formatted = formatLandline(landline.trim());
+      setCustomer(prev => ({
+        ...prev,
+        landline: formatted || landline.trim(),
+        firstName: (firstName || prev.firstName || '').trim()
+      }));
+      setHideCheckNumberSection(true); // Landline read-only, hide Check Number
+    }
+  }, [searchParams, editId]);
+
+  // When opened from dialing page (Create Sale): fetch last sale via check-by-number (single call; canShow updated when user loads)
+  // We do NOT depend on user: the API only needs the number (auth is via JWT). We use user only for canShow in the response.
+  useEffect(() => {
+    const fromCall = searchParams.get('fromCall');
+    const landline = searchParams.get('landline');
+    if (fromCall !== '1' || !landline?.trim() || editId) return;
+
+    const landlineKey = landline.trim();
+    const firstNameFromUrl = searchParams.get('firstName')?.trim();
+    if (lastFetchedLandlineRef.current === landlineKey) return;
+
+    let cancelled = false;
+    lastFetchedLandlineRef.current = landlineKey;
+    setLastSaleCheckLoading(true);
+    (async () => {
+      try {
+        const res = await apiClient.post('/api/customers/check-by-number', { number: landlineKey });
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!data || !data.success) {
+          setLastSaleInfo({ lastSale: null, canShow: false });
+          return;
+        }
+        const agentId = data?.lastSale?.agent?.id;
+        const isSupervised = user && isSupervisor(user) && user?.supervisedAgents?.some((a) => a.id === agentId);
+        const canShow = user && (isAdmin(user) || agentId === user?.id || isSupervised);
+        const customerFromSale = data?.lastSale?.customer;
+        const customerFromList = data?.customers?.[0];
+        const customerName = customerFromSale
+          ? `${customerFromSale?.firstName || ''} ${customerFromSale?.lastName || ''}`.trim()
+          : (customerFromList?.firstName ?? null);
+        setLastSaleInfo({
+          lastSale: data?.lastSale || null,
+          canShow: !!canShow,
+          customerName: customerName || null
+        });
+        const source = customerFromSale || customerFromList;
+        if (source && (source?.firstName !== undefined || source?.lastName !== undefined)) {
+          setCustomer(prev => ({
+            ...prev,
+            firstName: (firstNameFromUrl && firstNameFromUrl.trim()) ? firstNameFromUrl.trim() : (source?.firstName ?? prev.firstName ?? '').trim(),
+            lastName: (firstNameFromUrl && firstNameFromUrl.trim()) ? (prev.lastName ?? '').trim() : (source?.lastName ?? prev.lastName ?? '').trim()
+          }));
+        } else if (customerName && customerName.trim() && !firstNameFromUrl) {
+          // No name from URL: fill from last sale customer name
+          setCustomer(prev => {
+            if (prev.firstName?.trim()) return prev;
+            return { ...prev, firstName: customerName.trim() };
+          });
+        }
+      } catch {
+        if (!cancelled) setLastSaleInfo({ lastSale: null, canShow: false });
+      } finally {
+        setLastSaleCheckLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      lastFetchedLandlineRef.current = null;
+    };
+  }, [searchParams, editId]);
+
+  // When user loads after check-by-number already set lastSaleInfo, update canShow (never clear lastSaleInfo)
+  useEffect(() => {
+    if (!lastSaleInfo?.lastSale || !user) return;
+    const agentId = lastSaleInfo.lastSale?.agent?.id;
+    const isSupervised = isSupervisor(user) && user?.supervisedAgents?.some((a) => a.id === agentId);
+    const canShow = isAdmin(user) || agentId === user?.id || isSupervised;
+    if (lastSaleInfo.canShow !== canShow) {
+      setLastSaleInfo(prev => (prev && prev.lastSale) ? { ...prev, canShow } : prev);
+    }
+  }, [user?.id, lastSaleInfo?.lastSale, lastSaleInfo?.canShow]);
+
+  // When opened from dialer with no name in URL: fill name from last sale customer once we have lastSaleInfo
+  useEffect(() => {
+    if (!fromCreateSaleDialer) return;
+    if (!lastSaleInfo?.customerName || !lastSaleInfo.customerName.trim()) return;
+    setCustomer(prev => {
+      if (prev.firstName?.trim()) return prev;
+      return { ...prev, firstName: lastSaleInfo.customerName.trim() };
+    });
+  }, [fromCreateSaleDialer, lastSaleInfo?.customerName]);
+
   // Load data on component mount if in edit mode
   useEffect(() => {
     fetchSaleData();
@@ -979,18 +1082,18 @@ export default function AddSale() {
             const exactMatch = checkResult.exactMatchCustomer;
             setCustomer(prev => ({
               ...prev,
-              firstName: exactMatch.firstName,
-              lastName: exactMatch.lastName || '',
-              email: exactMatch.email || '',
-              phone: exactMatch.phone || '',
-              landline: exactMatch.landline || prev.landline,
-              address: exactMatch.address || '',
-              state: exactMatch.state || '',
-              city: exactMatch.city || '',
-              id: exactMatch.id
+              firstName: exactMatch?.firstName ?? prev.firstName,
+              lastName: exactMatch?.lastName ?? prev.lastName ?? '',
+              email: exactMatch?.email ?? prev.email ?? '',
+              phone: exactMatch?.phone ?? prev.phone ?? '',
+              landline: exactMatch?.landline ?? prev.landline,
+              address: exactMatch?.address ?? prev.address ?? '',
+              state: exactMatch?.state ?? prev.state ?? '',
+              city: exactMatch?.city ?? prev.city ?? '',
+              id: exactMatch?.id
             }));
-            selectedCustomerId = exactMatch.id;
-            selectedCustomerName = exactMatch.firstName;
+            selectedCustomerId = exactMatch?.id;
+            selectedCustomerName = exactMatch?.firstName ?? null;
           }
           
           // Show customer selection dialog when landline exists
@@ -1803,6 +1906,25 @@ Room: `;
   // Step-specific action handlers
   const handleFirstStepAction = (action, status) => {
     resetCallHighlight(); // Reset highlight when action is taken
+    // Require customer name and number before selecting any action (new sale only)
+    if (!isEditMode) {
+      const nameValid = validateCustomerName(customer.firstName);
+      const landlineValid = validateLandline(customer.landline);
+      if (!nameValid.isValid || !landlineValid.isValid) {
+        setCustomerValidation(prev => ({
+          ...prev,
+          firstName: nameValid,
+          landline: landlineValid
+        }));
+        setError('Please enter customer name and number before selecting an action.');
+        return;
+      }
+      if (!customer.firstName?.trim() || !customer.landline?.trim()) {
+        setError('Please enter customer name and number before selecting an action.');
+        return;
+      }
+      setError(null);
+    }
     if (action === 'appointment') {
       openAppointmentModal();
     } else if (action === 'sale_done') {
@@ -2065,7 +2187,7 @@ Room: `;
         }
       } else if (customerWarning.selectedCustomerId) {
         // User selected an existing customer
-        const customerToUse = customerWarning.landlineCustomers.find(c => c.id === customerWarning.selectedCustomerId);
+        const customerToUse = (customerWarning.landlineCustomers ?? []).find(c => c.id === customerWarning.selectedCustomerId);
         
         if (customerToUse) {
           setCheckedCustomer({
@@ -2097,7 +2219,7 @@ Room: `;
         }
       } else {
         // No explicit selection - use exact match or first customer (fallback behavior)
-        const customerToUse = customerWarning.exactMatchCustomer || customerWarning.landlineCustomers[0];
+        const customerToUse = customerWarning.exactMatchCustomer || customerWarning.landlineCustomers?.[0];
           
         if (customerToUse) {
           setCheckedCustomer({
@@ -2412,19 +2534,6 @@ Room: `;
     setSaving(true);
     setError(null);
     
-    // Only update status if it's not null
-    if (status !== null) {
-      setSaleStatus(status);
-      
-      // Update sale form status and tags
-      setSaleForm(prev => ({
-        ...prev,
-        status: status,
-        // Update tags if provided in additionalData
-        tags: additionalData.tags !== undefined ? additionalData.tags : prev.tags || []
-      }));
-    }
-    
     // Validate customer fields before proceeding
     if (!validateAllCustomerFields()) {
       setError('Please fix the validation errors before proceeding');
@@ -2433,10 +2542,23 @@ Room: `;
     }
     
     try {
-      // Only save sale if status is not null
+      // Only save sale if status is not null - call addSale first; do NOT update status until we know the user didn't get the customer dialog (so Cancel keeps current step)
       let saleResult = null;
       if (status !== null) {
         saleResult = await addSale(status, additionalData);
+        
+        if (saleResult?.showCustomerDialog) {
+          setSaving(false);
+          return;
+        }
+        
+        // Now update status (user did not cancel / dialog was not shown, or they continued from dialog)
+        setSaleStatus(status);
+        setSaleForm(prev => ({
+          ...prev,
+          status: status,
+          tags: additionalData.tags !== undefined ? additionalData.tags : prev.tags || []
+        }));
         
         // Set created sale for call button display (after any sale is created)
         if (saleResult?.id) {
@@ -2735,45 +2857,48 @@ Room: `;
           const checkResult = await checkResponse.json();
           if (checkResult.success && checkResult.exists) {
             if (checkResult.matchType === 'exact') {
-              // Exact match found - same name and landline
-              const lastSaleDateTime = checkResult.lastSale ? new Date(checkResult.lastSale.created_at).toLocaleString() : 'No previous sales';
-              const lastSaleTimeAgo = checkResult.lastSale ? getTimeAgo(checkResult.lastSale.created_at) : 'No previous sales';
-              const agentName = checkResult.lastSale?.agent ? `${checkResult.lastSale.agent.firstName} ${checkResult.lastSale.agent.lastName}` : 'Unknown';
+              // Exact match found - use exactMatchCustomer (API returns exactMatchCustomer, not customer/lastSale at top level)
+              const exactMatch = checkResult.exactMatchCustomer;
+              const lastSale = exactMatch?.lastSale;
+              const lastSaleDateTime = lastSale ? new Date(lastSale.created_at).toLocaleString() : 'No previous sales';
+              const lastSaleTimeAgo = lastSale ? getTimeAgo(lastSale.created_at) : 'No previous sales';
+              const agentName = lastSale?.agent ? `${lastSale.agent?.firstName || ''} ${lastSale.agent?.lastName || ''}`.trim() : 'Unknown';
               
-              // Check if the current user is the same as the last sale agent
-              const isCurrentUser = user && checkResult.lastSale?.agent && 
-                (user.id === checkResult.lastSale.agent.id || 
-                 (user.firstName === checkResult.lastSale.agent.firstName && user.lastName === checkResult.lastSale.agent.lastName));
+              const isCurrentUser = user && lastSale?.agent && 
+                (user.id === lastSale.agent.id || 
+                 (user?.firstName === lastSale.agent?.firstName && user?.lastName === lastSale.agent?.lastName));
               
               const displayAgentName = isCurrentUser ? 'You (yourself)' : 'Other agent';
               
-              // Show dialog with exact match
               setCustomerWarning({
                 matchType: 'exact',
-                customerName: checkResult.customer.firstName,
+                customerName: exactMatch?.firstName ?? '',
                 lastSaleDateTime: lastSaleDateTime,
                 lastSaleTimeAgo: lastSaleTimeAgo,
-                lastSaleStatus: checkResult.lastSale?.status || 'No previous sales',
+                lastSaleStatus: lastSale?.status || 'No previous sales',
                 agentName: displayAgentName,
                 isCurrentUser: isCurrentUser,
-                customerId: checkResult.customer.id,
-                lastSale: checkResult.lastSale // Include the full lastSale object with agent info
+                customerId: exactMatch?.id,
+                lastSale: lastSale,
+                landlineCustomers: exactMatch ? [{ ...exactMatch, isExactMatch: true }] : [],
+                exactMatchCustomer: exactMatch,
+                pendingStatus: status
               });
               setShowCustomerDialog(true);
               setSaving(false);
-              return;
+              return { showCustomerDialog: true };
               
             } else if (checkResult.matchType === 'landline') {
-              // Landline exists with different names - show selection dialog
               setCustomerWarning({
                 matchType: 'landline',
                 newCustomerName: customer.firstName.trim(),
-                landlineCustomers: checkResult.landlineCustomers,
-                customerCount: checkResult.landlineCustomers.length
+                landlineCustomers: checkResult.landlineCustomers ?? [],
+                customerCount: checkResult.landlineCustomers?.length ?? 0,
+                pendingStatus: status
               });
               setShowCustomerDialog(true);
               setSaving(false);
-              return;
+              return { showCustomerDialog: true };
             }
           } else {
             // Customer doesn't exist, create new one
@@ -4180,6 +4305,54 @@ Room: `;
                   )}
                   
 
+                  {/* Last sale for this number - when opened from Create sale (check-by-number on load); hide once user has checked number (checkedCustomer) */}
+                  {!checkedCustomer && (hideCheckNumberSection || fromCreateSaleDialer || lastSaleInfo) && (lastSaleCheckLoading || lastSaleInfo) && (
+                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      {lastSaleCheckLoading ? (
+                        <div className="flex items-center gap-2 text-sm text-blue-800">
+                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Loading last sale for this number...
+                        </div>
+                      ) : lastSaleInfo && (
+                        <div className="bg-white rounded-lg p-3 border">
+                          <h4 className="text-sm font-medium text-gray-800 mb-2">📊 Last Sale for this number</h4>
+                          {lastSaleInfo.lastSale ? (
+                            <div className="space-y-1 text-xs">
+                              <div><strong>Sale ID:</strong> {lastSaleInfo.lastSale.id}</div>
+                              <div><strong>Status:</strong> <span className="capitalize">{lastSaleInfo.lastSale.status}</span></div>
+                              <div><strong>Date:</strong> {new Date(lastSaleInfo.lastSale.created_at).toLocaleDateString()}</div>
+                              <div><strong>Time:</strong> {new Date(lastSaleInfo.lastSale.created_at).toLocaleTimeString()}</div>
+                              <div><strong>Period:</strong> <span className="text-blue-600 font-medium">{getTimeAgo(lastSaleInfo.lastSale.created_at)}</span></div>
+                              {(() => {
+                                const canShow = lastSaleInfo.canShow !== undefined
+                                  ? lastSaleInfo.canShow
+                                  : (isAdmin(user) || (user && lastSaleInfo.lastSale?.agent &&
+                                    (user.id === lastSaleInfo.lastSale.agent.id ||
+                                      (isSupervisor(user) && user.supervisedAgents?.some((a) => a.id === lastSaleInfo.lastSale.agent?.id)))));
+                                if (!canShow && lastSaleInfo.lastSale?.agent) {
+                                  return <div><strong>Agent:</strong> Other agent</div>;
+                                }
+                                return (canShow && lastSaleInfo.lastSale?.agent) ? (
+                                  <div><strong>Agent:</strong> {`${lastSaleInfo.lastSale.agent?.firstName || ''} ${lastSaleInfo.lastSale.agent?.lastName || ''}`.trim() || 'N/A'}</div>
+                                ) : null;
+                              })()}
+                              {lastSaleInfo.lastSale.notes && (
+                                <div><strong>Notes:</strong> {lastSaleInfo.lastSale.notes}</div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-gray-600 text-xs italic">
+                              No previous sales for this number.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Edit Mode - Show Current Sale Information and Call Button */}
                   {isEditMode && saleForm.id && customer.id && !checkedCustomer && (
                     <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -4270,14 +4443,19 @@ Room: `;
                                   <div><strong>Date:</strong> {new Date(lastSaleInfo.lastSale.created_at).toLocaleDateString()}</div>
                                   <div><strong>Time:</strong> {new Date(lastSaleInfo.lastSale.created_at).toLocaleTimeString()}</div>
                                   <div><strong>Period:</strong> <span className="text-blue-600 font-medium">{getTimeAgo(lastSaleInfo.lastSale.created_at)}</span></div>
-                              {/* Show agent name only if sale belongs to current user */}
+                              {/* Show agent name only if sale belongs to current user or supervised agent */}
                               {(() => {
-                                const isCurrentUser = user && lastSaleInfo.lastSale?.agent && 
-                                  (user.id === lastSaleInfo.lastSale.agent.id || 
-                                   (user.firstName === lastSaleInfo.lastSale.agent.firstName && user.lastName === lastSaleInfo.lastSale.agent.lastName));
-                                return isCurrentUser && (
-                                  <div><strong>Agent:</strong> {`${lastSaleInfo.lastSale.agent.firstName || ''} ${lastSaleInfo.lastSale.agent.lastName || ''}`.trim() || 'N/A'}</div>
-                                );
+                                const canShow = lastSaleInfo.canShow !== undefined
+                                  ? lastSaleInfo.canShow
+                                  : (isAdmin(user) || (user && lastSaleInfo.lastSale?.agent &&
+                                    (user.id === lastSaleInfo.lastSale.agent.id ||
+                                      (isSupervisor(user) && user.supervisedAgents?.some((a) => a.id === lastSaleInfo.lastSale.agent?.id)))));
+                                if (!canShow && lastSaleInfo.lastSale?.agent) {
+                                  return <div><strong>Agent:</strong> Other agent</div>;
+                                }
+                                return (canShow && lastSaleInfo.lastSale?.agent) ? (
+                                  <div><strong>Agent:</strong> {`${lastSaleInfo.lastSale.agent?.firstName || ''} ${lastSaleInfo.lastSale.agent?.lastName || ''}`.trim() || 'N/A'}</div>
+                                ) : null;
                               })()}
                               {lastSaleInfo.lastSale.notes && (
                                 <div><strong>Notes:</strong> {lastSaleInfo.lastSale.notes}</div>
@@ -5352,7 +5530,8 @@ Room: `;
                 
                 {/* Customer list - shown for both exact and landline matches */}
                 <div className="max-h-64 overflow-y-auto mb-3">
-                  {customerWarning.landlineCustomers
+                  {(customerWarning.landlineCustomers ?? [])
+                    .slice()
                     .sort((a, b) => {
                       // Sort exact matches to the top
                       if (a.isExactMatch && !b.isExactMatch) return -1;
@@ -5493,7 +5672,7 @@ Room: `;
                   Cancel
                 </button>
                 <button
-                  onClick={() => isCheckNumberMode ? handleCheckNumberCustomerDialogClose() : handleCustomerDialogClose(saleStatus)}
+                  onClick={() => isCheckNumberMode ? handleCheckNumberCustomerDialogClose() : handleCustomerDialogClose(customerWarning.pendingStatus ?? saleStatus)}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {isCheckNumberMode ? (
@@ -5679,7 +5858,19 @@ Room: `;
                         <p><span className="font-medium">Sale ID:</span> {lastSaleInfo.lastSale.id}</p>
                         <p><span className="font-medium">Status:</span> <span className="capitalize">{lastSaleInfo.lastSale.status}</span></p>
                         <p><span className="font-medium">Date & Time:</span> {new Date(lastSaleInfo.lastSale.created_at).toLocaleString()}</p>
-                        <p><span className="font-medium">Agent:</span> {lastSaleInfo.lastSale.agent ? `${lastSaleInfo.lastSale.agent.firstName || ''} ${lastSaleInfo.lastSale.agent.lastName || ''}`.trim() || 'Unknown' : 'Unknown'}</p>
+                        {(() => {
+                          const canShow = lastSaleInfo.canShow !== undefined
+                            ? lastSaleInfo.canShow
+                            : (isAdmin(user) || (user && lastSaleInfo.lastSale?.agent &&
+                              (user.id === lastSaleInfo.lastSale.agent.id ||
+                                (isSupervisor(user) && user.supervisedAgents?.some((a) => a.id === lastSaleInfo.lastSale.agent?.id)))));
+                          if (!canShow && lastSaleInfo.lastSale?.agent) {
+                            return <p><span className="font-medium">Agent:</span> Other agent</p>;
+                          }
+                          return (canShow && lastSaleInfo.lastSale?.agent) ? (
+                            <p><span className="font-medium">Agent:</span> {`${lastSaleInfo.lastSale.agent?.firstName || ''} ${lastSaleInfo.lastSale.agent?.lastName || ''}`.trim() || 'Unknown'}</p>
+                          ) : null;
+                        })()}
                         {lastSaleInfo.lastSale.notes && (
                           <p><span className="font-medium">Notes:</span> {lastSaleInfo.lastSale.notes}</p>
                         )}

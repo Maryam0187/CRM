@@ -4,6 +4,7 @@ import sequelizeDb from '../../../../lib/sequelize-db';
 import { SupervisorAgentService } from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 import { isSupervisor } from '../../../../lib/roleUtils';
+import { Op } from 'sequelize';
 
 export async function POST(request) {
   let phoneNumber = null;
@@ -206,6 +207,11 @@ export async function GET(request) {
     const customerId = searchParams.get('customerId');
     const agentId = searchParams.get('agentId');
     const saleId = searchParams.get('saleId');
+    const state = searchParams.get('state');
+    const city = searchParams.get('city');
+    const status = searchParams.get('status');
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
     const limit = parseInt(searchParams.get('limit')) || 50;
     const offset = parseInt(searchParams.get('offset')) || 0;
 
@@ -214,15 +220,32 @@ export async function GET(request) {
     if (customerId) where.customerId = customerId;
     if (agentId) where.agentId = agentId;
     if (saleId) where.saleId = saleId;
+    if (state && state.trim()) where.state = { [Op.like]: `%${state.trim()}%` };
+    if (city && city.trim()) where.city = { [Op.like]: `%${city.trim()}%` };
+    if (status && status.trim()) where.status = status.trim();
+    if (startDate || endDate) {
+      if (startDate && endDate) {
+        where.created_at = { [Op.between]: [new Date(startDate + 'T00:00:00.000Z'), new Date(endDate + 'T23:59:59.999Z')] };
+      } else if (startDate) {
+        where.created_at = { [Op.gte]: new Date(startDate + 'T00:00:00.000Z') };
+      } else {
+        where.created_at = { [Op.lte]: new Date(endDate + 'T23:59:59.999Z') };
+      }
+    }
 
     const supervisedAgentIds = currentUser.role === 'supervisor'
       ? (await SupervisorAgentService.getSupervisedAgents(currentUser.id)).map((a) => a.id)
       : [];
-    if (currentUser.role === 'supervisor' && agentId && !supervisedAgentIds.includes(parseInt(agentId, 10))) {
-      return NextResponse.json(
-        { success: false, message: 'You can only view call history for your supervised agents' },
-        { status: 403 }
-      );
+    const agentIdNum = agentId ? parseInt(agentId, 10) : null;
+    const isOwnCalls = agentIdNum === currentUser.id;
+    const isSaleContext = !!(saleId || customerId);
+    // Call Logs page: when filtering by agentId only, return only current user's logs
+    // Sale page: when filtering by saleId/customerId, return sale-related logs (no agent restriction)
+    if (!isSaleContext && agentId && !isOwnCalls) {
+      return NextResponse.json({
+        success: true,
+        data: { calls: [], total: 0, limit, offset }
+      });
     }
 
     const calls = await sequelizeDb.CallLog.findAndCountAll({

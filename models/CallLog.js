@@ -56,6 +56,28 @@ module.exports = (sequelize) => {
       allowNull: false,
       field: 'to_number'
     },
+    customerName: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      field: 'customer_name',
+      comment: 'Customer name when customerId is null (e.g. quick dial)'
+    },
+    state: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    city: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    country: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    zipcode: {
+      type: DataTypes.STRING(20),
+      allowNull: true
+    },
     status: {
       type: DataTypes.ENUM('initiated', 'queued', 'ringing', 'in-progress', 'completed', 'busy', 'failed', 'no-answer', 'canceled', 'voicemail'),
       allowNull: false,

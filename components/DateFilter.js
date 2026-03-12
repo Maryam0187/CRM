@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 
-export default function DateFilter({ onFilterChange, onDateFieldChange, className = "", value = 'today', dateField = 'created_at' }) {
+export default function DateFilter({ onFilterChange, onDateFieldChange, className = "", value = 'today', dateField = 'created_at', hideDateFieldToggle = false }) {
   const [selectedFilter, setSelectedFilter] = useState('Today');
   const [openDateRange, setOpenDateRange] = useState(false);
   const [openMonthRange, setOpenMonthRange] = useState(false);
@@ -263,6 +263,7 @@ export default function DateFilter({ onFilterChange, onDateFieldChange, classNam
       )}
 
       {/* Date Field Toggle */}
+      {!hideDateFieldToggle && (
       <div className="flex items-center gap-3 mr-6">
         <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">Filter by:</span>
         <div className="flex bg-gray-100 rounded-lg p-1">
@@ -294,6 +295,7 @@ export default function DateFilter({ onFilterChange, onDateFieldChange, classNam
           </button>
         </div>
       </div>
+      )}
 
       {/* Filter Buttons */}
       <div className="flex gap-2">

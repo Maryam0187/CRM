@@ -1,11 +1,18 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { useCall } from '../contexts/CallContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient';
 import { Device } from '@twilio/voice-sdk';
+
+// Dummy call flow for localhost testing only (never in production)
+const isMockCallMode =
+  typeof window !== 'undefined' &&
+  process.env.NODE_ENV === 'development' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
 // Add global unhandled rejection handler to prevent SDK errors from crashing app
 if (typeof window !== 'undefined' && !window.__twilioRejectionHandlerAdded) {
@@ -78,6 +85,9 @@ export default function GlobalWebCallInterface() {
   
   // Get user and access token from auth context (needed for device setup)
   const { user, accessToken } = useAuth();
+  const pathname = usePathname();
+  const router = useRouter();
+  const isOnSalePage = pathname === '/add-sale';
   const callEndedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
   const callStatusUiRef = useRef(callStatus);
   useEffect(() => {
@@ -215,8 +225,8 @@ export default function GlobalWebCallInterface() {
             activeConnection.current.disconnect();
             activeConnection.current = null;
           }
-          device.unregister();
-          device.destroy();
+          if (device && typeof device.unregister === 'function') device.unregister();
+          if (device && typeof device.destroy === 'function') device.destroy();
           setDevice(null);
           setIsConnected(false);
           setIsConnecting(false);
@@ -225,6 +235,28 @@ export default function GlobalWebCallInterface() {
         }
       }
       return;
+    }
+
+    // Mock call flow for localhost testing (no Twilio device)
+    if (isMockCallMode) {
+      console.log('📞 [MOCK] Localhost mode - simulating call success (no Twilio)');
+      setIsConnecting(true);
+      setError(null);
+      setDevice({ _mock: true });
+      const t = setTimeout(() => {
+        setIsConnected(true);
+        setIsConnecting(false);
+        callConnected();
+        updateCallStatus('in-progress');
+        startTimer();
+        console.log('✅ [MOCK] Call "connected" - timer started. Use Hang up to end.');
+      }, 1500);
+      return () => {
+        clearTimeout(t);
+        setIsConnected(false);
+        setIsConnecting(false);
+        setDevice(null);
+      };
     }
     
     // If device already exists and conferenceName matches, don't recreate
@@ -1925,6 +1957,27 @@ export default function GlobalWebCallInterface() {
                   Call Connected
                 </div>
               </div>
+            )}
+
+            {/* Create Sale - when on call, open Add Sale with landline pre-filled (hidden when already on add-sale page) */}
+            {!isOnSalePage && (isWebCallConnected || isConnected) && displayCallStatus === 'in-progress' && callMetadata?.phoneNumber && (
+              <button
+                onClick={() => {
+                  const params = new URLSearchParams();
+                  params.set('fromCall', '1');
+                  params.set('landline', callMetadata.phoneNumber);
+                  if (callMetadata.customerName && callMetadata.customerName !== 'Quick Dial' && callMetadata.customerName !== 'Call Log') {
+                    params.set('firstName', callMetadata.customerName);
+                  }
+                  router.push(`/add-sale?${params.toString()}`);
+                }}
+                className="w-full px-4 py-2 font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 mb-3 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+                Create Sale
+              </button>
             )}
 
             {/* Participants Status */}
