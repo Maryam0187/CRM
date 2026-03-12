@@ -551,7 +551,11 @@ export default function CallLogsPage() {
               <div className="border-t border-gray-100 pt-4 mt-4 flex flex-wrap items-center gap-4">
                 <DateFilter
                   value={dateFilter}
-                  onFilterChange={(v) => setDateFilter(v)}
+                  onFilterChange={(v) => {
+                    setDateFilter(v);
+                    setAppliedDateFilter(v);
+                    setPagination((p) => ({ ...p, page: 1 }));
+                  }}
                   hideDateFieldToggle
                   className="!p-3 !px-4"
                 />
