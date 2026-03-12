@@ -40,6 +40,8 @@ export default function CallLogsPage() {
   const [appliedDateFilter, setAppliedDateFilter] = useState('today');
   const [lastSaleByNumber, setLastSaleByNumber] = useState({});
   const [checkingLastSaleFor, setCheckingLastSaleFor] = useState(null);
+  const [quickDialNote, setQuickDialNote] = useState('');
+  const [noteModalCallId, setNoteModalCallId] = useState(null);
 
   const hasActiveCall = currentCallSid || isCalling || isWebCallConnected;
   const isTwilioEnabled = user?.twilio_enabled !== undefined ? user.twilio_enabled : true;
@@ -156,6 +158,14 @@ export default function CallLogsPage() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const NOTE_TRIM_LEN = 40;
+  const trimNote = (text) => {
+    if (!text || !String(text).trim()) return null;
+    const s = String(text).trim();
+    if (s.length <= NOTE_TRIM_LEN) return s;
+    return s.slice(0, NOTE_TRIM_LEN) + '…';
+  };
+
   const validatePhone = (v) => {
     if (!v?.trim()) return { isValid: false, message: 'Phone number is required' };
     const clean = v.replace(/\D/g, '');
@@ -197,14 +207,13 @@ export default function CallLogsPage() {
       saleId: null,
       phoneNumber: quickDialNumber.trim(),
       customerName: quickDialName.trim() || undefined,
+      callNotes: quickDialNote.trim() || undefined,
       agentId: user.id,
       callPurpose: 'follow_up',
       state: freshState || undefined,
       city: freshCity || undefined,
       zipcode: freshZipcode || undefined,
     });
-    setQuickDialNumber('');
-    setQuickDialName('');
     setQuickDialValidation({ isValid: true, message: '' });
     setCheckResult(null);
   };
@@ -218,11 +227,10 @@ export default function CallLogsPage() {
       saleId: null,
       phoneNumber: quickDialNumber.trim(),
       customerName: quickDialName.trim() || undefined,
+      callNotes: quickDialNote.trim() || undefined,
       agentId: user.id,
       callPurpose: 'follow_up',
     });
-    setQuickDialNumber('');
-    setQuickDialName('');
     setQuickDialValidation({ isValid: true, message: '' });
   };
 
@@ -369,9 +377,9 @@ export default function CallLogsPage() {
                 </div>
               )}
 
-              {/* 3. Number & Customer name, then Call - only when state is selected */}
+              {/* 3. Number & Customer name & Note, then Call - only when state is selected */}
               {freshState && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Number *</label>
                   <input
@@ -407,6 +415,16 @@ export default function CallLogsPage() {
                     className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Note (optional)</label>
+                  <textarea
+                    value={quickDialNote}
+                    onChange={(e) => setQuickDialNote(e.target.value)}
+                    placeholder="Call note"
+                    rows={2}
+                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y min-h-[2.5rem]"
+                  />
+                </div>
                 <div className="flex items-end">
                   <button
                     onClick={handleQuickDialCall}
@@ -429,8 +447,8 @@ export default function CallLogsPage() {
           {activeTab === 'quick' && (
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-3">Quick Dial</h3>
-            <p className="text-sm text-gray-500 mb-3">Enter number and optional name, then Call. No check step.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <p className="text-sm text-gray-500 mb-3">Enter number and optional name and note, then Call. No check step.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Number *</label>
                 <input
@@ -464,6 +482,16 @@ export default function CallLogsPage() {
                   onChange={(e) => setQuickDialName(e.target.value)}
                   placeholder="Customer name"
                   className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Note (optional)</label>
+                <textarea
+                  value={quickDialNote}
+                  onChange={(e) => setQuickDialNote(e.target.value)}
+                  placeholder="Call note"
+                  rows={2}
+                  className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y min-h-[2.5rem]"
                 />
               </div>
               <div className="flex items-end">
@@ -597,6 +625,7 @@ export default function CallLogsPage() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last sale</th>
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
                     </tr>
@@ -618,6 +647,20 @@ export default function CallLogsPage() {
                         <td className="px-4 py-3 text-sm text-gray-600">{getDisplayName(call)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{formatDate(call.created_at || call.createdAt)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{formatDuration(call.duration)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px]">
+                          {call.callNotes ? (
+                            <button
+                              type="button"
+                              onClick={() => setNoteModalCallId(call.id)}
+                              className="text-left w-full block truncate text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                              title="Click to see full note"
+                            >
+                              {trimNote(call.callNotes)}
+                            </button>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-sm">
                           {!lastSaleInfo ? (
                             <button
@@ -692,6 +735,31 @@ export default function CallLogsPage() {
           </div>
         </div>
       </div>
+
+      {/* Note full-text modal */}
+      {noteModalCallId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setNoteModalCallId(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold text-gray-900">Call note</h3>
+              <button
+                type="button"
+                onClick={() => setNoteModalCallId(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100"
+                aria-label="Close"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-gray-700 whitespace-pre-wrap break-words">
+              {calls.find((c) => c.id === noteModalCallId)?.callNotes || '—'}
+            </p>
+          </div>
+        </div>
+      )}
+
     </ProtectedRoute>
   );
 }

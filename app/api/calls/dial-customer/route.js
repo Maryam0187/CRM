@@ -31,7 +31,8 @@ export async function POST(request) {
       zipcode,
       conferenceName,
       callPurpose = 'follow_up',
-      customMessage
+      customMessage,
+      callNotes
     } = body;
     
     phoneNumber = phoneNum;
@@ -132,6 +133,7 @@ export async function POST(request) {
         if (state != null) updateData.state = state;
         if (city != null) updateData.city = city;
         if (zipcode != null) updateData.zipcode = zipcode;
+        if (callNotes != null) updateData.callNotes = callNotes;
         await callLog.update(updateData);
       } else {
         // Create new call log if not found (agentId, saleId null, customerId null for quick dial)
@@ -146,6 +148,7 @@ export async function POST(request) {
           state: state || null,
           city: city || null,
           zipcode: zipcode || null,
+          callNotes: callNotes != null ? String(callNotes) : null,
           direction: 'outbound',
           fromNumber: fromNumber,
           toNumber: formattedNumber,

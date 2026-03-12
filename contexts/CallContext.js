@@ -201,6 +201,7 @@ export function CallProvider({ children }) {
       state,
       city,
       zipcode,
+      callNotes,
       onCallInitiated,
       onError
     } = callParams;
@@ -232,6 +233,7 @@ export function CallProvider({ children }) {
         state,
         city,
         zipcode,
+        callNotes: callNotes != null ? String(callNotes).trim() : undefined,
         conferenceName: confName,
         callPurpose,
         customMessage: `Hello ${customerName || 'there'}, this is a call from our CRM system.`
