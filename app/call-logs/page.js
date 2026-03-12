@@ -196,7 +196,7 @@ export default function CallLogsPage() {
       customerId: null,
       saleId: null,
       phoneNumber: quickDialNumber.trim(),
-      customerName: quickDialName.trim() || 'Quick Dial',
+      customerName: quickDialName.trim() || undefined,
       agentId: user.id,
       callPurpose: 'follow_up',
       state: freshState || undefined,
@@ -217,7 +217,7 @@ export default function CallLogsPage() {
       customerId: null,
       saleId: null,
       phoneNumber: quickDialNumber.trim(),
-      customerName: quickDialName.trim() || 'Quick Dial',
+      customerName: quickDialName.trim() || undefined,
       agentId: user.id,
       callPurpose: 'follow_up',
     });
@@ -232,7 +232,7 @@ export default function CallLogsPage() {
       customerId: null,
       saleId: null,
       phoneNumber: (phoneNumber || '').trim(),
-      customerName: customerName || 'Call Log',
+      customerName: (customerName && customerName !== 'Quick Dial' && customerName !== 'Call Log') ? customerName : undefined,
       agentId: user.id,
       callPurpose: 'follow_up',
     });
@@ -245,7 +245,9 @@ export default function CallLogsPage() {
       const name = `${call.customer.firstName || ''} ${call.customer.lastName || ''}`.trim();
       if (name) return name;
     }
-    return call.customerName || '—';
+    const name = call.customerName;
+    if (name && name !== 'Quick Dial' && name !== 'Call Log') return name;
+    return '—';
   };
 
   const normalizeNumberForKey = (num) => (num || '').replace(/\D/g, '').slice(-10) || num;
