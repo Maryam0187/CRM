@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -43,12 +43,38 @@ export default function CallLogsPage() {
   const [quickDialNote, setQuickDialNote] = useState('');
   const [noteModalCallId, setNoteModalCallId] = useState(null);
 
+  const lastActiveCallSidRef = useRef(null);
+  const quickDialNoteRef = useRef(quickDialNote);
+  quickDialNoteRef.current = quickDialNote;
+
   const hasActiveCall = currentCallSid || isCalling || isWebCallConnected;
   const isTwilioEnabled = user?.twilio_enabled !== undefined ? user.twilio_enabled : true;
 
   useEffect(() => {
     if (user?.id) fetchCalls();
   }, [user?.id, pagination.page, appliedFilterState, appliedFilterCity, appliedFilterStatus, appliedDateFilter]);
+
+  // When we have an active call, remember its SID so we can save the note when it ends
+  useEffect(() => {
+    if (currentCallSid) lastActiveCallSidRef.current = currentCallSid;
+  }, [currentCallSid]);
+
+  // When call ends: save note to call log and clear the form
+  useEffect(() => {
+    if (currentCallSid || isCalling || isWebCallConnected) return;
+    const sid = lastActiveCallSidRef.current;
+    if (!sid) return;
+    lastActiveCallSidRef.current = null;
+    const noteToSave = (quickDialNoteRef.current || '').trim();
+    if (noteToSave) {
+      apiClient.post('/api/calls/notes', { callSid: sid, notes: noteToSave }).catch(() => {});
+    }
+    setQuickDialNumber('');
+    setQuickDialName('');
+    setQuickDialNote('');
+    setQuickDialValidation({ isValid: true, message: '' });
+    setCheckResult(null);
+  }, [currentCallSid, isCalling, isWebCallConnected]);
 
   const handleApplyFilters = () => {
     setAppliedFilterState(filterState);
