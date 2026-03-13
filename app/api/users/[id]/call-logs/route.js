@@ -45,6 +45,12 @@ export async function GET(request, { params }) {
     const offset = parseInt(searchParams.get('offset')) || 0;
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+    const state = searchParams.get('state');
+    const city = searchParams.get('city');
+    const phone = searchParams.get('phone');
+    const status = searchParams.get('status');
+    const notes = searchParams.get('notes');
+    const purpose = searchParams.get('purpose');
 
     // Build where clause
     const where = { agentId: userId };
@@ -58,6 +64,14 @@ export async function GET(request, { params }) {
         ]
       };
     }
+    
+    // Add additional filters
+    if (state && state.trim()) where.state = { [Op.like]: `%${state.trim()}%` };
+    if (city && city.trim()) where.city = { [Op.like]: `%${city.trim()}%` };
+    if (phone && phone.trim()) where.toNumber = { [Op.like]: `%${phone.trim().replace(/\D/g, '')}%` };
+    if (status && status.trim()) where.status = status.trim();
+    if (notes && notes.trim()) where.callNotes = { [Op.like]: `%${notes.trim()}%` };
+    if (purpose && purpose.trim()) where.callPurpose = purpose.trim();
 
     // Get total count
     const totalCallLogs = await CallLog.count({ where });
@@ -91,10 +105,13 @@ export async function GET(request, { params }) {
         direction: callLog.direction,
         fromNumber: callLog.fromNumber,
         toNumber: callLog.toNumber,
+        state: callLog.state,
+        city: callLog.city,
         status: callLog.status,
         duration: callLog.duration,
         callPurpose: callLog.callPurpose,
         callNotes: callLog.callNotes,
+        customerName: callLog.customerName,
         recordingUrl: isAdmin ? callLog.recordingUrl : undefined,
         recordings,
         transcriptionText: callLog.transcriptionText,

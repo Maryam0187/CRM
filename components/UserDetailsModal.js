@@ -59,6 +59,25 @@ export default function UserDetailsModal({ user, onClose }) {
   const [salesLoaded, setSalesLoaded] = useState(false);
   const [callLogsLoaded, setCallLogsLoaded] = useState(false);
   
+  // Call logs view mode and filters (admin only)
+  const [callLogsViewMode, setCallLogsViewMode] = useState('list'); // 'list' | 'table'
+  const [callLogsFilters, setCallLogsFilters] = useState({
+    state: '',
+    city: '',
+    phone: '',
+    status: '',
+    notes: '',
+    purpose: ''
+  });
+  const [appliedCallLogsFilters, setAppliedCallLogsFilters] = useState({
+    state: '',
+    city: '',
+    phone: '',
+    status: '',
+    notes: '',
+    purpose: ''
+  });
+  
   // State for displaying current user status and permission
   const [displayedUser, setDisplayedUser] = useState(user);
 
@@ -149,7 +168,7 @@ export default function UserDetailsModal({ user, onClose }) {
     if (user && activeTab === 'callLogs') {
       fetchCallLogs();
     }
-  }, [user, dateRange, callLogsPagination.offset, activeTab]);
+  }, [user, dateRange, callLogsPagination.offset, activeTab, appliedCallLogsFilters]);
 
 
   const fetchUserData = async () => {
@@ -267,11 +286,19 @@ export default function UserDetailsModal({ user, onClose }) {
       setLoading(true);
       setCallLogsLoaded(true);
       
-      const response = await apiClient.get(
-        `/api/users/${user.id}/call-logs?` +
-        `limit=${callLogsPagination.limit}&offset=${callLogsPagination.offset}&` +
-        `startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`
-      );
+      const params = new URLSearchParams();
+      params.append('limit', callLogsPagination.limit);
+      params.append('offset', callLogsPagination.offset);
+      params.append('startDate', dateRange.startDate);
+      params.append('endDate', dateRange.endDate);
+      if (appliedCallLogsFilters.state.trim()) params.append('state', appliedCallLogsFilters.state.trim());
+      if (appliedCallLogsFilters.city.trim()) params.append('city', appliedCallLogsFilters.city.trim());
+      if (appliedCallLogsFilters.phone.trim()) params.append('phone', appliedCallLogsFilters.phone.trim());
+      if (appliedCallLogsFilters.status.trim()) params.append('status', appliedCallLogsFilters.status.trim());
+      if (appliedCallLogsFilters.notes.trim()) params.append('notes', appliedCallLogsFilters.notes.trim());
+      if (appliedCallLogsFilters.purpose.trim()) params.append('purpose', appliedCallLogsFilters.purpose.trim());
+      
+      const response = await apiClient.get(`/api/users/${user.id}/call-logs?${params}`);
       
       const data = await response.json();
       
@@ -291,6 +318,18 @@ export default function UserDetailsModal({ user, onClose }) {
     } finally {
       setLoading(false);
     }
+  };
+  
+  const handleApplyCallLogsFilters = () => {
+    setAppliedCallLogsFilters({ ...callLogsFilters });
+    setCallLogsPagination(prev => ({ ...prev, offset: 0 }));
+  };
+  
+  const handleClearCallLogsFilters = () => {
+    const emptyFilters = { state: '', city: '', phone: '', status: '', notes: '', purpose: '' };
+    setCallLogsFilters(emptyFilters);
+    setAppliedCallLogsFilters(emptyFilters);
+    setCallLogsPagination(prev => ({ ...prev, offset: 0 }));
   };
 
   const handleDateRangeChange = () => {
@@ -751,9 +790,158 @@ export default function UserDetailsModal({ user, onClose }) {
               {/* Call Logs Tab */}
               {activeTab === 'callLogs' && (
                 <div className="space-y-4">
+                  {/* Filters and View Toggle (Admin only) */}
+                  {isAdmin(currentUser) && (
+                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-medium text-gray-700">Filters</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">View:</span>
+                          <button
+                            onClick={() => setCallLogsViewMode('list')}
+                            className={`px-2 py-1 text-xs rounded ${callLogsViewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                          >
+                            List
+                          </button>
+                          <button
+                            onClick={() => setCallLogsViewMode('table')}
+                            className={`px-2 py-1 text-xs rounded ${callLogsViewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                          >
+                            Table
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                        <input
+                          type="text"
+                          value={callLogsFilters.state}
+                          onChange={(e) => setCallLogsFilters(prev => ({ ...prev, state: e.target.value }))}
+                          placeholder="State"
+                          className="w-full h-8 px-2 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <input
+                          type="text"
+                          value={callLogsFilters.city}
+                          onChange={(e) => setCallLogsFilters(prev => ({ ...prev, city: e.target.value }))}
+                          placeholder="City"
+                          className="w-full h-8 px-2 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <input
+                          type="text"
+                          value={callLogsFilters.phone}
+                          onChange={(e) => setCallLogsFilters(prev => ({ ...prev, phone: e.target.value }))}
+                          placeholder="Phone"
+                          className="w-full h-8 px-2 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <select
+                          value={callLogsFilters.status}
+                          onChange={(e) => setCallLogsFilters(prev => ({ ...prev, status: e.target.value }))}
+                          className="w-full h-8 px-2 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="">All Status</option>
+                          <option value="completed">Completed</option>
+                          <option value="no-answer">No Answer</option>
+                          <option value="busy">Busy</option>
+                          <option value="failed">Failed</option>
+                          <option value="canceled">Canceled</option>
+                        </select>
+                        <select
+                          value={callLogsFilters.purpose}
+                          onChange={(e) => setCallLogsFilters(prev => ({ ...prev, purpose: e.target.value }))}
+                          className="w-full h-8 px-2 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="">All Purpose</option>
+                          <option value="cold_call">Cold Call</option>
+                          <option value="follow_up">Follow Up</option>
+                          <option value="sales">Sales</option>
+                          <option value="support">Support</option>
+                          <option value="appointment">Appointment</option>
+                          <option value="other">Other</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={callLogsFilters.notes}
+                          onChange={(e) => setCallLogsFilters(prev => ({ ...prev, notes: e.target.value }))}
+                          placeholder="Notes"
+                          className="w-full h-8 px-2 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={handleApplyCallLogsFilters}
+                          className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700"
+                        >
+                          Apply
+                        </button>
+                        <button
+                          onClick={handleClearCallLogsFilters}
+                          className="px-3 py-1 text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300 rounded hover:bg-gray-200"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
                   {callLogs.length === 0 ? (
                     <p className="text-gray-500 text-center py-8">No call logs found</p>
+                  ) : callLogsViewMode === 'table' && isAdmin(currentUser) ? (
+                    /* Table View */
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">State</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">City</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Purpose</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Note</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 bg-white">
+                          {callLogs.map((callLog) => (
+                            <tr key={callLog.id} className="hover:bg-gray-50">
+                              <td className="px-3 py-2">
+                                <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+                                  callLog.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                  callLog.status === 'failed' || callLog.status === 'canceled' ? 'bg-red-100 text-red-800' :
+                                  callLog.status === 'no-answer' || callLog.status === 'busy' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {callLog.status}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-gray-600">{callLog.state || '—'}</td>
+                              <td className="px-3 py-2 text-gray-600">{callLog.city || '—'}</td>
+                              <td className="px-3 py-2 font-mono text-gray-900">{callLog.toNumber || '—'}</td>
+                              <td className="px-3 py-2 text-gray-600">
+                                {callLog.customerName || (callLog.customer ? `${callLog.customer.firstName || ''} ${callLog.customer.lastName || ''}`.trim() : '—') || '—'}
+                              </td>
+                              <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{formatDate(callLog.createdAt)}</td>
+                              <td className="px-3 py-2 text-gray-600">
+                                {callLog.duration != null ? `${Math.floor(callLog.duration / 60)}:${(callLog.duration % 60).toString().padStart(2, '0')}` : '—'}
+                              </td>
+                              <td className="px-3 py-2">
+                                {callLog.callPurpose && (
+                                  <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-800 rounded-full">
+                                    {callLog.callPurpose.replace(/_/g, ' ')}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-gray-600 max-w-[150px] truncate" title={callLog.callNotes || ''}>
+                                {callLog.callNotes || '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   ) : (
+                    /* List View */
                     <div className="space-y-2">
                       {callLogs.map((callLog) => (
                         <div
@@ -794,10 +982,17 @@ export default function UserDetailsModal({ user, onClose }) {
                                   <span>{callLog.toNumber}</span>
                                 </div>
                               </div>
-                              {callLog.customer && (
+                              {(callLog.state || callLog.city) && (
                                 <p className="text-sm text-gray-600 mt-1">
-                                  <span className="font-medium">Customer:</span> {`${callLog.customer.firstName || ''} ${callLog.customer.lastName || ''}`.trim() || 'N/A'}
-                                  {callLog.customer.phone && ` • ${callLog.customer.phone}`}
+                                  {callLog.state && <span><span className="font-medium">State:</span> {callLog.state}</span>}
+                                  {callLog.state && callLog.city && ' • '}
+                                  {callLog.city && <span><span className="font-medium">City:</span> {callLog.city}</span>}
+                                </p>
+                              )}
+                              {(callLog.customerName || callLog.customer) && (
+                                <p className="text-sm text-gray-600 mt-1">
+                                  <span className="font-medium">Customer:</span> {callLog.customerName || `${callLog.customer?.firstName || ''} ${callLog.customer?.lastName || ''}`.trim() || 'N/A'}
+                                  {callLog.customer?.phone && ` • ${callLog.customer.phone}`}
                                 </p>
                               )}
                               {callLog.duration !== null && (
