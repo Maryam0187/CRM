@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { isAdmin, isSupervisor } from '../lib/roleUtils';
 import RecordingPlayer from './RecordingPlayer';
 import { getStatusBadgeClasses } from '../lib/salesStatuses';
+import StateSelector from './StateSelector';
 
 export default function UserDetailsModal({ user, onClose }) {
   const { user: currentUser } = useAuth();
@@ -849,14 +850,16 @@ export default function UserDetailsModal({ user, onClose }) {
                           </button>
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                        <input
-                          type="text"
-                          value={callLogsFilters.state}
-                          onChange={(e) => setCallLogsFilters(prev => ({ ...prev, state: e.target.value }))}
-                          placeholder="State"
-                          className="w-full h-8 px-2 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        />
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 items-end">
+                        <div className="[&_select]:h-8 [&_select]:py-0 [&_select]:px-2 [&_select]:text-xs [&_label]:hidden [&>div]:mb-0">
+                          <StateSelector
+                            value={callLogsFilters.state}
+                            onChange={(e) => setCallLogsFilters(prev => ({ ...prev, state: e.target.value }))}
+                            label=""
+                            showTimezone={false}
+                            className="w-full"
+                          />
+                        </div>
                         <input
                           type="text"
                           value={callLogsFilters.city}
