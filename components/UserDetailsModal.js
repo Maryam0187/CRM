@@ -67,7 +67,8 @@ export default function UserDetailsModal({ user, onClose }) {
     phone: '',
     status: '',
     notes: '',
-    purpose: ''
+    purpose: '',
+    source: ''
   });
   const [appliedCallLogsFilters, setAppliedCallLogsFilters] = useState({
     state: '',
@@ -75,7 +76,8 @@ export default function UserDetailsModal({ user, onClose }) {
     phone: '',
     status: '',
     notes: '',
-    purpose: ''
+    purpose: '',
+    source: ''
   });
   
   // State for displaying current user status and permission
@@ -310,6 +312,7 @@ export default function UserDetailsModal({ user, onClose }) {
       if (appliedCallLogsFilters.status.trim()) params.append('status', appliedCallLogsFilters.status.trim());
       if (appliedCallLogsFilters.notes.trim()) params.append('notes', appliedCallLogsFilters.notes.trim());
       if (appliedCallLogsFilters.purpose.trim()) params.append('purpose', appliedCallLogsFilters.purpose.trim());
+      if (appliedCallLogsFilters.source.trim()) params.append('source', appliedCallLogsFilters.source.trim());
       
       const response = await apiClient.get(`/api/users/${user.id}/call-logs?${params}`);
       
@@ -339,7 +342,7 @@ export default function UserDetailsModal({ user, onClose }) {
   };
   
   const handleClearCallLogsFilters = () => {
-    const emptyFilters = { state: '', city: '', phone: '', status: '', notes: '', purpose: '' };
+    const emptyFilters = { state: '', city: '', phone: '', status: '', notes: '', purpose: '', source: '' };
     setCallLogsFilters(emptyFilters);
     setAppliedCallLogsFilters(emptyFilters);
     setCallLogsPagination(prev => ({ ...prev, offset: 0 }));
@@ -893,6 +896,17 @@ export default function UserDetailsModal({ user, onClose }) {
                           <option value="appointment">Appointment</option>
                           <option value="other">Other</option>
                         </select>
+                        <select
+                          value={callLogsFilters.source}
+                          onChange={(e) => setCallLogsFilters(prev => ({ ...prev, source: e.target.value }))}
+                          className="w-full h-8 px-2 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="">All Source</option>
+                          <option value="lead_dialing">Lead Dialing</option>
+                          <option value="quick_dialing">Quick Dialing</option>
+                          <option value="call_history">Call History</option>
+                          <option value="sale_page">Sale Page</option>
+                        </select>
                         <input
                           type="text"
                           value={callLogsFilters.notes}
@@ -927,6 +941,7 @@ export default function UserDetailsModal({ user, onClose }) {
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">State</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">City</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
@@ -949,6 +964,19 @@ export default function UserDetailsModal({ user, onClose }) {
                                 }`}>
                                   {callLog.status}
                                 </span>
+                              </td>
+                              <td className="px-3 py-2">
+                                {callLog.callSource && (
+                                  <span className={`px-2 py-0.5 text-xs rounded-full ${
+                                    callLog.callSource === 'lead_dialing' ? 'bg-blue-100 text-blue-800' :
+                                    callLog.callSource === 'quick_dialing' ? 'bg-cyan-100 text-cyan-800' :
+                                    callLog.callSource === 'call_history' ? 'bg-orange-100 text-orange-800' :
+                                    callLog.callSource === 'sale_page' ? 'bg-green-100 text-green-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {callLog.callSource.replace(/_/g, ' ')}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-2 text-gray-600">{callLog.state || '—'}</td>
                               <td className="px-3 py-2 text-gray-600">{callLog.city || '—'}</td>
@@ -1002,6 +1030,17 @@ export default function UserDetailsModal({ user, onClose }) {
                                 {callLog.callPurpose && (
                                   <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
                                     {callLog.callPurpose}
+                                  </span>
+                                )}
+                                {callLog.callSource && (
+                                  <span className={`px-2 py-1 text-xs rounded-full ${
+                                    callLog.callSource === 'lead_dialing' ? 'bg-blue-100 text-blue-800' :
+                                    callLog.callSource === 'quick_dialing' ? 'bg-cyan-100 text-cyan-800' :
+                                    callLog.callSource === 'call_history' ? 'bg-orange-100 text-orange-800' :
+                                    callLog.callSource === 'sale_page' ? 'bg-green-100 text-green-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {callLog.callSource.replace(/_/g, ' ')}
                                   </span>
                                 )}
                                 <span className="text-sm text-gray-500">

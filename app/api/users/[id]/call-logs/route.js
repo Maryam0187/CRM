@@ -51,6 +51,7 @@ export async function GET(request, { params }) {
     const status = searchParams.get('status');
     const notes = searchParams.get('notes');
     const purpose = searchParams.get('purpose');
+    const source = searchParams.get('source');
 
     // Build where clause
     const where = { agentId: userId };
@@ -72,6 +73,7 @@ export async function GET(request, { params }) {
     if (status && status.trim()) where.status = status.trim();
     if (notes && notes.trim()) where.callNotes = { [Op.like]: `%${notes.trim()}%` };
     if (purpose && purpose.trim()) where.callPurpose = purpose.trim();
+    if (source && source.trim()) where.callSource = source.trim();
 
     // Get total count
     const totalCallLogs = await CallLog.count({ where });
@@ -110,6 +112,7 @@ export async function GET(request, { params }) {
         status: callLog.status,
         duration: callLog.duration,
         callPurpose: callLog.callPurpose,
+        callSource: callLog.callSource,
         callNotes: callLog.callNotes,
         customerName: callLog.customerName,
         recordingUrl: isAdmin ? callLog.recordingUrl : undefined,

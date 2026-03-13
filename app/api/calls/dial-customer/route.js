@@ -31,6 +31,7 @@ export async function POST(request) {
       zipcode,
       conferenceName,
       callPurpose = 'follow_up',
+      callSource,
       customMessage,
       callNotes
     } = body;
@@ -134,6 +135,7 @@ export async function POST(request) {
         if (city != null) updateData.city = city;
         if (zipcode != null) updateData.zipcode = zipcode;
         if (callNotes != null) updateData.callNotes = callNotes;
+        if (callSource != null) updateData.callSource = callSource;
         await callLog.update(updateData);
       } else {
         // Create new call log if not found (agentId, saleId null, customerId null for quick dial)
@@ -154,6 +156,7 @@ export async function POST(request) {
           toNumber: formattedNumber,
           status: 'queued',
           callPurpose: callPurpose || 'follow_up',
+          callSource: callSource || null,
           twilioData: {
             customerCallSid: call.sid,
             conferenceName: conferenceName,

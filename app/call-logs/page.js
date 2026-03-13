@@ -270,6 +270,7 @@ export default function CallLogsPage() {
       callNotes: quickDialNote.trim() || undefined,
       agentId: user.id,
       callPurpose: freshCallPurpose,
+      callSource: 'lead_dialing',
       state: freshState || undefined,
       city: freshCity || undefined,
       zipcode: freshZipcode || undefined,
@@ -290,6 +291,7 @@ export default function CallLogsPage() {
       callNotes: quickDialNote.trim() || undefined,
       agentId: user.id,
       callPurpose: quickCallPurpose,
+      callSource: 'quick_dialing',
     });
     setQuickDialValidation({ isValid: true, message: '' });
   };
@@ -303,6 +305,7 @@ export default function CallLogsPage() {
       customerName: (customerName && customerName !== 'Quick Dial' && customerName !== 'Call Log') ? customerName : undefined,
       agentId: user.id,
       callPurpose: 'follow_up',
+      callSource: 'call_history',
     });
   };
 

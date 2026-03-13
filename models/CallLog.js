@@ -129,6 +129,12 @@ module.exports = (sequelize) => {
       defaultValue: 'follow_up',
       field: 'call_purpose'
     },
+    callSource: {
+      type: DataTypes.ENUM('lead_dialing', 'quick_dialing', 'call_history', 'sale_page', 'ivr_dialer', 'other'),
+      allowNull: true,
+      field: 'call_source',
+      comment: 'Where the call was initiated from'
+    },
     twilioData: {
       type: DataTypes.JSON,
       allowNull: true,

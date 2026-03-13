@@ -8,6 +8,7 @@ const CallButton = forwardRef(function CallButton({
   phoneNumber, 
   customerName, 
   callPurpose = 'follow_up',
+  callSource = 'sale_page',
   onCallInitiated,
   onCallCompleted,
   className = '',
@@ -45,6 +46,7 @@ const CallButton = forwardRef(function CallButton({
       customerName,
       agentId: user.id,
       callPurpose,
+      callSource,
       onCallInitiated: (data) => {
         if (onCallInitiated) {
           onCallInitiated(data);

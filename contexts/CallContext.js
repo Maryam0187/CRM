@@ -198,6 +198,7 @@ export function CallProvider({ children }) {
       customerName,
       agentId,
       callPurpose = 'follow_up',
+      callSource,
       state,
       city,
       zipcode,
@@ -236,6 +237,7 @@ export function CallProvider({ children }) {
         callNotes: callNotes != null ? String(callNotes).trim() : undefined,
         conferenceName: confName,
         callPurpose,
+        callSource,
         customMessage: `Hello ${customerName || 'there'}, this is a call from our CRM system.`
       };
       
