@@ -27,7 +27,11 @@ export default function CallLogsPage() {
   const [quickDialValidation, setQuickDialValidation] = useState({ isValid: true, message: '' });
   const [checkResult, setCheckResult] = useState(null);
   const [isCheckingNumber, setIsCheckingNumber] = useState(false);
-  const [activeTab, setActiveTab] = useState('fresh'); // 'fresh' | 'quick'
+  const [activeTab, setActiveTab] = useState('fresh'); // 'fresh' | 'quick' | 'check'
+  const [checkNumberInput, setCheckNumberInput] = useState('');
+  const [checkNumberValidation, setCheckNumberValidation] = useState({ isValid: true, message: '' });
+  const [checkNumberResult, setCheckNumberResult] = useState(null);
+  const [isCheckingNumberTab, setIsCheckingNumberTab] = useState(false);
   const [freshState, setFreshState] = useState('');
   const [freshCity, setFreshCity] = useState('');
   const [freshZipcode, setFreshZipcode] = useState('');
@@ -272,6 +276,30 @@ export default function CallLogsPage() {
     }
   };
 
+  const handleCheckNumberTab = async () => {
+    const v = validatePhone(checkNumberInput);
+    setCheckNumberValidation(v);
+    if (!v.isValid) return;
+    try {
+      setIsCheckingNumberTab(true);
+      setCheckNumberResult(null);
+      const res = await apiClient.post('/api/customers/check-by-number', {
+        number: checkNumberInput.trim().replace(/\D/g, ''),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCheckNumberResult(data);
+      } else {
+        setCheckNumberResult({ success: true, exists: false, lastSale: null, message: data.message || 'Check failed' });
+      }
+    } catch (err) {
+      console.error('Check number error:', err);
+      setCheckNumberResult({ success: false, exists: false, lastSale: null, message: 'Network error. Please try again.' });
+    } finally {
+      setIsCheckingNumberTab(false);
+    }
+  };
+
   const handleQuickDialCall = async () => {
     const v = validatePhone(quickDialNumber);
     setQuickDialValidation(v);
@@ -425,7 +453,7 @@ export default function CallLogsPage() {
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Tabs: Lead Dialing | Quick Dial */}
+          {/* Tabs: Lead Dialing | Quick Dial | Check Number */}
           <div className="flex border-b border-gray-200 mb-6">
             <button
               onClick={() => setActiveTab('fresh')}
@@ -446,6 +474,16 @@ export default function CallLogsPage() {
               }`}
             >
               Quick Dial
+            </button>
+            <button
+              onClick={() => setActiveTab('check')}
+              className={`px-4 py-3 text-base font-medium border-b-2 transition-colors ${
+                activeTab === 'check'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Check Number
             </button>
           </div>
 
@@ -665,7 +703,178 @@ export default function CallLogsPage() {
           </div>
           )}
 
-          {/* Call history - same for both tabs */}
+          {/* Check Number Tab */}
+          {activeTab === 'check' && (
+          <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">Check Number</h3>
+            <p className="text-sm text-gray-500 mb-3">Enter a phone number to check if there's a customer or last sale associated with it.</p>
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row gap-3 items-start">
+                <div className="flex-1 max-w-md">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number</label>
+                  <input
+                    type="tel"
+                    value={checkNumberInput}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^\d*#+\-() ]/g, '');
+                      setCheckNumberInput(formatLandline(v));
+                      setCheckNumberValidation(validatePhone(formatLandline(v)));
+                    }}
+                    onPaste={(e) => {
+                      if (checkNumberResult) return;
+                      e.preventDefault();
+                      const pasted = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+                      const cleaned = pasted.replace(/[^\d*#+\-() ]/g, '');
+                      const formatted = formatLandline(cleaned);
+                      setCheckNumberInput(formatted);
+                      setCheckNumberValidation(validatePhone(formatted));
+                    }}
+                    placeholder="Paste or enter phone number"
+                    disabled={!!checkNumberResult}
+                    className={`w-full px-5 py-3.5 text-xl font-mono border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-500 ${checkNumberValidation.isValid ? 'border-blue-400 bg-blue-50/30' : 'border-red-500 bg-red-50/30'}`}
+                  />
+                  <p className={`mt-1 text-xs min-h-[1rem] ${checkNumberValidation.message ? (checkNumberValidation.isValid ? 'text-gray-500' : 'text-red-600') : 'invisible'}`}>
+                    {checkNumberValidation.message || 'placeholder'}
+                  </p>
+                </div>
+                <div className="flex gap-3 sm:mt-6">
+                  <button
+                    onClick={handleCheckNumberTab}
+                    disabled={!checkNumberInput.trim() || !checkNumberValidation.isValid || isCheckingNumberTab || !!checkNumberResult}
+                    className="w-full sm:w-auto px-8 py-3.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    {isCheckingNumberTab ? (
+                      <>
+                        <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Checking...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        Check
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCheckNumberInput('');
+                      setCheckNumberResult(null);
+                      setCheckNumberValidation({ isValid: true, message: '' });
+                    }}
+                    className="w-full sm:w-auto px-6 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-lg rounded-lg"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              {/* Results */}
+              {checkNumberResult && (
+                <div className="mt-4 p-4 rounded-lg border border-gray-200 bg-gray-50">
+                  <h4 className="font-semibold text-gray-900 mb-3">Results for {checkNumberInput}</h4>
+                  
+                  {checkNumberResult.exists ? (
+                    <div className="space-y-3">
+                      {/* Customer Info */}
+                      {checkNumberResult.customers && checkNumberResult.customers.length > 0 && (
+                        <div className="bg-white p-3 rounded border border-gray-200">
+                          <p className="text-sm font-medium text-gray-700 mb-2">Customer(s) Found:</p>
+                          {checkNumberResult.customers.map((customer, idx) => (
+                            <div key={idx} className="text-sm text-gray-600 mb-1">
+                              <span className="font-medium">{customer.firstName} {customer.lastName}</span>
+                              {customer.email && <span className="ml-2 text-gray-500">({customer.email})</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Last Sale Info */}
+                      {checkNumberResult.lastSale ? (() => {
+                        const sale = checkNumberResult.lastSale;
+                        const saleDate = (sale.created_at || sale.createdAt) ? new Date(sale.created_at || sale.createdAt) : null;
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const yesterday = new Date(today);
+                        yesterday.setDate(yesterday.getDate() - 1);
+                        const saleDateOnly = saleDate ? new Date(saleDate) : null;
+                        if (saleDateOnly) saleDateOnly.setHours(0, 0, 0, 0);
+                        
+                        let period = '';
+                        if (saleDateOnly) {
+                          if (saleDateOnly.getTime() === today.getTime()) {
+                            period = 'Today';
+                          } else if (saleDateOnly.getTime() === yesterday.getTime()) {
+                            period = 'Yesterday';
+                          } else {
+                            const diffDays = Math.floor((today - saleDateOnly) / (1000 * 60 * 60 * 24));
+                            if (diffDays < 7) {
+                              period = `${diffDays} days ago`;
+                            } else if (diffDays < 30) {
+                              const weeks = Math.floor(diffDays / 7);
+                              period = `${weeks} week${weeks > 1 ? 's' : ''} ago`;
+                            } else {
+                              const months = Math.floor(diffDays / 30);
+                              period = `${months} month${months > 1 ? 's' : ''} ago`;
+                            }
+                          }
+                        }
+                        
+                        return (
+                        <div className="bg-white p-3 rounded border border-gray-200">
+                          <p className="text-sm font-medium text-gray-700 mb-2">Last Sale:</p>
+                          <div className="text-sm text-gray-600 space-y-1">
+                            <p><span className="font-medium">Sale ID:</span> {sale.id}</p>
+                            <p><span className="font-medium">Customer:</span> {sale.customer?.firstName} {sale.customer?.lastName}</p>
+                            <p><span className="font-medium">Status:</span> <span className={`px-2 py-0.5 text-xs rounded-full ${
+                              sale.status === 'verified' ? 'bg-green-100 text-green-800' :
+                              sale.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                              sale.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>{sale.statusDisplay || sale.status}</span></p>
+                            {sale.agent && (
+                              isAdmin(user) || 
+                              sale.agent.id === user?.id ||
+                              (isSupervisor(user) && user?.supervisedAgents?.some((a) => a.id === sale.agent.id))
+                            ) && (
+                              <p><span className="font-medium">Agent:</span> {sale.agent.firstName} {sale.agent.lastName}</p>
+                            )}
+                            {saleDate && (
+                              <>
+                                <p><span className="font-medium">Date:</span> {saleDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })}</p>
+                                <p><span className="font-medium">Time:</span> {saleDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })}</p>
+                                <p><span className="font-medium">Period:</span> <span className="text-blue-600 font-medium">{period}</span></p>
+                              </>
+                            )}
+                            {sale.product && (
+                              <p><span className="font-medium">Product:</span> {sale.product}</p>
+                            )}
+                          </div>
+                        </div>
+                        );
+                      })() : (
+                        <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
+                          <p className="text-sm text-yellow-800">Customer found but no sales recorded.</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-green-50 p-3 rounded border border-green-200">
+                      <p className="text-sm text-green-800 font-medium">No customer or sale found for this number.</p>
+                      <p className="text-sm text-green-700 mt-1">This appears to be a fresh lead!</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          )}
+
+          {/* Call history - same for all tabs */}
           <div className="mt-6">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-lg font-semibold text-gray-900">Call history</h3>
@@ -816,15 +1025,11 @@ export default function CallLogsPage() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Purpose</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last sale</th>
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {calls.map((call) => {
-                      const numKey = normalizeNumberForKey(call.toNumber);
-                      const lastSaleInfo = lastSaleByNumber[numKey];
-                      return (
+                    {calls.map((call) => (
                       <tr key={call.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
                           <span className={getCallStatusBadgeClasses(call.status)}>
@@ -859,26 +1064,6 @@ export default function CallLogsPage() {
                             </button>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-sm">
-                          {!lastSaleInfo ? (
-                            <button
-                              type="button"
-                              onClick={() => handleCheckLastSale(call.toNumber)}
-                              disabled={!call.toNumber || checkingLastSaleFor === numKey}
-                              className="text-blue-600 hover:text-blue-800 text-xs font-medium disabled:opacity-50"
-                            >
-                              {checkingLastSaleFor === numKey ? '...' : 'Check'}
-                            </button>
-                          ) : lastSaleInfo.error ? (
-                            <span className="text-gray-400">—</span>
-                          ) : lastSaleInfo.canShow && lastSaleInfo.lastSale ? (
-                            <span className="text-gray-700">
-                              {lastSaleInfo.customerName || 'Customer'} · {lastSaleInfo.lastSale.statusDisplay || lastSaleInfo.lastSale.status}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400">Other agent</span>
-                          )}
-                        </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex flex-wrap gap-1 justify-end">
                             <button
@@ -901,7 +1086,7 @@ export default function CallLogsPage() {
                           </div>
                         </td>
                       </tr>
-                    ); })}
+                    ))}
                   </tbody>
                 </table>
               </div>
