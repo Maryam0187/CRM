@@ -10,6 +10,7 @@ import apiClient from '../../lib/apiClient';
 import { getCallStatusDisplayName, getCallStatusBadgeClasses } from '../../lib/salesStatuses';
 import { formatLandline } from '../../lib/validation';
 import { isAdmin, isSupervisor } from '../../lib/roleUtils';
+import { getCallPurposeDisplay } from '../../lib/twilio';
 import StateSelector from '../../components/StateSelector';
 import DateFilter from '../../components/DateFilter';
 
@@ -30,6 +31,8 @@ export default function CallLogsPage() {
   const [freshState, setFreshState] = useState('');
   const [freshCity, setFreshCity] = useState('');
   const [freshZipcode, setFreshZipcode] = useState('');
+  const [freshCallPurpose, setFreshCallPurpose] = useState('cold_call');
+  const [quickCallPurpose, setQuickCallPurpose] = useState('follow_up');
   const [filterState, setFilterState] = useState('');
   const [filterCity, setFilterCity] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -247,7 +250,7 @@ export default function CallLogsPage() {
       customerName: quickDialName.trim() || undefined,
       callNotes: quickDialNote.trim() || undefined,
       agentId: user.id,
-      callPurpose: 'follow_up',
+      callPurpose: freshCallPurpose,
       state: freshState || undefined,
       city: freshCity || undefined,
       zipcode: freshZipcode || undefined,
@@ -267,7 +270,7 @@ export default function CallLogsPage() {
       customerName: quickDialName.trim() || undefined,
       callNotes: quickDialNote.trim() || undefined,
       agentId: user.id,
-      callPurpose: 'follow_up',
+      callPurpose: quickCallPurpose,
     });
     setQuickDialValidation({ isValid: true, message: '' });
   };
@@ -341,13 +344,13 @@ export default function CallLogsPage() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <h1 className="text-2xl font-bold text-gray-900">Call Logs</h1>
             <p className="mt-1 text-sm text-gray-600">
-              Fresh Dialing: check number and last sale first. Quick Dial: dial directly. Call history below.
+              Lead Dialing: check number and last sale first. Quick Dial: dial directly. Call history below.
             </p>
           </div>
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Tabs: Fresh Dialing | Quick Dial */}
+          {/* Tabs: Lead Dialing | Quick Dial */}
           <div className="flex border-b border-gray-200 mb-6">
             <button
               onClick={() => setActiveTab('fresh')}
@@ -357,7 +360,7 @@ export default function CallLogsPage() {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Fresh Dialing
+              Lead Dialing
             </button>
             <button
               onClick={() => setActiveTab('quick')}
@@ -371,10 +374,10 @@ export default function CallLogsPage() {
             </button>
           </div>
 
-          {/* Fresh Dialing - State first, then City & Zipcode, then Number & Name, Check/Call */}
+          {/* Lead Dialing - State first, then City & Zipcode, then Number & Name, Check/Call */}
           {activeTab === 'fresh' && (
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-3">Fresh Dialing</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">Lead Dialing</h3>
             <p className="text-sm text-gray-500 mb-3">Select state, then city and zipcode (optional), then number and customer name (optional). Call to dial.</p>
             <div className="space-y-4">
               {/* 1. State */}
@@ -415,9 +418,9 @@ export default function CallLogsPage() {
                 </div>
               )}
 
-              {/* 3. Number & Customer name & Note, then Call - only when state is selected */}
+              {/* 3. Number & Customer name & Note & Purpose, then Call - only when state is selected */}
               {freshState && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Number *</label>
                   <input
@@ -454,6 +457,21 @@ export default function CallLogsPage() {
                   />
                 </div>
                 <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Purpose</label>
+                  <select
+                    value={freshCallPurpose}
+                    onChange={(e) => setFreshCallPurpose(e.target.value)}
+                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="cold_call">Cold Call</option>
+                    <option value="follow_up">Follow Up</option>
+                    <option value="sales">Sales</option>
+                    <option value="support">Support</option>
+                    <option value="appointment">Appointment</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Note (optional)</label>
                   <textarea
                     value={quickDialNote}
@@ -486,7 +504,7 @@ export default function CallLogsPage() {
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-3">Quick Dial</h3>
             <p className="text-sm text-gray-500 mb-3">Enter number and optional name and note, then Call. No check step.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Number *</label>
                 <input
@@ -521,6 +539,21 @@ export default function CallLogsPage() {
                   placeholder="Customer name"
                   className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Purpose</label>
+                <select
+                  value={quickCallPurpose}
+                  onChange={(e) => setQuickCallPurpose(e.target.value)}
+                  className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="follow_up">Follow Up</option>
+                  <option value="cold_call">Cold Call</option>
+                  <option value="sales">Sales</option>
+                  <option value="support">Support</option>
+                  <option value="appointment">Appointment</option>
+                  <option value="other">Other</option>
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Note (optional)</label>
@@ -697,6 +730,7 @@ export default function CallLogsPage() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Purpose</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last sale</th>
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
@@ -719,6 +753,7 @@ export default function CallLogsPage() {
                         <td className="px-4 py-3 text-sm text-gray-600">{getDisplayName(call)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{formatDate(call.created_at || call.createdAt)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{formatDuration(call.duration)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{getCallPurposeDisplay(call.callPurpose)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px]">
                           {call.callNotes ? (
                             <button
