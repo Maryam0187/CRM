@@ -785,14 +785,6 @@ export default function Home() {
                 </p>
               )}
             </div>
-            <div className="mt-4 sm:mt-0 flex space-x-3">
-              <button 
-                onClick={() => router.push('/add-sale')}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors duration-200"
-              >
-                Add New Sale
-              </button>
-            </div>
         </div>
       </div>
       </div>

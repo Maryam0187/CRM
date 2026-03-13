@@ -80,6 +80,19 @@ export default function UserDetailsModal({ user, onClose }) {
   
   // State for displaying current user status and permission
   const [displayedUser, setDisplayedUser] = useState(user);
+  
+  // State for note modal
+  const [noteModalContent, setNoteModalContent] = useState(null);
+
+  // Helper to truncate notes to 5-6 words
+  const NOTE_WORD_LIMIT = 6;
+  const trimNote = (text) => {
+    if (!text || !String(text).trim()) return null;
+    const s = String(text).trim();
+    const words = s.split(/\s+/);
+    if (words.length <= NOTE_WORD_LIMIT) return s;
+    return words.slice(0, NOTE_WORD_LIMIT).join(' ') + '...';
+  };
 
   // Function to fetch fresh user information
   const fetchFreshUserInfo = useCallback(async () => {
@@ -735,17 +748,39 @@ export default function UserDetailsModal({ user, onClose }) {
                               {log.note && (
                                 <div className="mt-2">
                                   <p className="text-xs font-medium text-gray-500">Note:</p>
-                                  <p className="text-sm text-gray-700 mt-1 bg-gray-50 p-2 rounded">
-                                    {log.note}
-                                  </p>
+                                  {trimNote(log.note) !== log.note ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setNoteModalContent(log.note)}
+                                      className="text-sm text-blue-600 hover:text-blue-800 hover:underline mt-1 bg-gray-50 p-2 rounded text-left w-full cursor-pointer"
+                                      title="Click to see full note"
+                                    >
+                                      {trimNote(log.note)}
+                                    </button>
+                                  ) : (
+                                    <p className="text-sm text-gray-700 mt-1 bg-gray-50 p-2 rounded">
+                                      {log.note}
+                                    </p>
+                                  )}
                                 </div>
                               )}
                               {log.breakdown && (
                                 <div className="mt-2">
                                   <p className="text-xs font-medium text-gray-500">Breakdown:</p>
-                                  <p className="text-sm text-gray-700 mt-1 bg-gray-50 p-2 rounded">
-                                    {log.breakdown}
-                                  </p>
+                                  {trimNote(log.breakdown) !== log.breakdown ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setNoteModalContent(log.breakdown)}
+                                      className="text-sm text-blue-600 hover:text-blue-800 hover:underline mt-1 bg-gray-50 p-2 rounded text-left w-full cursor-pointer"
+                                      title="Click to see full breakdown"
+                                    >
+                                      {trimNote(log.breakdown)}
+                                    </button>
+                                  ) : (
+                                    <p className="text-sm text-gray-700 mt-1 bg-gray-50 p-2 rounded">
+                                      {log.breakdown}
+                                    </p>
+                                  )}
                                 </div>
                               )}
                               {log.appointmentDatetime && (
@@ -1187,6 +1222,30 @@ export default function UserDetailsModal({ user, onClose }) {
           )}
         </div>
       </div>
+
+      {/* Note full-text modal */}
+      {noteModalContent && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => setNoteModalContent(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold text-gray-900">Note</h3>
+              <button
+                type="button"
+                onClick={() => setNoteModalContent(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100"
+                aria-label="Close"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-gray-700 whitespace-pre-wrap break-words">
+              {noteModalContent}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

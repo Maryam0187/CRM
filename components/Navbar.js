@@ -178,6 +178,17 @@ export default function Navbar() {
                 </Link>
               ) : (
                 <>
+                  {/* New Sale Button */}
+                  <button
+                    onClick={() => router.push('/add-sale')}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors duration-200 flex items-center"
+                  >
+                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    New Sale
+                  </button>
+
                   {/* IVR Dialer Button */}
                   <button
                     onClick={() => openIVRDialer()}
@@ -311,6 +322,21 @@ export default function Navbar() {
                   IVR Calls
                 </Link>
               </>
+            )}
+            {/* New Sale Button - Mobile */}
+            {isAuthenticated && (
+              <button
+                onClick={() => {
+                  router.push('/add-sale');
+                  setIsMenuOpen(false);
+                }}
+                className="bg-blue-600 text-white mx-3 px-4 py-2 rounded-lg text-base font-medium hover:bg-blue-700 transition-colors duration-200 flex items-center justify-center w-auto"
+              >
+                <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Sale
+              </button>
             )}
             {/* IVR Dialer Button - Mobile */}
             {isAuthenticated && (

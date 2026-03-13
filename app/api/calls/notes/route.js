@@ -16,7 +16,7 @@ export async function POST(request) {
     }
 
 const body = await request.json();
-    const { callSid, notes, callPurpose } = body;
+    const { callSid, notes, callPurpose, customerName, city, zipcode } = body;
 
     if (!callSid) {
       return NextResponse.json(
@@ -37,7 +37,7 @@ const body = await request.json();
       );
     }
 
-    // Update call log with notes and purpose
+    // Update call log with notes, purpose, and customer info
     const updateData = {};
     
     if (notes !== undefined) {
@@ -46,6 +46,18 @@ const body = await request.json();
     
     if (callPurpose !== undefined) {
       updateData.callPurpose = callPurpose;
+    }
+    
+    if (customerName !== undefined) {
+      updateData.customerName = customerName;
+    }
+    
+    if (city !== undefined) {
+      updateData.city = city;
+    }
+    
+    if (zipcode !== undefined) {
+      updateData.zipcode = zipcode;
     }
 
     await callLog.update(updateData);

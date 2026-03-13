@@ -53,6 +53,12 @@ export default function CallLogsPage() {
   const lastActiveCallSidRef = useRef(null);
   const quickDialNoteRef = useRef(quickDialNote);
   quickDialNoteRef.current = quickDialNote;
+  const quickDialNameRef = useRef(quickDialName);
+  quickDialNameRef.current = quickDialName;
+  const freshCityRef = useRef(freshCity);
+  freshCityRef.current = freshCity;
+  const freshZipcodeRef = useRef(freshZipcode);
+  freshZipcodeRef.current = freshZipcode;
 
   const hasActiveCall = currentCallSid || isCalling || isWebCallConnected;
   const isTwilioEnabled = user?.twilio_enabled !== undefined ? user.twilio_enabled : true;
@@ -66,19 +72,31 @@ export default function CallLogsPage() {
     if (currentCallSid) lastActiveCallSidRef.current = currentCallSid;
   }, [currentCallSid]);
 
-  // When call ends: save note to call log and clear the form
+  // When call ends: save note, customer name, city, zipcode to call log and clear the form
   useEffect(() => {
     if (currentCallSid || isCalling || isWebCallConnected) return;
     const sid = lastActiveCallSidRef.current;
     if (!sid) return;
     lastActiveCallSidRef.current = null;
     const noteToSave = (quickDialNoteRef.current || '').trim();
-    if (noteToSave) {
-      apiClient.post('/api/calls/notes', { callSid: sid, notes: noteToSave }).catch(() => {});
+    const nameToSave = (quickDialNameRef.current || '').trim();
+    const cityToSave = (freshCityRef.current || '').trim();
+    const zipcodeToSave = (freshZipcodeRef.current || '').trim();
+    
+    // Only call API if there's something to save
+    if (noteToSave || nameToSave || cityToSave || zipcodeToSave) {
+      const updateData = { callSid: sid };
+      if (noteToSave) updateData.notes = noteToSave;
+      if (nameToSave) updateData.customerName = nameToSave;
+      if (cityToSave) updateData.city = cityToSave;
+      if (zipcodeToSave) updateData.zipcode = zipcodeToSave;
+      apiClient.post('/api/calls/notes', updateData).catch(() => {});
     }
     setQuickDialNumber('');
     setQuickDialName('');
     setQuickDialNote('');
+    setFreshCity('');
+    setFreshZipcode('');
     setQuickDialValidation({ isValid: true, message: '' });
     setCheckResult(null);
   }, [currentCallSid, isCalling, isWebCallConnected]);
@@ -199,12 +217,13 @@ export default function CallLogsPage() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const NOTE_TRIM_LEN = 40;
+  const NOTE_WORD_LIMIT = 6;
   const trimNote = (text) => {
     if (!text || !String(text).trim()) return null;
     const s = String(text).trim();
-    if (s.length <= NOTE_TRIM_LEN) return s;
-    return s.slice(0, NOTE_TRIM_LEN) + '…';
+    const words = s.split(/\s+/);
+    if (words.length <= NOTE_WORD_LIMIT) return s;
+    return words.slice(0, NOTE_WORD_LIMIT).join(' ') + '...';
   };
 
   const validatePhone = (v) => {
