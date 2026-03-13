@@ -210,6 +210,8 @@ export async function GET(request) {
     const state = searchParams.get('state');
     const city = searchParams.get('city');
     const status = searchParams.get('status');
+    const notes = searchParams.get('notes');
+    const phone = searchParams.get('phone');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
     const limit = parseInt(searchParams.get('limit')) || 50;
@@ -223,6 +225,8 @@ export async function GET(request) {
     if (state && state.trim()) where.state = { [Op.like]: `%${state.trim()}%` };
     if (city && city.trim()) where.city = { [Op.like]: `%${city.trim()}%` };
     if (status && status.trim()) where.status = status.trim();
+    if (notes && notes.trim()) where.callNotes = { [Op.like]: `%${notes.trim()}%` };
+    if (phone && phone.trim()) where.toNumber = { [Op.like]: `%${phone.trim().replace(/\D/g, '')}%` };
     if (startDate || endDate) {
       if (startDate && endDate) {
         where.created_at = { [Op.between]: [new Date(startDate + 'T00:00:00.000Z'), new Date(endDate + 'T23:59:59.999Z')] };

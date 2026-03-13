@@ -33,10 +33,14 @@ export default function CallLogsPage() {
   const [filterState, setFilterState] = useState('');
   const [filterCity, setFilterCity] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterNotes, setFilterNotes] = useState('');
+  const [filterPhone, setFilterPhone] = useState('');
   const [dateFilter, setDateFilter] = useState('today');
   const [appliedFilterState, setAppliedFilterState] = useState('');
   const [appliedFilterCity, setAppliedFilterCity] = useState('');
   const [appliedFilterStatus, setAppliedFilterStatus] = useState('');
+  const [appliedFilterNotes, setAppliedFilterNotes] = useState('');
+  const [appliedFilterPhone, setAppliedFilterPhone] = useState('');
   const [appliedDateFilter, setAppliedDateFilter] = useState('today');
   const [lastSaleByNumber, setLastSaleByNumber] = useState({});
   const [checkingLastSaleFor, setCheckingLastSaleFor] = useState(null);
@@ -52,7 +56,7 @@ export default function CallLogsPage() {
 
   useEffect(() => {
     if (user?.id) fetchCalls();
-  }, [user?.id, pagination.page, appliedFilterState, appliedFilterCity, appliedFilterStatus, appliedDateFilter]);
+  }, [user?.id, pagination.page, appliedFilterState, appliedFilterCity, appliedFilterStatus, appliedFilterNotes, appliedFilterPhone, appliedDateFilter]);
 
   // When we have an active call, remember its SID so we can save the note when it ends
   useEffect(() => {
@@ -80,6 +84,8 @@ export default function CallLogsPage() {
     setAppliedFilterState(filterState);
     setAppliedFilterCity(filterCity);
     setAppliedFilterStatus(filterStatus);
+    setAppliedFilterNotes(filterNotes);
+    setAppliedFilterPhone(filterPhone);
     setAppliedDateFilter(dateFilter);
     setPagination((p) => ({ ...p, page: 1 }));
   };
@@ -88,10 +94,14 @@ export default function CallLogsPage() {
     setFilterState('');
     setFilterCity('');
     setFilterStatus('');
+    setFilterNotes('');
+    setFilterPhone('');
     setDateFilter('today');
     setAppliedFilterState('');
     setAppliedFilterCity('');
     setAppliedFilterStatus('');
+    setAppliedFilterNotes('');
+    setAppliedFilterPhone('');
     setAppliedDateFilter('today');
     setPagination((p) => ({ ...p, page: 1 }));
   };
@@ -146,6 +156,8 @@ export default function CallLogsPage() {
       if (appliedFilterState.trim()) params.append('state', appliedFilterState.trim());
       if (appliedFilterCity.trim()) params.append('city', appliedFilterCity.trim());
       if (appliedFilterStatus.trim()) params.append('status', appliedFilterStatus.trim());
+      if (appliedFilterNotes.trim()) params.append('notes', appliedFilterNotes.trim());
+      if (appliedFilterPhone.trim()) params.append('phone', appliedFilterPhone.trim());
       const { startDate, endDate } = parseDateFilterToParams(appliedDateFilter);
       if (startDate) params.append('startDate', startDate);
       if (endDate) params.append('endDate', endDate);
@@ -556,7 +568,7 @@ export default function CallLogsPage() {
 
             {/* Filters */}
             <div className="mb-4 p-4 bg-white rounded-lg border border-gray-200">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 items-end">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-gray-600">State</label>
                   <div className="[&_select]:h-10 [&_select]:py-2">
@@ -580,6 +592,16 @@ export default function CallLogsPage() {
                   />
                 </div>
                 <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600">Phone</label>
+                  <input
+                    type="text"
+                    value={filterPhone}
+                    onChange={(e) => setFilterPhone(e.target.value)}
+                    placeholder="Filter by phone"
+                    className="w-full h-10 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-gray-600">Status</label>
                   <select
                     value={filterStatus}
@@ -596,6 +618,16 @@ export default function CallLogsPage() {
                     <option value="canceled">Canceled</option>
                     <option value="queued">Queued</option>
                   </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600">Notes</label>
+                  <input
+                    type="text"
+                    value={filterNotes}
+                    onChange={(e) => setFilterNotes(e.target.value)}
+                    placeholder="Filter by notes"
+                    className="w-full h-10 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-gray-600 invisible">Apply</label>
