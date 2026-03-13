@@ -49,6 +49,9 @@ export default function CallLogsPage() {
   const [checkingLastSaleFor, setCheckingLastSaleFor] = useState(null);
   const [quickDialNote, setQuickDialNote] = useState('');
   const [noteModalCallId, setNoteModalCallId] = useState(null);
+  const [editingNote, setEditingNote] = useState(false);
+  const [editNoteValue, setEditNoteValue] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
 
   const lastActiveCallSidRef = useRef(null);
   const quickDialNoteRef = useRef(quickDialNote);
@@ -217,13 +220,24 @@ export default function CallLogsPage() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const NOTE_WORD_LIMIT = 6;
+  const NOTE_CHAR_LIMIT = 5;
   const trimNote = (text) => {
     if (!text || !String(text).trim()) return null;
     const s = String(text).trim();
-    const words = s.split(/\s+/);
-    if (words.length <= NOTE_WORD_LIMIT) return s;
-    return words.slice(0, NOTE_WORD_LIMIT).join(' ') + '...';
+    // Count only alphabetic characters
+    let alphaCount = 0;
+    let cutIndex = s.length;
+    for (let i = 0; i < s.length; i++) {
+      if (/[a-zA-Z]/.test(s[i])) {
+        alphaCount++;
+        if (alphaCount === NOTE_CHAR_LIMIT) {
+          cutIndex = i + 1;
+          break;
+        }
+      }
+    }
+    if (alphaCount < NOTE_CHAR_LIMIT || cutIndex >= s.length) return s;
+    return s.slice(0, cutIndex) + '...';
   };
 
   const validatePhone = (v) => {
@@ -357,6 +371,45 @@ export default function CallLogsPage() {
     params.set('landline', (phoneNumber || '').trim());
     if (customerName && customerName !== '—') params.set('firstName', customerName);
     router.push(`/add-sale?${params.toString()}`);
+  };
+
+  const handleOpenNoteModal = (callId) => {
+    const call = calls.find((c) => c.id === callId);
+    setNoteModalCallId(callId);
+    setEditNoteValue(call?.callNotes || '');
+    setEditingNote(false);
+  };
+
+  const handleSaveNote = async () => {
+    const call = calls.find((c) => c.id === noteModalCallId);
+    if (!call?.callSid) return;
+    
+    setSavingNote(true);
+    try {
+      const res = await apiClient.post('/api/calls/notes', {
+        callSid: call.callSid,
+        notes: editNoteValue.trim(),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCalls((prev) =>
+          prev.map((c) =>
+            c.id === noteModalCallId ? { ...c, callNotes: editNoteValue.trim() } : c
+          )
+        );
+        setEditingNote(false);
+      }
+    } catch (err) {
+      console.error('Error saving note:', err);
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const handleCloseNoteModal = () => {
+    setNoteModalCallId(null);
+    setEditingNote(false);
+    setEditNoteValue('');
   };
 
   return (
@@ -789,14 +842,21 @@ export default function CallLogsPage() {
                           {call.callNotes ? (
                             <button
                               type="button"
-                              onClick={() => setNoteModalCallId(call.id)}
+                              onClick={() => handleOpenNoteModal(call.id)}
                               className="text-left w-full block truncate text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
                               title="Click to see full note"
                             >
                               {trimNote(call.callNotes)}
                             </button>
                           ) : (
-                            '—'
+                            <button
+                              type="button"
+                              onClick={() => handleOpenNoteModal(call.id)}
+                              className="text-gray-400 hover:text-blue-600 hover:underline cursor-pointer"
+                              title="Click to add note"
+                            >
+                              + Add
+                            </button>
                           )}
                         </td>
                         <td className="px-4 py-3 text-sm">
@@ -876,13 +936,13 @@ export default function CallLogsPage() {
 
       {/* Note full-text modal */}
       {noteModalCallId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setNoteModalCallId(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={handleCloseNoteModal}>
           <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-lg font-semibold text-gray-900">Call note</h3>
               <button
                 type="button"
-                onClick={() => setNoteModalCallId(null)}
+                onClick={handleCloseNoteModal}
                 className="p-1.5 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100"
                 aria-label="Close"
               >
@@ -891,9 +951,72 @@ export default function CallLogsPage() {
                 </svg>
               </button>
             </div>
-            <p className="text-gray-700 whitespace-pre-wrap break-words">
-              {calls.find((c) => c.id === noteModalCallId)?.callNotes || '—'}
-            </p>
+            
+            {editingNote ? (
+              <div className="space-y-3">
+                <textarea
+                  value={editNoteValue}
+                  onChange={(e) => setEditNoteValue(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y min-h-[100px]"
+                  placeholder="Enter note..."
+                  autoFocus
+                />
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingNote(false);
+                      const call = calls.find((c) => c.id === noteModalCallId);
+                      setEditNoteValue(call?.callNotes || '');
+                    }}
+                    disabled={savingNote}
+                    className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveNote}
+                    disabled={savingNote}
+                    className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {savingNote ? (
+                      <>
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Saving...
+                      </>
+                    ) : (
+                      'Save'
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {calls.find((c) => c.id === noteModalCallId)?.callNotes ? (
+                  <p className="text-gray-700 whitespace-pre-wrap break-words">
+                    {calls.find((c) => c.id === noteModalCallId)?.callNotes}
+                  </p>
+                ) : (
+                  <p className="text-gray-400 italic">No note yet</p>
+                )}
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setEditingNote(true)}
+                    className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg flex items-center gap-1.5"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    {calls.find((c) => c.id === noteModalCallId)?.callNotes ? 'Edit note' : 'Add note'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
