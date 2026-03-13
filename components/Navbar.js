@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '../contexts/AuthContext';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { isAdmin } from '../lib/auth';
 import NotificationBell from './NotificationBell';
 import { useSocket } from '../contexts/SocketContext';
@@ -17,7 +17,25 @@ export default function Navbar() {
   const [isAdminMobileOpen, setIsAdminMobileOpen] = useState(false);
   const { user, logout, isAuthenticated } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const { socket } = useSocket();
+
+  const isActive = (href) => {
+    if (href === '/') return pathname === '/';
+    return pathname.startsWith(href);
+  };
+
+  const getLinkClasses = (href, isMobile = false) => {
+    const active = isActive(href);
+    if (isMobile) {
+      return active
+        ? 'bg-blue-50 text-blue-600 border-l-4 border-blue-600 block px-3 py-2 rounded-r-md text-base font-medium'
+        : 'text-gray-700 hover:text-blue-600 hover:bg-gray-100 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200';
+    }
+    return active
+      ? 'bg-blue-50 text-blue-600 px-3 py-2 rounded-t-md text-sm font-medium border-b-2 border-blue-600'
+      : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200';
+  };
 
   const toggleMenu = () => {
     setIsMenuOpen(!isMenuOpen);
@@ -69,14 +87,14 @@ export default function Navbar() {
             <div className="ml-10 flex items-baseline space-x-4">
               <Link
                 href="/"
-                className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                className={getLinkClasses('/')}
               >
                 My Dashboard
               </Link>
               {isAuthenticated &&(
                 <Link
                   href="/call-logs"
-                  className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                  className={getLinkClasses('/call-logs')}
                 >
                   Dialing
                 </Link>
@@ -85,13 +103,13 @@ export default function Navbar() {
                 <>
                   <Link
                     href="/customers"
-                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                    className={getLinkClasses('/customers')}
                   >
                     Customers
                   </Link>
                   <Link
                     href="/ivr-calls"
-                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200"
+                    className={getLinkClasses('/ivr-calls')}
                   >
                     IVR Calls
                   </Link>
@@ -101,7 +119,7 @@ export default function Navbar() {
                 <div className="relative inline-block">
                   <button
                     onClick={toggleAdminMenu}
-                    className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 inline-flex items-center"
+                    className={`${isActive('/admin') ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600 rounded-t-md' : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50 rounded-md'} px-3 py-2 text-sm font-medium transition-colors duration-200 inline-flex items-center`}
                   >
                     Admin
                     <svg className={`ml-1 w-4 h-4 transition-transform ${isAdminMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -262,7 +280,7 @@ export default function Navbar() {
           <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 bg-gray-50 border-t border-gray-200">
             <Link
               href="/"
-              className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+              className={getLinkClasses('/', true)}
               onClick={() => setIsMenuOpen(false)}
             >
               My Dashboard
@@ -270,7 +288,7 @@ export default function Navbar() {
             {isAuthenticated && (
               <Link
                 href="/call-logs"
-                className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+                className={getLinkClasses('/call-logs', true)}
                 onClick={() => setIsMenuOpen(false)}
               >
                 Dialing
@@ -280,14 +298,14 @@ export default function Navbar() {
               <>
                 <Link
                   href="/customers"
-                  className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+                  className={getLinkClasses('/customers', true)}
                   onClick={() => setIsMenuOpen(false)}
                 >
                   Customers
                 </Link>
                 <Link
                   href="/ivr-calls"
-                  className="text-gray-700 hover:text-blue-600 block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+                  className={getLinkClasses('/ivr-calls', true)}
                   onClick={() => setIsMenuOpen(false)}
                 >
                   IVR Calls
@@ -313,7 +331,7 @@ export default function Navbar() {
               <div className="space-y-1">
                 <button
                   onClick={() => setIsAdminMobileOpen(!isAdminMobileOpen)}
-                  className="text-gray-700 hover:text-blue-600 flex items-center justify-between w-full px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
+                  className={`${isActive('/admin') ? 'bg-blue-50 text-blue-600 border-l-4 border-blue-600 rounded-r-md' : 'text-gray-700 hover:text-blue-600 hover:bg-gray-100 rounded-md'} flex items-center justify-between w-full px-3 py-2 text-base font-medium transition-colors duration-200`}
                 >
                   Admin
                   <svg className={`w-4 h-4 transition-transform ${isAdminMobileOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
