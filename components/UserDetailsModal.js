@@ -955,7 +955,7 @@ export default function UserDetailsModal({ user, onClose }) {
                         <tbody className="divide-y divide-gray-200 bg-white">
                           {callLogs.map((callLog) => (
                             <tr key={callLog.id} className="hover:bg-gray-50">
-                              <td className="px-3 py-2">
+                              <td className="px-3 py-2 whitespace-nowrap">
                                 <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
                                   callLog.status === 'completed' ? 'bg-green-100 text-green-800' :
                                   callLog.status === 'failed' || callLog.status === 'canceled' ? 'bg-red-100 text-red-800' :
@@ -965,7 +965,7 @@ export default function UserDetailsModal({ user, onClose }) {
                                   {callLog.status}
                                 </span>
                               </td>
-                              <td className="px-3 py-2">
+                              <td className="px-3 py-2 whitespace-nowrap">
                                 {callLog.callSource && (
                                   <span className={`px-2 py-0.5 text-xs rounded-full ${
                                     callLog.callSource === 'lead_dialing' ? 'bg-blue-100 text-blue-800' :
@@ -988,7 +988,7 @@ export default function UserDetailsModal({ user, onClose }) {
                               <td className="px-3 py-2 text-gray-600">
                                 {callLog.duration != null ? `${Math.floor(callLog.duration / 60)}:${(callLog.duration % 60).toString().padStart(2, '0')}` : '—'}
                               </td>
-                              <td className="px-3 py-2">
+                              <td className="px-3 py-2 whitespace-nowrap">
                                 {callLog.callPurpose && (
                                   <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-800 rounded-full">
                                     {callLog.callPurpose.replace(/_/g, ' ')}
