@@ -392,7 +392,7 @@ export default function CallLogsPage() {
                 />
               </div>
 
-              {/* 2. City & Zipcode - only when state is selected */}
+              {/* 2. City & Zipcode & Purpose - only when state is selected */}
               {freshState && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   <div>
@@ -415,14 +415,29 @@ export default function CallLogsPage() {
                       className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Purpose</label>
+                    <select
+                      value={freshCallPurpose}
+                      onChange={(e) => setFreshCallPurpose(e.target.value)}
+                      className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="cold_call">Cold Call</option>
+                      <option value="follow_up">Follow Up</option>
+                      <option value="sales">Sales</option>
+                      <option value="support">Support</option>
+                      <option value="appointment">Appointment</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
                 </div>
               )}
 
-              {/* 3. Number & Customer name & Note & Purpose, then Call - only when state is selected */}
+              {/* 3. Number & Call button - only when state is selected */}
               {freshState && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Number *</label>
+              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
+                <div className="flex-1 max-w-md">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number *</label>
                   <input
                     type="tel"
                     value={quickDialNumber}
@@ -440,12 +455,28 @@ export default function CallLogsPage() {
                       setQuickDialValidation(validatePhone(formatted));
                     }}
                     placeholder="Paste or enter phone number"
-                    className={`w-full px-4 py-2.5 text-base font-mono border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${quickDialValidation.isValid ? 'border-gray-300' : 'border-red-500'}`}
+                    className={`w-full px-5 py-3.5 text-xl font-mono border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm ${quickDialValidation.isValid ? 'border-blue-400 bg-blue-50/30' : 'border-red-500 bg-red-50/30'}`}
                   />
                   {quickDialValidation.message && (
                     <p className={`mt-1 text-xs ${quickDialValidation.isValid ? 'text-gray-500' : 'text-red-600'}`}>{quickDialValidation.message}</p>
                   )}
                 </div>
+                <button
+                  onClick={handleQuickDialCall}
+                  disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled}
+                  className="w-full sm:w-auto px-8 py-3.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                  </svg>
+                  {hasActiveCall ? 'Call in progress' : isCalling ? 'Connecting...' : 'Call'}
+                </button>
+              </div>
+              )}
+
+              {/* 4. Customer name & Note - only when state is selected */}
+              {freshState && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Customer name (optional)</label>
                   <input
@@ -457,41 +488,14 @@ export default function CallLogsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Purpose</label>
-                  <select
-                    value={freshCallPurpose}
-                    onChange={(e) => setFreshCallPurpose(e.target.value)}
-                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="cold_call">Cold Call</option>
-                    <option value="follow_up">Follow Up</option>
-                    <option value="sales">Sales</option>
-                    <option value="support">Support</option>
-                    <option value="appointment">Appointment</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-                <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Note (optional)</label>
                   <textarea
                     value={quickDialNote}
                     onChange={(e) => setQuickDialNote(e.target.value)}
                     placeholder="Call note"
-                    rows={2}
+                    rows={1}
                     className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y min-h-[2.5rem]"
                   />
-                </div>
-                <div className="flex items-end">
-                  <button
-                    onClick={handleQuickDialCall}
-                    disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled}
-                    className="w-full sm:w-auto px-6 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg flex items-center justify-center gap-2"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                    </svg>
-                    {hasActiveCall ? 'Call in progress' : isCalling ? 'Connecting...' : 'Call'}
-                  </button>
                 </div>
               </div>
               )}
@@ -504,78 +508,83 @@ export default function CallLogsPage() {
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-3">Quick Dial</h3>
             <p className="text-sm text-gray-500 mb-3">Enter number and optional name and note, then Call. No check step.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Number *</label>
-                <input
-                  type="tel"
-                  value={quickDialNumber}
-                  onChange={(e) => {
-                    const v = e.target.value.replace(/[^\d*#+\-() ]/g, '');
-                    setQuickDialNumber(formatLandline(v));
-                    setQuickDialValidation(validatePhone(formatLandline(v)));
-                  }}
-                  onPaste={(e) => {
-                    e.preventDefault();
-                    const pasted = (e.clipboardData || window.clipboardData)?.getData('text') || '';
-                    const cleaned = pasted.replace(/[^\d*#+\-() ]/g, '');
-                    const formatted = formatLandline(cleaned);
-                    setQuickDialNumber(formatted);
-                    setQuickDialValidation(validatePhone(formatted));
-                  }}
-                  placeholder="Paste or enter phone number"
-                  className={`w-full px-4 py-2.5 text-base font-mono border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${quickDialValidation.isValid ? 'border-gray-300' : 'border-red-500'}`}
-                />
-                {quickDialValidation.message && (
-                  <p className={`mt-1 text-xs ${quickDialValidation.isValid ? 'text-gray-500' : 'text-red-600'}`}>{quickDialValidation.message}</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Name (optional)</label>
-                <input
-                  type="text"
-                  value={quickDialName}
-                  onChange={(e) => setQuickDialName(e.target.value)}
-                  placeholder="Customer name"
-                  className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Purpose</label>
-                <select
-                  value={quickCallPurpose}
-                  onChange={(e) => setQuickCallPurpose(e.target.value)}
-                  className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="follow_up">Follow Up</option>
-                  <option value="cold_call">Cold Call</option>
-                  <option value="sales">Sales</option>
-                  <option value="support">Support</option>
-                  <option value="appointment">Appointment</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Note (optional)</label>
-                <textarea
-                  value={quickDialNote}
-                  onChange={(e) => setQuickDialNote(e.target.value)}
-                  placeholder="Call note"
-                  rows={2}
-                  className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y min-h-[2.5rem]"
-                />
-              </div>
-              <div className="flex items-end">
+            <div className="space-y-4">
+              {/* Number & Call button */}
+              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
+                <div className="flex-1 max-w-md">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number *</label>
+                  <input
+                    type="tel"
+                    value={quickDialNumber}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^\d*#+\-() ]/g, '');
+                      setQuickDialNumber(formatLandline(v));
+                      setQuickDialValidation(validatePhone(formatLandline(v)));
+                    }}
+                    onPaste={(e) => {
+                      e.preventDefault();
+                      const pasted = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+                      const cleaned = pasted.replace(/[^\d*#+\-() ]/g, '');
+                      const formatted = formatLandline(cleaned);
+                      setQuickDialNumber(formatted);
+                      setQuickDialValidation(validatePhone(formatted));
+                    }}
+                    placeholder="Paste or enter phone number"
+                    className={`w-full px-5 py-3.5 text-xl font-mono border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm ${quickDialValidation.isValid ? 'border-blue-400 bg-blue-50/30' : 'border-red-500 bg-red-50/30'}`}
+                  />
+                  {quickDialValidation.message && (
+                    <p className={`mt-1 text-xs ${quickDialValidation.isValid ? 'text-gray-500' : 'text-red-600'}`}>{quickDialValidation.message}</p>
+                  )}
+                </div>
                 <button
                   onClick={handleQuickDialCallNoCheck}
                   disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled}
-                  className="w-full sm:w-auto px-6 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg flex items-center justify-center gap-2"
+                  className="w-full sm:w-auto px-8 py-3.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                   </svg>
                   {hasActiveCall ? 'Call in progress' : isCalling ? 'Connecting...' : 'Call'}
                 </button>
+              </div>
+
+              {/* Name, Purpose & Note */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Name (optional)</label>
+                  <input
+                    type="text"
+                    value={quickDialName}
+                    onChange={(e) => setQuickDialName(e.target.value)}
+                    placeholder="Customer name"
+                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Purpose</label>
+                  <select
+                    value={quickCallPurpose}
+                    onChange={(e) => setQuickCallPurpose(e.target.value)}
+                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="follow_up">Follow Up</option>
+                    <option value="cold_call">Cold Call</option>
+                    <option value="sales">Sales</option>
+                    <option value="support">Support</option>
+                    <option value="appointment">Appointment</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Note (optional)</label>
+                  <textarea
+                    value={quickDialNote}
+                    onChange={(e) => setQuickDialNote(e.target.value)}
+                    placeholder="Call note"
+                    rows={1}
+                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y min-h-[2.5rem]"
+                  />
+                </div>
               </div>
             </div>
           </div>
