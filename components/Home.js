@@ -13,6 +13,7 @@ import { useSocket } from '../contexts/SocketContext';
 import { useFilterStorage } from '../lib/useFilterStorage';
 import apiClient from '../lib/apiClient';
 import { SALES_STATUSES, SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName, getTagDisplayName, getTagBadgeClasses, SALE_TAGS, DISPLAY_TAGS, hasTag } from '../lib/salesStatuses';
+import StatusMultiSelect from './StatusMultiSelect';
 import { formatLandline, formatPhoneNumber } from '../lib/validation';
 import { downloadSaleDoc, buildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
 
@@ -135,7 +136,7 @@ export default function Home() {
 
   // Save filter state to localStorage
   const { filters, updateFilter } = useFilterStorage('homeFilters', {
-    status: '',
+    statuses: [], // Changed from 'status' string to 'statuses' array for multi-select
     dateFilter: 'today',
     dateField: 'created_at',
     numberSearch: '',
@@ -143,7 +144,7 @@ export default function Home() {
   });
   
   // Extract filter values
-  const status = filters.status;
+  const statuses = Array.isArray(filters.statuses) ? filters.statuses : (filters.statuses ? [filters.statuses] : []);
   const dateFilter = filters.dateFilter;
   const dateField = filters.dateField;
   const numberSearch = filters.numberSearch;
@@ -276,7 +277,7 @@ export default function Home() {
 
   // Fetch sales data from API
   // options.silent = true: refresh without showing loader (e.g. real-time update from socket)
-  const fetchSalesData = async (statusFilter = '', dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage, dateFieldValue = dateField, numberSearchValue = numberSearch, searchLastFourValue = searchLastFour, options = {}) => {
+  const fetchSalesData = async (statusesFilter = [], dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage, dateFieldValue = dateField, numberSearchValue = numberSearch, searchLastFourValue = searchLastFour, options = {}) => {
     const { silent = false } = options;
     if (!silent) {
       setLoading(true);
@@ -291,7 +292,9 @@ export default function Home() {
       
       // Build URL with filters
       const params = new URLSearchParams();
-      if (statusFilter) params.append('status', statusFilter);
+      // Handle multiple statuses - pass as comma-separated string
+      const statusArray = Array.isArray(statusesFilter) ? statusesFilter : (statusesFilter ? [statusesFilter] : []);
+      if (statusArray.length > 0) params.append('status', statusArray.join(','));
       params.append('dateFilter', effectiveDateFilter);
       params.append('dateField', effectiveDateField);
       if (numberSearchValue) {
@@ -390,7 +393,7 @@ export default function Home() {
       const isSupervisorOnAgentTab = user.role === 'supervisor' && !showingSupervisorSales && selectedAgent?.id === agentId;
 
       if (isAgentView || isSupervisorOnAgentTab) {
-        fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, { silent: true });
+        fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, { silent: true });
       }
     };
 
@@ -399,7 +402,7 @@ export default function Home() {
       socket.off('sale_updated', handleSaleUpdated);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, isConnected, pathname, user?.id, user?.role, showingSupervisorSales, selectedAgent?.id, status, dateFilter, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour]);
+  }, [socket, isConnected, pathname, user?.id, user?.role, showingSupervisorSales, selectedAgent?.id, statuses, dateFilter, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour]);
 
   // Load sales data when user, filters, pagination, or supervisor view changes
   useEffect(() => {
@@ -409,17 +412,17 @@ export default function Home() {
     if (user.role === 'supervisor') {
       // Only fetch for supervisors if showingSupervisorSales is set (initialized)
       if (showingSupervisorSales !== undefined) {
-        fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+        fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
       }
     } else if (user.role === 'admin') {
       // For admins, pass selectedUserId as agentId parameter
-      fetchSalesData(status, dateFilter, selectedUserId, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+      fetchSalesData(statuses, dateFilter, selectedUserId, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
     } else {
       // For agents, fetch data directly (no supervisor dependencies)
-      fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+      fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, status, dateFilter, dateField, currentPage, itemsPerPage, debouncedNumberSearch, searchLastFour,
+  }, [user, statuses, dateFilter, dateField, currentPage, itemsPerPage, debouncedNumberSearch, searchLastFour,
       // Supervisor-specific dependencies only trigger for supervisors due to conditional logic above
       selectedAgent, showingSupervisorSales, selectedUserId]);
 
@@ -681,21 +684,21 @@ export default function Home() {
     updateFilter('dateFilter', filterValue);
     setCurrentPage(1); // Reset to first page when changing filters
     // Fetch sales data with the new date filter
-    fetchSalesData(status, filterValue, null, 1, itemsPerPage, dateField);
+    fetchSalesData(statuses, filterValue, null, 1, itemsPerPage, dateField);
   };
 
-  const handleStatusChange = (e) => {
-    updateFilter('status', e.target.value);
+  const handleStatusChange = (newStatuses) => {
+    updateFilter('statuses', newStatuses);
     setCurrentPage(1); // Reset to first page when changing filters
     // Fetch sales data with the new status filter
-    fetchSalesData(e.target.value, dateFilter, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+    fetchSalesData(newStatuses, dateFilter, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
   };
 
-  const clearStatus = () => {
-    updateFilter('status', '');
+  const clearStatuses = () => {
+    updateFilter('statuses', []);
     setCurrentPage(1); // Reset to first page when clearing filters
     // Fetch sales data without status filter
-    fetchSalesData('', dateFilter, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+    fetchSalesData([], dateFilter, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
   };
 
   const handleNumberSearchChange = (e) => {
@@ -717,7 +720,7 @@ export default function Home() {
   };
 
   const handleRefresh = () => {
-    fetchSalesData(status, dateFilter, null, currentPage, itemsPerPage);
+    fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage);
   };
 
   const handleEdit = (saleId) => {
@@ -877,20 +880,20 @@ export default function Home() {
                 </p>
               </div>
                {/* Status Filter and User Filter (for Admin) */}
-            <div className="flex gap-2 justify-end mb-6">
+            <div className="flex gap-2 justify-end items-start flex-wrap">
             <button
                   onClick={handleRefresh}
                   disabled={loading}
-                  className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed h-[42px]"
                 >
                   <svg className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
                   Refresh
                 </button>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-start">
                 {/* Number Search */}
-                <div className="min-w-[300px] flex flex-col gap-2">
+                <div className="w-[220px] flex-shrink-0">
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -898,13 +901,13 @@ export default function Home() {
                       value={numberSearch}
                       onChange={handleNumberSearchChange}
                       disabled={loading}
-                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed h-[42px]"
                       maxLength={20}
                     />
                     {numberSearch && (
                       <button
                         onClick={clearNumberSearch}
-                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200 h-[42px]"
                         title="Clear number search"
                       >
                         ✕
@@ -912,31 +915,27 @@ export default function Home() {
                     )}
                   </div>
                   {numberSearch && numberSearch.length >= 4 && (
-                    <label className="flex items-center gap-2 px-1 py-1.5 bg-blue-50 border border-blue-200 rounded-md text-sm text-gray-700 cursor-pointer hover:bg-blue-100 transition-colors">
+                    <label className="flex items-center gap-2 px-1 py-1.5 mt-1 bg-blue-50 border border-blue-200 rounded-md text-xs text-gray-700 cursor-pointer hover:bg-blue-100 transition-colors">
                       <input
                         type="checkbox"
                         checked={searchLastFour}
                         onChange={handleSearchLastFourToggle}
                         disabled={loading}
-                        className="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-3 h-3 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                       />
-                      <span className="font-medium">
-                        {numberSearch.length === 4 
-                          ? 'Search last 4 digits only' 
-                          : 'Search last 4 digits only (when 4 digits entered)'}
-                      </span>
+                      <span className="font-medium">Last 4 only</span>
                     </label>
                   )}
                 </div>
                 {/* User Filter (Admin only) */}
                 {user?.role === 'admin' && (
-                  <div className="min-w-[200px] flex gap-2">
+                  <div className="w-[180px] flex gap-2 items-start flex-shrink-0">
                     <select
                       id="user"
                       value={selectedUserId || ''}
                       onChange={handleUserSelect}
                       disabled={loading}
-                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed h-[42px]"
                     >
                       <option value="">All Users</option>
                       {allUsers.map((userItem) => (
@@ -948,7 +947,7 @@ export default function Home() {
                     {selectedUserId && (
                       <button
                         onClick={clearUserFilter}
-                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200 h-[42px]"
                         title="Clear user filter"
                       >
                         ✕
@@ -956,28 +955,25 @@ export default function Home() {
                     )}
                   </div>
                 )}
-                {/* Status Filter */}
-                <div className="min-w-[250px] flex gap-2">
-                  <select
-                    id="status"
-                    value={status}
-                    onChange={handleStatusChange}
-                    disabled={loading}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option value="">All Statuses</option>
-                    {SALES_STATUS_ARRAY.map((statusValue) => (
-                      <option key={statusValue} value={statusValue}>
-                        {getStatusDisplayName(statusValue)}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={clearStatus}
-                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
-                  >
-                    Clear
-                  </button>
+                {/* Status Multi-Select Filter */}
+                <div className="w-[200px] flex gap-2 items-start flex-shrink-0">
+                  <div className="flex-1">
+                    <StatusMultiSelect
+                      selectedStatuses={statuses}
+                      onChange={handleStatusChange}
+                      disabled={loading}
+                      placeholder="All Statuses"
+                    />
+                  </div>
+                  {statuses.length > 0 && (
+                    <button
+                      onClick={clearStatuses}
+                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200 h-[42px]"
+                      title="Clear status filter"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
