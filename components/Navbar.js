@@ -229,7 +229,7 @@ export default function Navbar() {
                         <p className="text-xs text-blue-600 capitalize">{user?.role}</p>
                       </div>
                       <a
-                        href="/docs/SalesCRM_Agent_Supervisor_Guide.pdf"
+                        href="/docs/agent-guide"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 border-b border-gray-100"
@@ -241,7 +241,7 @@ export default function Navbar() {
                       </a>
                       {isAdmin(user) && (
                         <a
-                          href="/docs/SalesCRM_Admin_Guide.pdf"
+                          href="/docs/admin-guide"
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 border-b border-gray-100"
@@ -451,7 +451,7 @@ export default function Navbar() {
                     </div>
                   </div>
                   <a
-                    href="/docs/SalesCRM_Agent_Supervisor_Guide.pdf"
+                    href="/docs/agent-guide"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center justify-center w-full bg-purple-100 text-purple-700 px-4 py-2 rounded-md text-sm font-medium hover:bg-purple-200 transition-colors duration-200 mb-2"
@@ -464,7 +464,7 @@ export default function Navbar() {
                   </a>
                   {isAdmin(user) && (
                     <a
-                      href="/docs/SalesCRM_Admin_Guide.pdf"
+                      href="/docs/admin-guide"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center justify-center w-full bg-indigo-100 text-indigo-700 px-4 py-2 rounded-md text-sm font-medium hover:bg-indigo-200 transition-colors duration-200 mb-2"
