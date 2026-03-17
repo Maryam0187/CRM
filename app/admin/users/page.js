@@ -235,12 +235,16 @@ export default function AdminUsersPage() {
 
   const visibleColumns = columnConfig.filter(c => c.visible);
 
-  // Sort users: online first, then away, then offline (so online users "move above" when they come online)
+  // Sort users: online first, then away, then offline; within same status sort by last seen (most recent first), then by name
   const statusOrder = { online: 0, away: 1, offline: 2 };
   const sortedUsers = [...users].sort((a, b) => {
     const aOrder = statusOrder[a.status] ?? 2;
     const bOrder = statusOrder[b.status] ?? 2;
     if (aOrder !== bOrder) return aOrder - bOrder;
+    // Within same status (e.g. offline): sort by last_seen_at descending (most recently seen first)
+    const aTime = a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0;
+    const bTime = b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0;
+    if (aTime !== bTime) return bTime - aTime;
     return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
   });
 
