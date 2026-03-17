@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <!-- Not used now but kept for possible future background -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>   <!-- blue -->
+      <stop offset="33%" style="stop-color:#ef4444"/>  <!-- red -->
+      <stop offset="66%" style="stop-color:#22c55e"/>  <!-- green -->
+      <stop offset="100%" style="stop-color:#eab308"/> <!-- yellow -->
+    </linearGradient>
+    <!-- Solid dark blue for the letter -->
+    <linearGradient id="letter" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#1d4ed8"/>
+      <stop offset="100%" style="stop-color:#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <!-- Dark blue star for favicon, slightly reduced to avoid clipping -->
+  <path
+    d="M16 4.5l3.1 6.3 7 1-5.1 5 1.2 7.1L16 20.3l-6.2 3.6 1.2-7.1-5.1-5 7-1L16 4.5z"
+    fill="url(#letter)"
+    transform="translate(16 16.5) scale(1.4) translate(-16 -16)"
+  />
+</svg>
