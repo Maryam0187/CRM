@@ -120,6 +120,7 @@ export default function AddSale() {
     address: '',
     state: '',
     city: '',
+    zipcode: '',
     country: 'USA',
     mailingAddress: '',
     customerFeedback: ''
@@ -242,6 +243,7 @@ export default function AddSale() {
         { label: 'Address', value: customer.address },
         { label: 'City', value: customer.city },
         { label: 'State', value: customer.state },
+        { label: 'Zipcode', value: customer.zipcode },
         { label: 'Country', value: customer.country },
         { label: 'Mailing Address', value: customer.mailingAddress },
         { label: 'Customer Feedback', value: customer.customerFeedback }
@@ -508,6 +510,7 @@ export default function AddSale() {
             address: sale.address || sale.customer.address || '',
             state: sale.customer.state || '',
             city: sale.customer.city || '',
+            zipcode: sale.customer.zipcode || '',
             country: sale.customer.country || 'USA',
             mailingAddress: sale.customer.mailingAddress || '',
             customerFeedback: sale.customer.customerFeedback || ''
@@ -1090,6 +1093,7 @@ export default function AddSale() {
               address: exactMatch?.address ?? prev.address ?? '',
               state: exactMatch?.state ?? prev.state ?? '',
               city: exactMatch?.city ?? prev.city ?? '',
+              zipcode: exactMatch?.zipcode ?? prev.zipcode ?? '',
               id: exactMatch?.id
             }));
             selectedCustomerId = exactMatch?.id;
@@ -1170,6 +1174,7 @@ export default function AddSale() {
         address: customer.address,
         state: customer.state,
         city: customer.city,
+        zipcode: customer.zipcode,
         country: 'USA',
         mailingAddress: customer.mailingAddress,
         customerFeedback: customer.customerFeedback,
@@ -2163,6 +2168,7 @@ Room: `;
           address: '',
           state: prev.state || '',
           city: prev.city || '',
+          zipcode: '',
           id: undefined
         }));
         
@@ -2208,6 +2214,7 @@ Room: `;
             address: customerToUse.address || '',
             state: customerToUse.state || '',
             city: customerToUse.city || '',
+            zipcode: customerToUse.zipcode || '',
             id: customerToUse.id
           }));
           
@@ -2268,6 +2275,7 @@ Room: `;
         address: customer.address,
         state: customer.state,
         city: customer.city,
+        zipcode: customer.zipcode,
         country: 'USA', // Always set to USA
         mailingAddress: customer.mailingAddress,
         customerFeedback: customer.customerFeedback,
@@ -2368,6 +2376,7 @@ Room: `;
             address: customer.address || undefined,
             state: customer.state || undefined,
             city: customer.city || undefined,
+            zipcode: customer.zipcode || undefined,
             country: customer.country || undefined,
             mailingAddress: customer.mailingAddress || undefined,
             customerFeedback: customer.customerFeedback || undefined
@@ -2638,6 +2647,7 @@ Room: `;
       address: customer.address,
       state: customer.state,
       city: customer.city,
+      zipcode: customer.zipcode,
       country: 'USA',
       mailingAddress: customer.mailingAddress,
       customerFeedback: customer.customerFeedback,
@@ -2822,6 +2832,7 @@ Room: `;
               address: customer.address,
               state: customer.state,
               city: customer.city,
+              zipcode: customer.zipcode,
               country: 'USA', // Always set to USA
               mailingAddress: customer.mailingAddress,
               customerFeedback: customer.customerFeedback,
@@ -2911,6 +2922,7 @@ Room: `;
               address: customer.address,
               state: customer.state,
               city: customer.city,
+              zipcode: customer.zipcode,
               country: 'USA', // Always set to USA
               mailingAddress: customer.mailingAddress,
               customerFeedback: customer.customerFeedback,
@@ -2936,6 +2948,7 @@ Room: `;
             address: customer.address,
             state: customer.state,
             city: customer.city,
+            zipcode: customer.zipcode,
             country: 'USA', // Always set to USA
             mailingAddress: customer.mailingAddress,
             customerFeedback: customer.customerFeedback,
@@ -3032,6 +3045,7 @@ Room: `;
               address: customer.address || undefined,
               state: customer.state || undefined,
               city: customer.city || undefined,
+              zipcode: customer.zipcode || undefined,
               country: customer.country || undefined,
               mailingAddress: customer.mailingAddress || undefined,
               customerFeedback: customer.customerFeedback || undefined
@@ -4501,7 +4515,7 @@ Room: `;
               </div>
               
               {/* Address Details */}
-              <div className="grid gap-6 md:grid-cols-3">
+              <div className="grid gap-6 md:grid-cols-4">
                 <div>
                   <label htmlFor="country" className="block mb-2 text-sm font-medium text-gray-900">
                     Country
@@ -4533,6 +4547,19 @@ Room: `;
                     onChange={(e) => handleCustomerChange('city', e.target.value)}
                     className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
                     placeholder="Enter City"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="zipcode" className="block mb-2 text-sm font-medium text-gray-900">
+                    Zipcode
+                  </label>
+                  <input
+                    type="text"
+                    id="zipcode"
+                    value={customer.zipcode}
+                    onChange={(e) => handleCustomerChange('zipcode', e.target.value)}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                    placeholder="Zipcode"
                   />
                 </div>
               </div>
