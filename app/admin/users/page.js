@@ -235,6 +235,15 @@ export default function AdminUsersPage() {
 
   const visibleColumns = columnConfig.filter(c => c.visible);
 
+  // Sort users: online first, then away, then offline (so online users "move above" when they come online)
+  const statusOrder = { online: 0, away: 1, offline: 2 };
+  const sortedUsers = [...users].sort((a, b) => {
+    const aOrder = statusOrder[a.status] ?? 2;
+    const bOrder = statusOrder[b.status] ?? 2;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+  });
+
   const moveColumn = useCallback((index, direction) => {
     const next = index + direction;
     if (next < 0 || next >= columnConfig.length) return;
@@ -324,14 +333,14 @@ export default function AdminUsersPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {users.length === 0 ? (
+                  {sortedUsers.length === 0 ? (
                     <tr>
                       <td colSpan={visibleColumns.length} className="px-6 py-4 text-center text-gray-500">
                         No users found
                       </td>
                     </tr>
                   ) : (
-                    users.map((userItem) => (
+                    sortedUsers.map((userItem) => (
                       <tr 
                         key={userItem.id} 
                         className="hover:bg-gray-50 cursor-pointer"
