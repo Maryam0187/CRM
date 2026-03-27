@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getClient, validatePhoneNumber, getWebhookUrl } from '../../../../lib/twilio';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 import { CallTransfer, CallLog, User } from '../../../../models';
+import socketManager from '../../../../lib/socket';
 
 export async function POST(request) {
   try {
@@ -15,7 +15,7 @@ export async function POST(request) {
     }
 
     const body = await request.json();
-    const { callSid, transferTo, transferType = 'blind', agentId } = body;
+    const { callSid, transferTo, transferType = 'warm', agentId, conferenceName: requestedConferenceName } = body;
 
     if (!callSid) {
       return NextResponse.json(
@@ -24,45 +24,29 @@ export async function POST(request) {
       );
     }
 
-    if (!transferTo && !agentId) {
+    if (!agentId) {
       return NextResponse.json(
-        { success: false, message: 'Transfer destination (phone number or agent ID) is required' },
+        { success: false, message: 'Internal destination agent ID is required' },
         { status: 400 }
       );
     }
 
-    // Validate transfer type
-    if (!['blind', 'warm'].includes(transferType)) {
+    // Enforce internal warm add-participant flow only
+    if (transferTo) {
       return NextResponse.json(
-        { success: false, message: 'Transfer type must be "blind" or "warm"' },
+        { success: false, message: 'External phone transfer is not allowed for this action' },
+        { status: 400 }
+      );
+    }
+
+    if (transferType !== 'warm') {
+      return NextResponse.json(
+        { success: false, message: 'Only warm transfer is allowed for add participant' },
         { status: 400 }
       );
     }
 
     const fromAgentId = authResult.user.id;
-    const client = getClient();
-    const baseUrl = getWebhookUrl('');
-
-    // Fetch the call to check its current status
-    let call;
-    try {
-      call = await client.calls(callSid).fetch();
-      console.log('📞 Current call status:', call.status);
-    } catch (fetchErr) {
-      console.error('❌ Error fetching call:', fetchErr);
-      return NextResponse.json(
-        { success: false, message: 'Call not found or inaccessible' },
-        { status: 404 }
-      );
-    }
-
-    // Check if call is in a transferable state
-    if (call.status !== 'in-progress' && call.status !== 'ringing') {
-      return NextResponse.json(
-        { success: false, message: `Call cannot be transferred. Current status: ${call.status}` },
-        { status: 400 }
-      );
-    }
 
     // Find the call log if it exists
     let callLog = null;
@@ -75,58 +59,29 @@ export async function POST(request) {
     }
 
     let toAgentId = null;
-    let destinationPhone = null;
     let conferenceSid = null;
 
-    // Determine destination: agent ID or phone number
-    if (agentId) {
-      // Transfer to agent by user ID
-      try {
-        const toAgent = await User.findByPk(agentId, {
-          attributes: ['id', 'firstName', 'lastName', 'phone']
-        });
+    // Determine destination: internal agent only
+    try {
+      const toAgent = await User.findByPk(agentId, {
+        attributes: ['id', 'firstName', 'lastName']
+      });
 
-        if (!toAgent) {
-          return NextResponse.json(
-            { success: false, message: 'Agent not found' },
-            { status: 404 }
-          );
-        }
-
-        if (!toAgent.phone) {
-          return NextResponse.json(
-            { success: false, message: 'Agent does not have a phone number configured' },
-            { status: 400 }
-          );
-        }
-
-        toAgentId = toAgent.id;
-        destinationPhone = validatePhoneNumber(toAgent.phone);
-        
-        if (!destinationPhone) {
-          return NextResponse.json(
-            { success: false, message: 'Agent phone number is invalid' },
-            { status: 400 }
-          );
-        }
-
-        console.log(`📞 Transferring to agent: ${toAgent.firstName} ${toAgent.lastName} (${destinationPhone})`);
-      } catch (err) {
-        console.error('❌ Error fetching agent:', err);
+      if (!toAgent) {
         return NextResponse.json(
-          { success: false, message: 'Failed to fetch agent information' },
-          { status: 500 }
+          { success: false, message: 'Agent not found' },
+          { status: 404 }
         );
       }
-    } else {
-      // Transfer to phone number
-      destinationPhone = validatePhoneNumber(transferTo);
-      if (!destinationPhone) {
-        return NextResponse.json(
-          { success: false, message: 'Invalid phone number format' },
-          { status: 400 }
-        );
-      }
+
+      toAgentId = toAgent.id;
+      console.log(`📞 Inviting internal agent: ${toAgent.firstName} ${toAgent.lastName}`);
+    } catch (err) {
+      console.error('❌ Error fetching agent:', err);
+      return NextResponse.json(
+        { success: false, message: 'Failed to fetch agent information' },
+        { status: 500 }
+      );
     }
 
     // Create transfer record
@@ -137,7 +92,7 @@ export async function POST(request) {
         callLogId: callLog?.id || null,
         fromAgentId: fromAgentId,
         toAgentId: toAgentId,
-        transferTo: destinationPhone,
+        transferTo: null,
         transferType: transferType,
         transferStatus: 'initiated'
       });
@@ -166,7 +121,7 @@ export async function POST(request) {
         // Let's use a pattern: if we know the original agent, use their conference
         
         // Create a call to the destination that joins the conference
-        const conferenceName = `call-${fromAgentId}`; // Use original agent's conference
+        const conferenceName = requestedConferenceName || callLog?.conferenceName || `call-${fromAgentId}`;
         
         // Update transfer record with conference info
         if (transferRecord) {
@@ -176,80 +131,41 @@ export async function POST(request) {
           });
         }
 
-        // Create a call to the destination agent/phone to join the conference
-        const warmTransferUrl = `${baseUrl}/api/twilio/warm-transfer-voice?conference=${encodeURIComponent(conferenceName)}`;
-        
-        const transferredCall = await client.calls.create({
-          to: destinationPhone,
-          from: call.from, // Use the same Twilio number
-          url: warmTransferUrl,
-          method: 'POST',
-          statusCallback: `${baseUrl}/api/twilio/call-status-callback`,
-          // Rely on `answered` rather than `in-progress` for "picked up" to avoid early-media quirks.
-          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-          statusCallbackMethod: 'POST'
-        });
+        // Agent joins via app only: send in-app invite via socket notification.
+        const invitationPayload = {
+          id: `call-invite-${callSid}-${toAgentId}-${Date.now()}`,
+          type: 'call_participant_invite',
+          title: 'Call Invitation',
+          message: 'You were invited to join a live call.',
+          time: new Date().toISOString(),
+          isRead: false,
+          callSid,
+          conferenceName,
+          invitedByAgentId: fromAgentId,
+          invitedAgentId: toAgentId,
+          customerName: callLog?.customerName || null,
+          mutedByDefault: true
+        };
 
-        console.log('📞 Warm transfer call created:', {
-          callSid: transferredCall.sid,
-          to: destinationPhone,
-          conference: conferenceName
-        });
+        const inviteSent = socketManager.isReady()
+          ? socketManager.sendNotificationToUser(toAgentId, invitationPayload)
+          : false;
 
-        // Update transfer record with transferred call SID
-        if (transferRecord) {
-          await transferRecord.update({
-            transferredCallSid: transferredCall.sid
-          });
+        if (!inviteSent) {
+          console.warn('⚠️ Invited agent not connected to app socket:', toAgentId);
         }
 
         return NextResponse.json({
           success: true,
           data: {
             transferId: transferRecord?.id || null,
-            callSid: call.sid,
-            transferredCallSid: transferredCall.sid,
+            callSid,
             transferType: 'warm',
-            transferTo: destinationPhone,
             toAgentId: toAgentId,
             conferenceName: conferenceName,
-            message: 'Warm transfer initiated - agent will remain in call'
-          }
-        });
-
-      } else {
-        // Blind transfer: Redirect the call to new destination
-        // Include agentId so downstream Dial status callbacks can be routed to the right agent UI.
-        const transferUrl = `${baseUrl}/api/twilio/transfer-voice-response?to=${encodeURIComponent(destinationPhone)}&agentId=${encodeURIComponent(fromAgentId)}`;
-        
-        const updatedCall = await client.calls(callSid).update({
-          url: transferUrl,
-          method: 'POST'
-        });
-
-        // Update transfer record
-        if (transferRecord) {
-          await transferRecord.update({
-            transferStatus: 'in_progress'
-          });
-        }
-
-        console.log('📞 Blind transfer completed:', {
-          callSid: updatedCall.sid,
-          status: updatedCall.status,
-          transferTo: destinationPhone
-        });
-
-        return NextResponse.json({
-          success: true,
-          data: {
-            transferId: transferRecord?.id || null,
-            callSid: updatedCall.sid,
-            status: updatedCall.status,
-            transferType: 'blind',
-            transferTo: destinationPhone,
-            toAgentId: toAgentId,
-            message: 'Blind transfer initiated - call redirected to destination'
+            invitedViaApp: true,
+            inviteSent,
+            message: 'Warm participant invite sent - invited agent can join from app (muted by default)'
           }
         });
       }

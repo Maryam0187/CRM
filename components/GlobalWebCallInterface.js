@@ -72,6 +72,7 @@ export default function GlobalWebCallInterface() {
     isMuted,
     
     // Actions
+    startCall,
     updateCallStatus,
     setCurrentCallSid,
     setWebCallInterfaceRef,
@@ -101,6 +102,12 @@ export default function GlobalWebCallInterface() {
   const [isRecording, setIsRecording] = useState(false);
   const [activeRecordingSid, setActiveRecordingSid] = useState(null);
   const [recordingControlLoading, setRecordingControlLoading] = useState(false);
+  const [availableAgents, setAvailableAgents] = useState([]);
+  const [isLoadingAgents, setIsLoadingAgents] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState('');
+  const [isAddingParticipant, setIsAddingParticipant] = useState(false);
+  const [addParticipantError, setAddParticipantError] = useState('');
+  const [addParticipantSuccess, setAddParticipantSuccess] = useState('');
   
   // Track known CallSids for matching conference participants
   const [knownSids, setKnownSids] = useState({
@@ -1073,6 +1080,63 @@ export default function GlobalWebCallInterface() {
     }
   }, [conferenceName, isRecording, activeRecordingSid]);
 
+  const loadAvailableAgents = useCallback(async () => {
+    setIsLoadingAgents(true);
+    setAddParticipantError('');
+    try {
+      const res = await apiClient.get('/api/calls/agents');
+      const data = await res.json();
+      if (data?.success && Array.isArray(data?.data)) {
+        setAvailableAgents(data.data);
+        return;
+      }
+      setAvailableAgents([]);
+      setAddParticipantError(data?.message || 'Failed to load internal agents');
+    } catch (err) {
+      console.error('❌ Error loading internal agents:', err);
+      setAvailableAgents([]);
+      setAddParticipantError(err?.message || 'Failed to load internal agents');
+    } finally {
+      setIsLoadingAgents(false);
+    }
+  }, []);
+
+  const handleAddParticipant = useCallback(async () => {
+    if (!currentCallSid) {
+      setAddParticipantError('Active call not found');
+      return;
+    }
+    if (!selectedAgentId) {
+      setAddParticipantError('Please select an internal agent');
+      return;
+    }
+
+    setIsAddingParticipant(true);
+    setAddParticipantError('');
+    setAddParticipantSuccess('');
+    try {
+      const res = await apiClient.post('/api/calls/transfer', {
+        callSid: currentCallSid,
+        transferType: 'warm',
+        agentId: Number(selectedAgentId),
+        conferenceName,
+      });
+      const data = await res.json();
+      if (data?.success) {
+        setAddParticipantSuccess('Participant added. They join muted by default.');
+        setSelectedAgentId('');
+        await loadAvailableAgents();
+        return;
+      }
+      setAddParticipantError(data?.message || 'Failed to add participant');
+    } catch (err) {
+      console.error('❌ Error adding participant:', err);
+      setAddParticipantError(err?.message || 'Failed to add participant');
+    } finally {
+      setIsAddingParticipant(false);
+    }
+  }, [currentCallSid, selectedAgentId, loadAvailableAgents]);
+
   // Cleanup function for call state
   const cleanupCallState = useCallback((reason = 'unknown') => {
     console.log('🧹 [CLEANUP] Call cleanup:', { reason, conferenceName, currentCallSid });
@@ -1810,6 +1874,43 @@ export default function GlobalWebCallInterface() {
     }
   };
 
+  useEffect(() => {
+    const canManageParticipants =
+      (isWebCallConnected || isConnected) &&
+      displayCallStatus === 'in-progress';
+    if (canManageParticipants) {
+      loadAvailableAgents();
+    }
+  }, [displayCallStatus, isConnected, isWebCallConnected, loadAvailableAgents]);
+
+  // In-app call invitation handling (invited agent joins conference through app, not phone)
+  useEffect(() => {
+    const handleNewNotification = (event) => {
+      const notification = event?.detail?.notification;
+      if (!notification || notification.type !== 'call_participant_invite') return;
+      if (!notification.conferenceName) return;
+
+      // Do not interrupt if this user is already in another active call.
+      if (showWebInterface || currentCallSid || isConnected || isWebCallConnected) {
+        return;
+      }
+
+      startCall({
+        callSid: notification.callSid || `invite-${Date.now()}`,
+        conferenceName: notification.conferenceName,
+        customerName: notification.customerName || 'Live Call',
+        phoneNumber: null,
+      });
+      setAddParticipantSuccess('');
+      setAddParticipantError('');
+    };
+
+    window.addEventListener('newNotificationArrived', handleNewNotification);
+    return () => {
+      window.removeEventListener('newNotificationArrived', handleNewNotification);
+    };
+  }, [startCall, showWebInterface, currentCallSid, isConnected, isWebCallConnected]);
+
   if (!showWebInterface || !conferenceName) {
     return null;
   }
@@ -2156,6 +2257,45 @@ export default function GlobalWebCallInterface() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
                 </svg>
                 <span>Microphone Muted</span>
+              </div>
+            )}
+
+            {/* Add Internal Participant (Warm transfer only) */}
+            {(isWebCallConnected || isConnected) && displayCallStatus === 'in-progress' && (
+              <div className="mb-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <div className="text-xs font-semibold text-slate-700 mb-2">Add Internal Participant</div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedAgentId}
+                    onChange={(e) => setSelectedAgentId(e.target.value)}
+                    className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                    disabled={isLoadingAgents || isAddingParticipant}
+                  >
+                    <option value="">Select agent</option>
+                    {availableAgents.map((agent) => (
+                      <option key={agent.id} value={agent.id}>
+                        {agent.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleAddParticipant}
+                    disabled={!selectedAgentId || isAddingParticipant || isLoadingAgents}
+                    className="px-3 py-2 text-sm font-medium rounded bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isAddingParticipant ? 'Adding...' : 'Add'}
+                  </button>
+                </div>
+                {isLoadingAgents && (
+                  <div className="mt-2 text-[11px] text-slate-600">Loading internal agents...</div>
+                )}
+                {addParticipantError && (
+                  <div className="mt-2 text-[11px] text-red-600">{addParticipantError}</div>
+                )}
+                {addParticipantSuccess && (
+                  <div className="mt-2 text-[11px] text-green-700">{addParticipantSuccess}</div>
+                )}
               </div>
             )}
 
