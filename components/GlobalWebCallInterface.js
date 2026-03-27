@@ -2274,7 +2274,7 @@ export default function GlobalWebCallInterface() {
                     <option value="">Select agent</option>
                     {availableAgents.map((agent) => (
                       <option key={agent.id} value={agent.id}>
-                        {agent.name}
+                        {`${agent.name} (${(agent.status || 'offline').toLowerCase()})`}
                       </option>
                     ))}
                   </select>
