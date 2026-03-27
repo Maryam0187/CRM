@@ -121,7 +121,13 @@ export default function GlobalWebCallInterface() {
   const [participants, setParticipants] = useState([]);
   
   // Derived participant info
-  const customerParticipant = participants.find(p => p.role === 'customer');
+  // Prefer the most advanced customer state to avoid stale duplicate rows (e.g., pending + real SID).
+  const customerParticipants = participants.filter(p => p.role === 'customer');
+  const customerParticipant =
+    customerParticipants.find(p => p.status === 'connected') ||
+    customerParticipants.find(p => p.status === 'ringing') ||
+    customerParticipants.find(p => p.status === 'waiting') ||
+    customerParticipants[0];
   const agentParticipant = participants.find(p => p.role === 'agent');
   
   // Customer is connected when they have status 'connected'
@@ -1507,6 +1513,9 @@ export default function GlobalWebCallInterface() {
                 if (callSid) return p.callSid === callSid;
                 return role === 'customer' && p.role === 'customer';
               });
+              // If customer joined with a real CallSid, merge with existing customer placeholder row.
+              const existingCustomerByRole =
+                role === 'customer' ? prev.find(p => p.role === 'customer') : null;
               
               // NEW FLOW: Customer only joins conference AFTER they answer
               // So when we get a 'join' event for customer, they've already answered!
@@ -1521,8 +1530,8 @@ export default function GlobalWebCallInterface() {
                 callSid: callSid?.substring(0, 20)
               });
               
-              if (existing) {
-                return prev.map(p => (matchesParticipant(p, callSid, role))
+              if (existing || existingCustomerByRole) {
+                return prev.map(p => ((matchesParticipant(p, callSid, role)) || (role === 'customer' && p.role === 'customer'))
                   ? { 
                       ...p, 
                       callSid: callSid || p.callSid, 
