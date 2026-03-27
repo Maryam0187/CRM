@@ -1429,6 +1429,13 @@ export default function GlobalWebCallInterface() {
           if (sid && sid === currentCallSid) return 'customer'; // currentCallSid is customer's
           return 'unknown';
         };
+
+        // Avoid broad role-only matching for agents; use SID whenever available.
+        const matchesParticipant = (p, sid, role) => {
+          if (sid) return p.callSid === sid;
+          if (role === 'customer') return p.role === 'customer';
+          return false;
+        };
         
         switch (eventType) {
           case 'agent_sid_captured':
@@ -1447,9 +1454,9 @@ export default function GlobalWebCallInterface() {
             
             // Update/add agent participant
             setParticipants(prev => {
-              const existing = prev.find(p => p.role === 'agent' || p.callSid === conferenceEventData.agentCallSid);
+              const existing = prev.find(p => p.callSid === conferenceEventData.agentCallSid);
               if (existing) {
-                return prev.map(p => (p.role === 'agent' || p.callSid === conferenceEventData.agentCallSid)
+                return prev.map(p => (p.callSid === conferenceEventData.agentCallSid)
                   ? { ...p, callSid: conferenceEventData.agentCallSid, role: 'agent', status: 'connected' }
                   : p
                 );
@@ -1496,7 +1503,10 @@ export default function GlobalWebCallInterface() {
             });
             
             setParticipants(prev => {
-              const existing = prev.find(p => p.callSid === callSid || (role !== 'unknown' && p.role === role));
+              const existing = prev.find(p => {
+                if (callSid) return p.callSid === callSid;
+                return role === 'customer' && p.role === 'customer';
+              });
               
               // NEW FLOW: Customer only joins conference AFTER they answer
               // So when we get a 'join' event for customer, they've already answered!
@@ -1512,7 +1522,7 @@ export default function GlobalWebCallInterface() {
               });
               
               if (existing) {
-                return prev.map(p => (p.callSid === callSid || (role !== 'unknown' && p.role === role))
+                return prev.map(p => (matchesParticipant(p, callSid, role))
                   ? { 
                       ...p, 
                       callSid: callSid || p.callSid, 
@@ -1538,8 +1548,8 @@ export default function GlobalWebCallInterface() {
             // Participant left - update status to 'left'
             const leaveRole = determineRole(callSid, participantRole);
             console.log('👋 [PARTICIPANT LEAVE]', { role: leaveRole, callSid: callSid?.substring(0, 20) });
-            setParticipants(prev => prev.map(p => 
-              (p.callSid === callSid || p.role === leaveRole) 
+            setParticipants(prev => prev.map(p =>
+              matchesParticipant(p, callSid, leaveRole)
                 ? { ...p, status: 'left' } 
                 : p
             ));
@@ -1549,8 +1559,8 @@ export default function GlobalWebCallInterface() {
           case 'unmute':
             // Update mute status
             const muteRole = determineRole(callSid, participantRole);
-            setParticipants(prev => prev.map(p => 
-              (p.callSid === callSid || p.role === muteRole) 
+            setParticipants(prev => prev.map(p =>
+              matchesParticipant(p, callSid, muteRole)
                 ? { ...p, muted: eventType === 'mute' } 
                 : p
             ));
@@ -1560,8 +1570,8 @@ export default function GlobalWebCallInterface() {
           case 'unhold':
             // Update hold status
             const holdRole = determineRole(callSid, participantRole);
-            setParticipants(prev => prev.map(p => 
-              (p.callSid === callSid || p.role === holdRole)
+            setParticipants(prev => prev.map(p =>
+              matchesParticipant(p, callSid, holdRole)
                 ? { ...p, hold: eventType === 'hold' } 
                 : p
             ));
@@ -1574,7 +1584,7 @@ export default function GlobalWebCallInterface() {
             console.log(`🎤 [${eventType.toUpperCase()}]`, { role: speechRole, callSid: callSid?.substring(0, 20) });
             
             setParticipants(prev => prev.map(p => {
-              const isMatch = p.callSid === callSid || p.role === speechRole;
+              const isMatch = matchesParticipant(p, callSid, speechRole);
               if (!isMatch) return p;
               
               // IMPORTANT: If customer has speech-start, they DEFINITELY answered!
@@ -1874,6 +1884,19 @@ export default function GlobalWebCallInterface() {
     }
   };
 
+  // Leave only this agent from conference (do not force customer call hangup).
+  const handleLeaveCall = () => {
+    try {
+      if (webCallInterfaceRef.current?.hangUp) {
+        webCallInterfaceRef.current.hangUp();
+      }
+      endCall();
+    } catch (err) {
+      console.error('Error leaving call:', err);
+      endCall();
+    }
+  };
+
   useEffect(() => {
     const canManageParticipants =
       (isWebCallConnected || isConnected) &&
@@ -1917,11 +1940,17 @@ export default function GlobalWebCallInterface() {
 
   const durationToShow = finalDuration || callTimer;
   const displayError = error || callError;
+  const connectedAgentsCountFromParticipants = participants.filter(
+    (p) => p.role === 'agent' && p.status === 'connected'
+  ).length;
+  const connectedAgentsCount =
+    connectedAgentsCountFromParticipants || ((isWebCallConnected || isConnected) ? 1 : 0);
+  const isSingleConnectedAgent = connectedAgentsCount === 1;
 
   return (
     <div
       className={`fixed bottom-4 right-4 z-[9999] transition-all duration-300 ${
-        isMinimized ? 'w-64' : 'w-80 max-h-[calc(100vh-2rem)]'
+        isMinimized ? 'w-64' : 'w-[28rem] max-h-[calc(100vh-2rem)]'
       }`}
     >
       <div className="bg-white rounded-lg shadow-2xl border-2 border-blue-200 backdrop-blur-sm overflow-hidden flex flex-col max-h-[calc(100vh-2rem)]">
@@ -2086,85 +2115,44 @@ export default function GlobalWebCallInterface() {
               <div className="mb-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
                 <div className="text-xs font-semibold text-gray-700 mb-2">Participants</div>
                 <div className="space-y-2">
-                  {/* Agent Status - use participant status or connection state */}
-                  <div className="flex items-center justify-between text-xs text-gray-700">
-                    <div className="flex items-center gap-1.5 truncate">
-                      {/* Speaking indicator for agent */}
-                      {agentParticipant?.speaking && (
-                        <span className="flex items-center" title="Speaking">
-                          <svg className="w-3.5 h-3.5 text-green-500 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1 1.93c-3.94-.49-7-3.85-7-7.93h2c0 3.31 2.69 6 6 6s6-2.69 6-6h2c0 4.08-3.06 7.44-7 7.93V22h-2v-6.07z"/>
-                          </svg>
-                        </span>
-                      )}
-                      <span className="font-medium">Agent:</span> <span>{user?.firstName || user?.name || 'You'}</span>
-                    </div>
-                    {(() => {
-                      const agentStatus = agentParticipant?.status || (isConnected || isWebCallConnected ? 'connected' : isConnecting ? 'connecting' : 'waiting');
-                      const statusConfig = {
-                        connected: { bg: 'bg-green-100', text: 'text-green-800', border: 'border-green-200', label: 'Connected' },
-                        connecting: { bg: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-200', label: 'Connecting' },
-                        waiting: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', label: 'Waiting' },
-                        left: { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-200', label: 'Left' }
-                      };
-                      const config = statusConfig[agentStatus] || statusConfig.waiting;
-                      return (
+                  {participants.map((p, idx) => {
+                    const statusConfig = {
+                      connected: { bg: 'bg-green-100', text: 'text-green-800', border: 'border-green-200', label: 'Connected' },
+                      connecting: { bg: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-200', label: 'Connecting' },
+                      ringing: { bg: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-200', label: 'Ringing' },
+                      waiting: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', label: 'Waiting' },
+                      left: { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-200', label: 'Left' }
+                    };
+                    const derivedStatus = p.status || 'waiting';
+                    const config = statusConfig[derivedStatus] || statusConfig.waiting;
+                    const isCurrentAgent = p.callSid && p.callSid === knownSids.agentCallSid;
+                    const roleLabel =
+                      p.role === 'customer'
+                        ? (callMetadata?.customerName || callMetadata?.phoneNumber || 'Customer')
+                        : p.role === 'agent'
+                        ? (isCurrentAgent ? (user?.firstName || user?.name || 'You') : 'Agent')
+                        : 'Participant';
+
+                    return (
+                      <div key={p.callSid || `${p.role || 'participant'}-${idx}`} className="flex items-center justify-between text-xs text-gray-700">
+                        <div className="flex items-center gap-1.5 truncate">
+                          {p.speaking && (
+                            <span className="flex items-center" title="Speaking">
+                              <svg className="w-3.5 h-3.5 text-green-500 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1 1.93c-3.94-.49-7-3.85-7-7.93h2c0 3.31 2.69 6 6 6s6-2.69 6-6h2c0 4.08-3.06 7.44-7 7.93V22h-2v-6.07z"/>
+                              </svg>
+                            </span>
+                          )}
+                          <span className="font-medium capitalize">{p.role || 'participant'}:</span>
+                          <span>{roleLabel}</span>
+                          {isCurrentAgent && <span className="text-[10px] text-blue-600">(you)</span>}
+                        </div>
                         <span className={`text-[11px] px-2 py-0.5 rounded border ${config.bg} ${config.text} ${config.border}`}>
                           {config.label}
                         </span>
-                      );
-                    })()}
-                  </div>
-                  
-                  {/* Customer Status - use participant status */}
-                  <div className="flex items-center justify-between text-xs text-gray-700">
-                    <div className="flex items-center gap-1.5 truncate">
-                      {/* Speaking indicator for customer */}
-                      {customerParticipant?.speaking && (
-                        <span className="flex items-center" title="Speaking">
-                          <svg className="w-3.5 h-3.5 text-green-500 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1 1.93c-3.94-.49-7-3.85-7-7.93h2c0 3.31 2.69 6 6 6s6-2.69 6-6h2c0 4.08-3.06 7.44-7 7.93V22h-2v-6.07z"/>
-                          </svg>
-                        </span>
-                      )}
-                      <span className="font-medium">Customer:</span> <span>{callMetadata?.customerName || callMetadata?.phoneNumber || 'Customer'}</span>
-                    </div>
-                    {(() => {
-                      // Use participant status, fallback to call status
-                      const custStatus = customerParticipant?.status || 
-                        (displayCallStatus === 'in-progress' ? 'connected' : 
-                         displayCallStatus === 'ringing' ? 'ringing' : 
-                         callEndedStatuses.includes(displayCallStatus) ? 'left' : 'waiting');
-                      const statusConfig = {
-                        connected: { bg: 'bg-green-100', text: 'text-green-800', border: 'border-green-200', label: 'Connected' },
-                        ringing: { bg: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-200', label: 'Ringing' },
-                        waiting: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', label: 'Waiting' },
-                        left: { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-200', label: 'Left' }
-                      };
-                      // Handle call-ended statuses
-                      if (callEndedStatuses.includes(displayCallStatus)) {
-                        const endedLabels = {
-                          completed: 'Ended',
-                          'no-answer': 'No Answer',
-                          busy: 'Busy',
-                          failed: 'Failed',
-                          canceled: 'Canceled',
-                          voicemail: 'Voicemail'
-                        };
-                        return (
-                          <span className="text-[11px] px-2 py-0.5 rounded border bg-red-100 text-red-800 border-red-200">
-                            {endedLabels[displayCallStatus] || 'Ended'}
-                          </span>
-                        );
-                      }
-                      const config = statusConfig[custStatus] || statusConfig.waiting;
-                      return (
-                        <span className={`text-[11px] px-2 py-0.5 rounded border ${config.bg} ${config.text} ${config.border}`}>
-                          {config.label}
-                        </span>
-                      );
-                    })()}
-                  </div>
+                      </div>
+                    );
+                  })}
                   
                   {/* Mute indicator for customer if connected */}
                   {customerParticipant?.status === 'connected' && customerParticipant?.muted && (
@@ -2274,7 +2262,7 @@ export default function GlobalWebCallInterface() {
                     <option value="">Select agent</option>
                     {availableAgents.map((agent) => (
                       <option key={agent.id} value={agent.id}>
-                        {`${agent.name} (${(agent.status || 'offline').toLowerCase()})`}
+                        {`${(agent.status || 'offline').toLowerCase() === 'online' ? '🟢' : (agent.status || 'offline').toLowerCase() === 'away' ? '🟡' : '🔴'} ${agent.name}`}
                       </option>
                     ))}
                   </select>
@@ -2349,8 +2337,21 @@ export default function GlobalWebCallInterface() {
               </div>
             )}
 
+            {/* Leave for current agent only (doesn't force-end customer call) */}
+            {(isWebCallConnected || isConnected) && displayCallStatus === 'in-progress' && (
+              <button
+                onClick={handleLeaveCall}
+                className="w-full px-4 py-2 font-medium rounded-lg transition-all duration-200 flex items-center justify-center gap-2 mb-3 bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Leave Call
+              </button>
+            )}
+
             {/* Hangup Button - highlight when call ended */}
-            {(isWebCallConnected || isConnected || callStatus === 'in-progress' || callStatus === 'ringing' || callStatus === 'connecting' || isCalling || isConnecting || callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') && (
+            {(((isWebCallConnected || isConnected) && isSingleConnectedAgent) || callStatus === 'ringing' || callStatus === 'connecting' || isCalling || isConnecting || callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') && (
               <button
                 onClick={handleHangup}
                 className={`w-full px-4 py-2 font-medium rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
