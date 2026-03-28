@@ -220,6 +220,7 @@ async function handleVoiceResponse(request) {
     <Conference 
       startConferenceOnEnter="false" 
       endConferenceOnExit="false" 
+      beep="false"
       maxParticipants="10"${conferenceMutedAttr}
       statusCallback="${confCallbackUrl}" 
       statusCallbackMethod="POST" 
@@ -335,6 +336,7 @@ async function handleVoiceResponse(request) {
         twiml += `\n    <Conference 
         startConferenceOnEnter="true" 
         endConferenceOnExit="true" 
+        beep="false"
         maxParticipants="10" 
         statusCallback="${conferenceCallbackUrl}" 
         statusCallbackMethod="POST" 
