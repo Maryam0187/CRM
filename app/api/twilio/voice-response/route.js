@@ -206,6 +206,11 @@ async function handleVoiceResponse(request) {
                 ? '/api/twilio/inbound/call-status-callback'
                 : '/api/twilio/call-status-callback'
             );
+
+            const joinMuted =
+              formData &&
+              (formData.get('joinMuted') === 'true' || formData.get('JoinMuted') === 'true');
+            const conferenceMutedAttr = joinMuted ? ' muted="true"' : '';
             
             // Agent leg: Use Dial with Conference (required for Voice SDK)
             // answerOnBridge not needed here since agent is already connected via WebRTC
@@ -214,8 +219,8 @@ async function handleVoiceResponse(request) {
   <Dial record="false" timeout="30" timeLimit="3600" hangupOnStar="false">
     <Conference 
       startConferenceOnEnter="false" 
-      endConferenceOnExit="true" 
-      maxParticipants="10" 
+      endConferenceOnExit="false" 
+      maxParticipants="10"${conferenceMutedAttr}
       statusCallback="${confCallbackUrl}" 
       statusCallbackMethod="POST" 
       statusCallbackEvent="start end join leave mute hold speaker"

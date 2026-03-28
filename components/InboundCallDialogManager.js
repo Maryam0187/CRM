@@ -14,6 +14,10 @@ export default function InboundCallDialogManager() {
     if (!socket || !isConnected) return;
     
     const handleInboundCallNotification = (notification) => {
+      // Warm participant invites use GlobalWebCallInterface modal only (same socket shape has conferenceName)
+      if (notification.type === 'call_participant_invite') {
+        return;
+      }
       // Check if this is an inbound call notification
       if (notification.conferenceName || notification.type === 'inbound_call') {
         // Extract saleId from relatedId when relatedType is 'sale'

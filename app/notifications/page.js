@@ -167,6 +167,19 @@ export default function NotificationsPage() {
 
   // Handle notification click
   const handleNotificationClick = async (notification) => {
+    // Warm participant invites: same as live socket — show join dialog, do not auto-connect
+    if (notification.conferenceName && notification.type === 'call_participant_invite') {
+      if (!notification.isRead) {
+        await handleMarkAsRead(notification.id);
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('newNotificationArrived', { detail: { notification } })
+        );
+      }
+      return;
+    }
+
     // For inbound call notifications, open GlobalWebCallInterface and sale
     if (notification.conferenceName) {
       // Mark as read if not already read

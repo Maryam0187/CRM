@@ -62,6 +62,9 @@ export default function NotificationBell() {
     if (!socket || !isConnected) return;
     
     const handleInboundCallNotification = (notification) => {
+      if (notification.type === 'call_participant_invite') {
+        return;
+      }
       // Check if this is an inbound call notification
       if (notification.conferenceName || notification.conference_name) {
         // Format notification to match expected structure
@@ -190,6 +193,15 @@ export default function NotificationBell() {
   const handleNotificationClick = async (notification) => {
     // For inbound call notifications, show the dialog instead of directly starting call
     if (notification.conferenceName) {
+      if (notification.type === 'call_participant_invite') {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('newNotificationArrived', { detail: { notification } })
+          );
+        }
+        setIsOpen(false);
+        return;
+      }
       // Show the inbound call dialog
       showInboundCall(notification);
       // Close dropdown

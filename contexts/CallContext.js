@@ -88,7 +88,8 @@ export function CallProvider({ children }) {
       saleId: callData.saleId,
       phoneNumber: callData.phoneNumber,
       customerName: callData.customerName,
-      dialParams: callData.dialParams // Preserve dialParams if provided
+      dialParams: callData.dialParams, // Preserve dialParams if provided
+      mutedByDefault: callData.mutedByDefault === true
     });
     setShowWebInterface(true);
     setError(null);

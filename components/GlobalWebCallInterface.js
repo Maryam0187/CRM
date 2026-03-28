@@ -108,6 +108,8 @@ export default function GlobalWebCallInterface() {
   const [isAddingParticipant, setIsAddingParticipant] = useState(false);
   const [addParticipantError, setAddParticipantError] = useState('');
   const [addParticipantSuccess, setAddParticipantSuccess] = useState('');
+  /** Warm-transfer in-app invite: show dialog first; join only after agent confirms */
+  const [pendingParticipantInvite, setPendingParticipantInvite] = useState(null);
   
   // Track known CallSids for matching conference participants
   const [knownSids, setKnownSids] = useState({
@@ -175,6 +177,10 @@ export default function GlobalWebCallInterface() {
   const ringingAudioContextRef = useRef(null); // For Web Audio API
   const ringingOscillatorsRef = useRef([]); // For storing oscillators
   const callStatusRef = useRef(callStatus); // Track current call status for interval checks
+  const callMetadataRef = useRef(callMetadata);
+  useEffect(() => {
+    callMetadataRef.current = callMetadata;
+  }, [callMetadata]);
   
   // Helper: Determine participant role by matching CallSid
   const resolveRoleByCallSid = (callSid) => {
@@ -563,7 +569,8 @@ export default function GlobalWebCallInterface() {
         customerId: callMetadata?.customerId ?? '',
         saleId: callMetadata?.saleId ?? '',
         callPurpose: 'follow_up',
-        direction: conferenceName?.startsWith('inbound-') ? 'inbound' : 'outbound'
+        direction: conferenceName?.startsWith('inbound-') ? 'inbound' : 'outbound',
+        ...(callMetadata?.mutedByDefault ? { joinMuted: 'true' } : {})
       };
       console.log('📞 Connecting with params:', params);
 
@@ -666,6 +673,15 @@ export default function GlobalWebCallInterface() {
               
               if (!isWebCallConnected) {
                 callConnected();
+              }
+
+              // Participant invite: TwiML may start conference muted; also enforce SDK mute once media is ready
+              if (callMetadataRef.current?.mutedByDefault) {
+                setLocalIsMuted(true);
+                setIsMuted(true);
+                setTimeout(() => {
+                  mute({ requireConnected: false });
+                }, 650);
               }
               
               // Check if this is an inbound call
@@ -873,9 +889,10 @@ export default function GlobalWebCallInterface() {
   };
 
   // Mute/Unmute functionality
-  const mute = async () => {
+  const mute = async (options = {}) => {
+    const requireConnectedFlag = options.requireConnected !== false;
     try {
-      if (!activeConnection.current || !isConnected) {
+      if (!activeConnection.current || (requireConnectedFlag && !isConnected)) {
         console.warn('⚠️ Cannot mute: call not connected');
         return false;
       }
@@ -1927,12 +1944,7 @@ export default function GlobalWebCallInterface() {
         return;
       }
 
-      startCall({
-        callSid: notification.callSid || `invite-${Date.now()}`,
-        conferenceName: notification.conferenceName,
-        customerName: notification.customerName || 'Live Call',
-        phoneNumber: null,
-      });
+      setPendingParticipantInvite(notification);
       setAddParticipantSuccess('');
       setAddParticipantError('');
     };
@@ -1941,10 +1953,104 @@ export default function GlobalWebCallInterface() {
     return () => {
       window.removeEventListener('newNotificationArrived', handleNewNotification);
     };
-  }, [startCall, showWebInterface, currentCallSid, isConnected, isWebCallConnected]);
+  }, [showWebInterface, currentCallSid, isConnected, isWebCallConnected]);
+
+  const dismissParticipantInvite = useCallback(() => {
+    setPendingParticipantInvite(null);
+  }, []);
+
+  const acceptParticipantInvite = useCallback(() => {
+    if (!pendingParticipantInvite?.conferenceName) return;
+    const notification = pendingParticipantInvite;
+    setPendingParticipantInvite(null);
+    startCall({
+      callSid: notification.callSid || `invite-${Date.now()}`,
+      conferenceName: notification.conferenceName,
+      customerName: notification.customerName || 'Live Call',
+      phoneNumber: null,
+      mutedByDefault: notification.mutedByDefault !== false
+    });
+    setAddParticipantSuccess('');
+    setAddParticipantError('');
+  }, [pendingParticipantInvite, startCall]);
 
   if (!showWebInterface || !conferenceName) {
-    return null;
+    if (!pendingParticipantInvite) {
+      return null;
+    }
+    const inv = pendingParticipantInvite;
+    return (
+      <div
+        className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="call-participant-invite-title"
+      >
+        <div className="bg-white rounded-xl shadow-2xl border-2 border-blue-200 max-w-md w-full overflow-hidden">
+          <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-2xl flex-shrink-0" aria-hidden>
+                📞
+              </span>
+              <div className="min-w-0">
+                <h2 id="call-participant-invite-title" className="text-lg font-bold truncate">
+                  {inv.title || 'Call invitation'}
+                </h2>
+                <p className="text-xs text-blue-100 truncate">
+                  {inv.message || 'You were invited to join a live call.'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={dismissParticipantInvite}
+              className="flex-shrink-0 p-1.5 rounded-lg hover:bg-blue-700/80 transition-colors"
+              aria-label="Dismiss invitation"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="p-6 space-y-4">
+            {inv.customerName && (
+              <p className="text-center text-sm text-gray-600">
+                Customer: <span className="font-semibold text-gray-900">{inv.customerName}</span>
+              </p>
+            )}
+            {inv.mutedByDefault && (
+              <p className="text-center text-xs text-gray-500">
+                You will join muted; you can unmute from the call controls.
+              </p>
+            )}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={dismissParticipantInvite}
+                className="flex-1 px-4 py-3 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+              >
+                Decline
+              </button>
+              <button
+                type="button"
+                onClick={acceptParticipantInvite}
+                className="flex-1 px-4 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                  />
+                </svg>
+                Join call
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const durationToShow = finalDuration || callTimer;
@@ -2150,19 +2256,17 @@ export default function GlobalWebCallInterface() {
                           <span>{roleLabel}</span>
                           {isCurrentAgent && <span className="text-[10px] text-blue-600">(you)</span>}
                         </div>
-                        <span className={`text-[11px] px-2 py-0.5 rounded border ${config.bg} ${config.text} ${config.border}`}>
-                          {config.label}
-                        </span>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {p.muted && (
+                            <span className="text-[10px] font-medium text-orange-700">Muted</span>
+                          )}
+                          <span className={`text-[11px] px-2 py-0.5 rounded border ${config.bg} ${config.text} ${config.border}`}>
+                            {config.label}
+                          </span>
+                        </div>
                       </div>
                     );
                   })}
-                  
-                  {/* Mute indicator for customer if connected */}
-                  {customerParticipant?.status === 'connected' && customerParticipant?.muted && (
-                    <div className="text-[10px] text-orange-600 pl-2">
-                      Customer is muted
-                    </div>
-                  )}
                   
                   {/* Hold indicator */}
                   {customerParticipant?.hold && (
