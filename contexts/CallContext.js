@@ -89,7 +89,9 @@ export function CallProvider({ children }) {
       phoneNumber: callData.phoneNumber,
       customerName: callData.customerName,
       dialParams: callData.dialParams, // Preserve dialParams if provided
-      mutedByDefault: callData.mutedByDefault === true
+      mutedByDefault: callData.mutedByDefault === true,
+      /** PSTN customer leg — set for invitees so hold/unhold works before socket join */
+      customerCallSid: callData.customerCallSid || null
     });
     setShowWebInterface(true);
     setError(null);

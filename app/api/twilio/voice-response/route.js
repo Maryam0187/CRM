@@ -317,6 +317,7 @@ async function handleVoiceResponse(request) {
             ? '/api/twilio/inbound/call-status-callback'
             : '/api/twilio/call-status-callback'
         );
+        const conferenceHoldMusicUrl = getWebhookUrl('/api/twilio/conference-hold-music');
         
         console.log('📞 [TwiML] Conference details:', {
           conferenceName: safeConferenceName,
@@ -338,6 +339,8 @@ async function handleVoiceResponse(request) {
         endConferenceOnExit="true" 
         beep="false"
         maxParticipants="10" 
+        waitUrl="${conferenceHoldMusicUrl}"
+        waitMethod="GET"
         statusCallback="${conferenceCallbackUrl}" 
         statusCallbackMethod="POST" 
         statusCallbackEvent="start end join leave mute hold speaker"

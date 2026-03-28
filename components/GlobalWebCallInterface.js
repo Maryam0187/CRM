@@ -102,6 +102,7 @@ export default function GlobalWebCallInterface() {
   const [isRecording, setIsRecording] = useState(false);
   const [activeRecordingSid, setActiveRecordingSid] = useState(null);
   const [recordingControlLoading, setRecordingControlLoading] = useState(false);
+  const [customerHoldLoading, setCustomerHoldLoading] = useState(false);
   const [availableAgents, setAvailableAgents] = useState([]);
   const [isLoadingAgents, setIsLoadingAgents] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState('');
@@ -134,6 +135,7 @@ export default function GlobalWebCallInterface() {
   
   // Customer is connected when they have status 'connected'
   const customerConnected = customerParticipant?.status === 'connected';
+  const customerOnHold = customerParticipant?.hold === true;
   
   // Keep UI simple and correct:
   // - show Waiting/Queued before customer answers
@@ -925,6 +927,41 @@ export default function GlobalWebCallInterface() {
     }
   };
 
+  const getCustomerLegCallSid = () => {
+    const fromParticipant = customerParticipant?.callSid;
+    if (fromParticipant && String(fromParticipant).startsWith('CA')) return fromParticipant;
+    const fromKnown = knownSids.customerCallSid;
+    if (fromKnown && String(fromKnown).startsWith('CA')) return fromKnown;
+    return null;
+  };
+
+  /** Twilio conference hold + waitUrl = hold music for PSTN customer. Any agent in the conference can hold/resume. */
+  const toggleCustomerHold = async () => {
+    if (isMockCallMode) return;
+    if (!conferenceName) {
+      console.warn('⚠️ Customer hold: missing conference');
+      return;
+    }
+    const leg = getCustomerLegCallSid();
+    const nextHold = !customerOnHold;
+    setCustomerHoldLoading(true);
+    try {
+      const res = await apiClient.post('/api/twilio/conference-participant', {
+        conferenceName,
+        hold: nextHold,
+        ...(leg ? { participantCallSid: leg } : {})
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        console.warn('⚠️ Customer hold failed:', data?.message || res.status);
+      }
+    } catch (err) {
+      console.warn('⚠️ Customer hold error:', err);
+    } finally {
+      setCustomerHoldLoading(false);
+    }
+  };
+
   const applyLocalUnmuteSideEffects = async (call) => {
     setLocalIsMuted(false);
     setIsMuted(false);
@@ -1645,15 +1682,58 @@ export default function GlobalWebCallInterface() {
           }
             
           case 'hold':
-          case 'unhold':
-            // Update hold status
+          case 'unhold': {
             const holdRole = determineRole(callSid, participantRole);
-            setParticipants(prev => prev.map(p =>
-              matchesParticipant(p, callSid, holdRole)
-                ? { ...p, hold: eventType === 'hold' } 
-                : p
-            ));
+            let nextHold;
+            if (typeof hold === 'boolean') nextHold = hold;
+            else if (hold === true || hold === 'true') nextHold = true;
+            else if (hold === false || hold === 'false') nextHold = false;
+            else nextHold = eventType === 'hold';
+
+            // Customer hold must show for every agent in the conference. Webhook callSid is the
+            // customer's leg; invited agents sometimes have a mismatched/placeholder customer row
+            // callSid — still update all customer rows when we know the event is for the customer.
+            const customerSidCandidates = [
+              knownSids.customerCallSid,
+              callMetadata?.customerCallSid
+            ].filter(Boolean);
+            const isCustomerHoldEvent =
+              holdRole === 'customer' ||
+              participantRole === 'customer' ||
+              (callSid && customerSidCandidates.some((c) => String(c) === String(callSid)));
+
+            setParticipants((prev) => {
+              let next = prev.map((p) => {
+                if (isCustomerHoldEvent && p.role === 'customer') {
+                  return { ...p, hold: nextHold };
+                }
+                if (matchesParticipant(p, callSid, holdRole)) {
+                  return { ...p, hold: nextHold };
+                }
+                return p;
+              });
+              // Invited agent may never have received the customer's join event — still show hold state
+              if (isCustomerHoldEvent && !next.some((p) => p.role === 'customer')) {
+                const ca =
+                  callSid ||
+                  knownSids.customerCallSid ||
+                  callMetadata?.customerCallSid ||
+                  'customer';
+                next = [
+                  ...next,
+                  {
+                    callSid: ca,
+                    role: 'customer',
+                    status: 'connected',
+                    muted: false,
+                    hold: nextHold
+                  }
+                ];
+              }
+              return next;
+            });
             break;
+          }
           
           case 'speech-start':
           case 'speech-stop':
@@ -1719,7 +1799,17 @@ export default function GlobalWebCallInterface() {
       window.removeEventListener('conferenceStatus', handleConferenceStatus);
       clearInterval(interval);
     };
-  }, [currentCallSid, conferenceName, getCallStatus, updateCallStatus, device, endCall, disconnectCall, knownSids]);
+  }, [
+    currentCallSid,
+    conferenceName,
+    callMetadata,
+    getCallStatus,
+    updateCallStatus,
+    device,
+    endCall,
+    disconnectCall,
+    knownSids
+  ]);
 
   // Sync mute state
   useEffect(() => {
@@ -1794,36 +1884,58 @@ export default function GlobalWebCallInterface() {
     }
   }, [callStatus]);
 
+  // Seed customer leg from invite metadata (invited agent) — before Twilio join events arrive
+  useEffect(() => {
+    const seed = callMetadata?.customerCallSid;
+    if (seed && String(seed).startsWith('CA')) {
+      setKnownSids((prev) => ({
+        ...prev,
+        customerCallSid: prev.customerCallSid || seed
+      }));
+    }
+  }, [callMetadata?.customerCallSid]);
+
   // Initialize participants and known SIDs when call starts
   useEffect(() => {
     if (conferenceName && currentCallSid && isCalling) {
-      // Store customer CallSid for matching
-      setKnownSids(prev => ({
-        ...prev,
-        customerCallSid: currentCallSid
-      }));
-      
-      // Initialize with customer participant (from the call we initiated)
-      setParticipants(prev => {
+      const fromMeta =
+        callMetadata?.customerCallSid && String(callMetadata.customerCallSid).startsWith('CA')
+          ? callMetadata.customerCallSid
+          : null;
+      const fromCurrent =
+        currentCallSid && String(currentCallSid).startsWith('CA') ? currentCallSid : null;
+      const seedCustomerSid = fromMeta || fromCurrent;
+
+      if (seedCustomerSid) {
+        setKnownSids((prev) => ({
+          ...prev,
+          customerCallSid: prev.customerCallSid || seedCustomerSid
+        }));
+      }
+
+      // Initialize with customer participant (outbound: placeholder until real CA from events)
+      setParticipants((prev) => {
         if (prev.length === 0) {
-          return [{
-            callSid: currentCallSid,
-            role: 'customer',
-            status: 'waiting', // Waiting for conference join
-            muted: false,
-            hold: false
-          }];
+          return [
+            {
+              callSid: seedCustomerSid || currentCallSid,
+              role: 'customer',
+              status: 'waiting',
+              muted: false,
+              hold: false
+            }
+          ];
         }
         return prev;
       });
     }
-    
+
     // Clear when no longer calling
     if (!conferenceName && !isCalling) {
       setParticipants([]);
       setKnownSids({ customerCallSid: null, agentCallSid: null });
     }
-  }, [conferenceName, currentCallSid, isCalling]);
+  }, [conferenceName, currentCallSid, isCalling, callMetadata?.customerCallSid]);
 
   // Play/stop default Twilio ringing sound
   useEffect(() => {
@@ -2028,6 +2140,12 @@ export default function GlobalWebCallInterface() {
       notification.participantSnapshot?.fromNumber ||
       notification.participantSnapshot?.toNumber ||
       null;
+    const customerSidFromSnap =
+      snapCustomer?.callSid ||
+      notification.participantSnapshot?.participants?.find((p) => p.role === 'customer')?.callSid ||
+      null;
+    const inviteCustomerSid =
+      customerSidFromSnap && String(customerSidFromSnap).startsWith('CA') ? customerSidFromSnap : null;
     startCall({
       callSid: notification.callSid || `invite-${Date.now()}`,
       conferenceName: notification.conferenceName,
@@ -2035,7 +2153,8 @@ export default function GlobalWebCallInterface() {
       phoneNumber: resolvedPhone,
       customerId: notification.customerId ?? snapCustomer?.customerId,
       saleId: notification.saleId ?? snapCustomer?.saleId,
-      mutedByDefault: notification.mutedByDefault !== false
+      mutedByDefault: notification.mutedByDefault !== false,
+      customerCallSid: inviteCustomerSid || undefined
     });
     setAddParticipantSuccess('');
     setAddParticipantError('');
@@ -2417,6 +2536,29 @@ export default function GlobalWebCallInterface() {
               </button>
             )}
 
+            {/* Customer on hold with music — any agent in the conference can hold/resume (API resolves PSTN leg if needed) */}
+            {(isWebCallConnected || isConnected) && displayCallStatus === 'in-progress' && (
+              <button
+                type="button"
+                onClick={() => void toggleCustomerHold()}
+                disabled={customerHoldLoading || !conferenceName}
+                className={`w-full px-4 py-2 font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 mb-3 ${
+                  customerOnHold
+                    ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                    : 'bg-slate-600 hover:bg-slate-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'
+                }`}
+              >
+                {customerHoldLoading ? (
+                  <span className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                )}
+                <span>{customerOnHold ? 'Resume customer' : 'Hold customer (music)'}</span>
+              </button>
+            )}
+
             {/* Record/Stop Recording Button */}
             {(isWebCallConnected || isConnected) && displayCallStatus === 'in-progress' && (
               <button
@@ -2501,6 +2643,9 @@ export default function GlobalWebCallInterface() {
                 {addParticipantSuccess && (
                   <div className="mt-2 text-[11px] text-green-700">{addParticipantSuccess}</div>
                 )}
+                <p className="mt-2 text-[11px] text-slate-500">
+                  While the other agent joins, either agent can use <span className="font-medium">Hold customer (music)</span> so the caller hears hold music.
+                </p>
               </div>
             )}
 

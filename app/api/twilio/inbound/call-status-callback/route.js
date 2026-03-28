@@ -87,15 +87,33 @@ export async function POST(request) {
       if (conferenceEvent === 'conference-end') normalizedEvent = 'end';
       if (conferenceEvent === 'participant-join') normalizedEvent = 'join';
       if (conferenceEvent === 'participant-leave') normalizedEvent = 'leave';
+      if (conferenceEvent === 'participant-hold') normalizedEvent = 'hold';
+      if (conferenceEvent === 'participant-unhold') normalizedEvent = 'unhold';
+      if (conferenceEvent === 'participant-mute') normalizedEvent = 'mute';
+      if (conferenceEvent === 'participant-unmute') normalizedEvent = 'unmute';
 
       const participantCallSid =
         formData.get('ParticipantCallSid') || formData.get('CallSid');
+      const mutedForm = formData.get('Muted');
+      const holdForm = formData.get('Hold');
+      const rawFrom = formData.get('From') || formData.get('Caller') || '';
+      const inferredParticipantRole = String(rawFrom).startsWith('client:') ? 'agent' : 'customer';
+      const participantLevelEvents = ['join', 'leave', 'hold', 'unhold', 'mute', 'unmute'];
 
       sendConferenceEvent(conferenceName, {
         event: normalizedEvent,
         conferenceSid,
         conferenceName,
-        callSid: participantCallSid || null
+        callSid: participantCallSid || null,
+        ...(participantLevelEvents.includes(normalizedEvent)
+          ? { participantRole: inferredParticipantRole }
+          : {}),
+        ...(normalizedEvent === 'mute' || normalizedEvent === 'unmute'
+          ? { muted: mutedForm === 'true' }
+          : {}),
+        ...(normalizedEvent === 'hold' || normalizedEvent === 'unhold'
+          ? { hold: holdForm === 'true' }
+          : {})
       });
 
       if (normalizedEvent === 'leave') {
