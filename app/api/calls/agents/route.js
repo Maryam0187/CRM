@@ -3,7 +3,7 @@ import { User } from '../../../../models';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 import { Op } from 'sequelize';
 
-// GET /api/calls/agents - Get available agents for call transfer
+// GET /api/calls/agents - Get active users (all roles) for warm transfer / add participant
 export async function GET(request) {
   try {
     // Validate JWT token
@@ -15,7 +15,7 @@ export async function GET(request) {
       );
     }
 
-    // Get all active agents (excluding the current user)
+    // Get all active users for transfer target (excluding the current user)
     const currentUserId = authResult.user.id;
     const agents = await User.findAll({
       attributes: ['id', 'firstName', 'lastName', 'email', 'phone', 'role', 'status'],
@@ -23,10 +23,7 @@ export async function GET(request) {
         id: {
           [Op.ne]: currentUserId // Exclude current user
         },
-        isActive: true,
-        role: {
-          [Op.in]: ['agent', 'supervisor'] // Only agents and supervisors can receive transfers
-        }
+        isActive: true
       },
       order: [['firstName', 'ASC'], ['lastName', 'ASC']]
     });
