@@ -170,8 +170,6 @@ export default function GlobalWebCallInterface() {
   const [error, setError] = useState(null);
   const [localIsMuted, setLocalIsMuted] = useState(false);
   const activeConnection = useRef(null);
-  /** Joined with <Conference muted="true" /> — SDK unmute alone does not lift bridge mute */
-  const twilioConferenceJoinMutedRef = useRef(false);
   const localMediaStream = useRef(null);
   const isCleaningUp = useRef(false);
   const muteSyncIntervalRef = useRef(null);
@@ -677,10 +675,8 @@ export default function GlobalWebCallInterface() {
                 callConnected();
               }
 
-              twilioConferenceJoinMutedRef.current = false;
-              // Participant invite: TwiML conference muted + SDK mute until agent unmutes (needs REST to clear bridge)
+              // Participant invite: TwiML conference muted + SDK mute; unmute will sync bridge via REST
               if (callMetadataRef.current?.mutedByDefault) {
-                twilioConferenceJoinMutedRef.current = true;
                 setLocalIsMuted(true);
                 setIsMuted(true);
                 setTimeout(() => {
@@ -906,26 +902,25 @@ export default function GlobalWebCallInterface() {
     }
   };
 
-  const clearTwilioConferenceBridgeMute = async (call) => {
+  /** Keep Twilio conference bridge mute in sync with SDK so other agents get mute/unmute/leave webhooks */
+  const syncConferenceBridgeMute = async (call, mutedFlag) => {
+    if (isMockCallMode) return false;
     const legSid = getParticipantLegCallSid(call);
-    if (!legSid || !conferenceName) {
-      console.warn('⚠️ Conference bridge unmute skipped: missing leg CallSid or conference name');
-      return false;
-    }
+    if (!legSid || !conferenceName) return false;
     try {
       const res = await apiClient.post('/api/twilio/conference-participant', {
         conferenceName,
         participantCallSid: legSid,
-        muted: false
+        muted: !!mutedFlag
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.success) {
-        console.warn('⚠️ Conference participant unmute API:', data?.message || res.status);
+        console.warn('⚠️ Conference participant mute sync:', data?.message || res.status);
         return false;
       }
       return true;
     } catch (err) {
-      console.warn('⚠️ Conference participant unmute request failed:', err);
+      console.warn('⚠️ Conference participant mute sync failed:', err);
       return false;
     }
   };
@@ -933,17 +928,17 @@ export default function GlobalWebCallInterface() {
   const applyLocalUnmuteSideEffects = async (call) => {
     setLocalIsMuted(false);
     setIsMuted(false);
-    if (twilioConferenceJoinMutedRef.current && call) {
-      const cleared = await clearTwilioConferenceBridgeMute(call);
-      if (cleared) {
-        twilioConferenceJoinMutedRef.current = false;
-      }
-    }
+    await syncConferenceBridgeMute(call, false);
   };
 
   // Mute/Unmute functionality
   const mute = async (options = {}) => {
     const requireConnectedFlag = options.requireConnected !== false;
+    const finishMute = (callInstance) => {
+      setLocalIsMuted(true);
+      setIsMuted(true);
+      void syncConferenceBridgeMute(callInstance, true);
+    };
     try {
       if (!activeConnection.current || (requireConnectedFlag && !isConnected)) {
         console.warn('⚠️ Cannot mute: call not connected');
@@ -955,8 +950,7 @@ export default function GlobalWebCallInterface() {
       if (typeof call.mute === 'function') {
         try {
           call.mute(true);
-          setLocalIsMuted(true);
-          setIsMuted(true);
+          finishMute(call);
           console.log('✅ Call muted using SDK mute() method');
           return true;
         } catch (err) {
@@ -971,8 +965,7 @@ export default function GlobalWebCallInterface() {
             tracks.forEach(track => {
               track.enabled = false;
             });
-            setLocalIsMuted(true);
-            setIsMuted(true);
+            finishMute(call);
             console.log('✅ Call muted via local media stream');
             return true;
           }
@@ -987,8 +980,7 @@ export default function GlobalWebCallInterface() {
           local.getAudioTracks().forEach(track => {
             track.enabled = false;
           });
-          setLocalIsMuted(true);
-          setIsMuted(true);
+          finishMute(call);
           console.log('✅ Call muted via getCallStreams');
           return true;
         }
@@ -1631,15 +1623,26 @@ export default function GlobalWebCallInterface() {
             break;
             
           case 'mute':
-          case 'unmute':
-            // Update mute status
+          case 'unmute': {
+            // Prefer Twilio's Muted flag when present; SDK-only mute did not fire webhooks before bridge sync
             const muteRole = determineRole(callSid, participantRole);
+            let nextMuted;
+            if (typeof muted === 'boolean') {
+              nextMuted = muted;
+            } else if (muted === true || muted === 'true') {
+              nextMuted = true;
+            } else if (muted === false || muted === 'false') {
+              nextMuted = false;
+            } else {
+              nextMuted = eventType === 'mute';
+            }
             setParticipants(prev => prev.map(p =>
               matchesParticipant(p, callSid, muteRole)
-                ? { ...p, muted: eventType === 'mute' } 
+                ? { ...p, muted: nextMuted }
                 : p
             ));
             break;
+          }
             
           case 'hold':
           case 'unhold':
