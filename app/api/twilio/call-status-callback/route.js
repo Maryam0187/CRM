@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import socketManager from '../../../../lib/socket';
+import { endCustomerLegsIfNoAgentsRemain } from '../../../../lib/conferenceEndCustomerIfNoAgents';
 import { Op } from 'sequelize';
 
 // Constants
@@ -276,6 +277,8 @@ async function handleConferenceCallback(formData, conferenceSid, conferenceName,
         participantRole: role,
         timestamp
       });
+
+      void endCustomerLegsIfNoAgentsRemain(conferenceSid, conferenceName, participantId);
       break;
       
     case 'mute':

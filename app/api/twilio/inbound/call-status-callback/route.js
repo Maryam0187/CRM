@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import sequelizeDb from '../../../../../lib/sequelize-db';
 import socketManager from '../../../../../lib/socket';
 import { Op } from 'sequelize';
+import { endCustomerLegsIfNoAgentsRemain } from '../../../../../lib/conferenceEndCustomerIfNoAgents';
 
 // Inbound-only callback handler (kept separate from outbound to avoid regressions)
 const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
@@ -87,12 +88,19 @@ export async function POST(request) {
       if (conferenceEvent === 'participant-join') normalizedEvent = 'join';
       if (conferenceEvent === 'participant-leave') normalizedEvent = 'leave';
 
+      const participantCallSid =
+        formData.get('ParticipantCallSid') || formData.get('CallSid');
+
       sendConferenceEvent(conferenceName, {
         event: normalizedEvent,
         conferenceSid,
         conferenceName,
-        callSid: formData.get('CallSid') || null
+        callSid: participantCallSid || null
       });
+
+      if (normalizedEvent === 'leave') {
+        void endCustomerLegsIfNoAgentsRemain(conferenceSid, conferenceName, participantCallSid || null);
+      }
 
       return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
         headers: { 'Content-Type': 'text/xml' }
