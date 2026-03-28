@@ -170,6 +170,8 @@ export default function GlobalWebCallInterface() {
   const [error, setError] = useState(null);
   const [localIsMuted, setLocalIsMuted] = useState(false);
   const activeConnection = useRef(null);
+  /** Joined with <Conference muted="true" /> — SDK unmute alone does not lift bridge mute */
+  const twilioConferenceJoinMutedRef = useRef(false);
   const localMediaStream = useRef(null);
   const isCleaningUp = useRef(false);
   const muteSyncIntervalRef = useRef(null);
@@ -675,8 +677,10 @@ export default function GlobalWebCallInterface() {
                 callConnected();
               }
 
-              // Participant invite: TwiML may start conference muted; also enforce SDK mute once media is ready
+              twilioConferenceJoinMutedRef.current = false;
+              // Participant invite: TwiML conference muted + SDK mute until agent unmutes (needs REST to clear bridge)
               if (callMetadataRef.current?.mutedByDefault) {
+                twilioConferenceJoinMutedRef.current = true;
                 setLocalIsMuted(true);
                 setIsMuted(true);
                 setTimeout(() => {
@@ -888,6 +892,55 @@ export default function GlobalWebCallInterface() {
     }
   };
 
+  const getParticipantLegCallSid = (call) => {
+    if (!call) return null;
+    try {
+      const p = call.parameters;
+      if (!p) return null;
+      if (typeof p.get === 'function') {
+        return p.get('CallSid') || null;
+      }
+      return p.CallSid || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const clearTwilioConferenceBridgeMute = async (call) => {
+    const legSid = getParticipantLegCallSid(call);
+    if (!legSid || !conferenceName) {
+      console.warn('⚠️ Conference bridge unmute skipped: missing leg CallSid or conference name');
+      return false;
+    }
+    try {
+      const res = await apiClient.post('/api/twilio/conference-participant', {
+        conferenceName,
+        participantCallSid: legSid,
+        muted: false
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        console.warn('⚠️ Conference participant unmute API:', data?.message || res.status);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn('⚠️ Conference participant unmute request failed:', err);
+      return false;
+    }
+  };
+
+  const applyLocalUnmuteSideEffects = async (call) => {
+    setLocalIsMuted(false);
+    setIsMuted(false);
+    if (twilioConferenceJoinMutedRef.current && call) {
+      const cleared = await clearTwilioConferenceBridgeMute(call);
+      if (cleared) {
+        twilioConferenceJoinMutedRef.current = false;
+      }
+    }
+  };
+
   // Mute/Unmute functionality
   const mute = async (options = {}) => {
     const requireConnectedFlag = options.requireConnected !== false;
@@ -951,9 +1004,10 @@ export default function GlobalWebCallInterface() {
     }
   };
 
-  const unmute = async () => {
+  const unmute = async (options = {}) => {
+    const requireConnectedFlag = options.requireConnected !== false;
     try {
-      if (!activeConnection.current || !isConnected) {
+      if (!activeConnection.current || (requireConnectedFlag && !isConnected)) {
         console.warn('⚠️ Cannot unmute: call not connected');
         return false;
       }
@@ -963,8 +1017,7 @@ export default function GlobalWebCallInterface() {
       if (typeof call.mute === 'function') {
         try {
           call.mute(false);
-          setLocalIsMuted(false);
-          setIsMuted(false);
+          await applyLocalUnmuteSideEffects(call);
           console.log('✅ Call unmuted using SDK mute() method');
           return true;
         } catch (err) {
@@ -979,8 +1032,7 @@ export default function GlobalWebCallInterface() {
             tracks.forEach(track => {
               track.enabled = true;
             });
-            setLocalIsMuted(false);
-            setIsMuted(false);
+            await applyLocalUnmuteSideEffects(call);
             console.log('✅ Call unmuted via local media stream');
             return true;
           }
@@ -995,8 +1047,7 @@ export default function GlobalWebCallInterface() {
           local.getAudioTracks().forEach(track => {
             track.enabled = true;
           });
-          setLocalIsMuted(false);
-          setIsMuted(false);
+          await applyLocalUnmuteSideEffects(call);
           console.log('✅ Call unmuted via getCallStreams');
           return true;
         }
@@ -1014,8 +1065,7 @@ export default function GlobalWebCallInterface() {
               sender.track.enabled = true;
             }
           });
-          setLocalIsMuted(false);
-          setIsMuted(false);
+          await applyLocalUnmuteSideEffects(call);
           console.log('✅ Call unmuted via peer connection');
           return true;
         }
@@ -1033,10 +1083,9 @@ export default function GlobalWebCallInterface() {
 
   const toggleMute = async () => {
     if (localIsMuted) {
-      return await unmute();
-    } else {
-      return await mute();
+      return await unmute({ requireConnected: false });
     }
+    return await mute();
   };
 
   // Send DTMF digits during call (keypad)
@@ -1963,11 +2012,26 @@ export default function GlobalWebCallInterface() {
     if (!pendingParticipantInvite?.conferenceName) return;
     const notification = pendingParticipantInvite;
     setPendingParticipantInvite(null);
+    const snapCustomer = notification.participantSnapshot?.participants?.find((p) => p.role === 'customer');
+    const resolvedCustomerName =
+      (notification.customerName && String(notification.customerName).trim()) ||
+      (snapCustomer?.displayName && String(snapCustomer.displayName).trim()) ||
+      (notification.phoneNumber && String(notification.phoneNumber).trim()) ||
+      (snapCustomer?.phone && String(snapCustomer.phone).trim()) ||
+      'Live Call';
+    const resolvedPhone =
+      notification.phoneNumber ||
+      snapCustomer?.phone ||
+      notification.participantSnapshot?.fromNumber ||
+      notification.participantSnapshot?.toNumber ||
+      null;
     startCall({
       callSid: notification.callSid || `invite-${Date.now()}`,
       conferenceName: notification.conferenceName,
-      customerName: notification.customerName || 'Live Call',
-      phoneNumber: null,
+      customerName: resolvedCustomerName,
+      phoneNumber: resolvedPhone,
+      customerId: notification.customerId ?? snapCustomer?.customerId,
+      saleId: notification.saleId ?? snapCustomer?.saleId,
       mutedByDefault: notification.mutedByDefault !== false
     });
     setAddParticipantSuccess('');
@@ -2013,10 +2077,53 @@ export default function GlobalWebCallInterface() {
             </button>
           </div>
           <div className="p-6 space-y-4">
-            {inv.customerName && (
-              <p className="text-center text-sm text-gray-600">
-                Customer: <span className="font-semibold text-gray-900">{inv.customerName}</span>
+            {inv.invitedByName && (
+              <p className="text-sm text-gray-700">
+                Invited by{' '}
+                <span className="font-semibold text-gray-900">{inv.invitedByName}</span>
               </p>
+            )}
+            {inv.participantSnapshot?.participants?.length > 0 ? (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+                  On this call
+                </div>
+                <ul className="space-y-2 text-sm">
+                  {inv.participantSnapshot.participants.map((p, i) => (
+                    <li
+                      key={`${p.role}-${p.callSid || p.userId || i}`}
+                      className="flex flex-col gap-0.5 border-b border-gray-100 pb-2 last:border-0 last:pb-0"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-gray-900 capitalize">{p.role}</span>
+                        <span className="text-[11px] text-gray-500 truncate max-w-[55%] text-right">
+                          {p.status === 'in-conference' ? 'In conference' : p.status || '—'}
+                        </span>
+                      </div>
+                      <div className="text-gray-700 truncate" title={p.displayName}>
+                        {p.displayName}
+                      </div>
+                      {p.phone && (
+                        <div className="text-xs text-gray-500">{p.phone}</div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {inv.participantSnapshot.direction && (
+                  <p className="mt-2 text-[11px] text-gray-500">
+                    {inv.participantSnapshot.direction === 'inbound' ? 'Inbound' : 'Outbound'} call
+                    {inv.participantSnapshot.conferenceSid
+                      ? ` · Conf. ${String(inv.participantSnapshot.conferenceSid).slice(0, 10)}…`
+                      : ''}
+                  </p>
+                )}
+              </div>
+            ) : (
+              inv.customerName && (
+                <p className="text-center text-sm text-gray-600">
+                  Customer: <span className="font-semibold text-gray-900">{inv.customerName}</span>
+                </p>
+              )
             )}
             {inv.mutedByDefault && (
               <p className="text-center text-xs text-gray-500">

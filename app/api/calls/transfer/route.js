@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
+import { Op } from 'sequelize';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
-import { CallTransfer, CallLog, User } from '../../../../models';
+import { CallTransfer, CallLog, User, Customer } from '../../../../models';
 import socketManager from '../../../../lib/socket';
 
 export async function POST(request) {
@@ -48,12 +49,25 @@ export async function POST(request) {
 
     const fromAgentId = authResult.user.id;
 
-    // Find the call log if it exists
+    // Find the call log if it exists (match primary, customer, or agent leg SID; then conference name)
     let callLog = null;
     try {
       callLog = await CallLog.findOne({
-        where: { callSid: callSid }
+        where: {
+          [Op.or]: [
+            { callSid },
+            { customerCallSid: callSid },
+            { agentCallSid: callSid }
+          ]
+        },
+        order: [['created_at', 'DESC']]
       });
+      if (!callLog && requestedConferenceName) {
+        callLog = await CallLog.findOne({
+          where: { conferenceName: requestedConferenceName },
+          order: [['created_at', 'DESC']]
+        });
+      }
     } catch (err) {
       console.warn('⚠️ Could not find call log:', err.message);
     }
@@ -131,20 +145,111 @@ export async function POST(request) {
           });
         }
 
+        const [fromAgentUser, hostAgentUser] = await Promise.all([
+          User.findByPk(fromAgentId, { attributes: ['id', 'firstName', 'lastName', 'email'] }),
+          callLog?.agentId
+            ? User.findByPk(callLog.agentId, { attributes: ['id', 'firstName', 'lastName', 'email'] })
+            : Promise.resolve(null)
+        ]);
+
+        const invitedByName = fromAgentUser
+          ? [fromAgentUser.firstName, fromAgentUser.lastName].filter(Boolean).join(' ').trim() ||
+            fromAgentUser.email ||
+            `Agent #${fromAgentId}`
+          : `Agent #${fromAgentId}`;
+
+        let customerPhone = null;
+        if (callLog) {
+          customerPhone =
+            callLog.direction === 'inbound' ? callLog.fromNumber : callLog.toNumber;
+        }
+
+        // Match live UI: name often comes from CRM customer, not call_logs.customer_name
+        let resolvedCustomerName = callLog?.customerName || null;
+        if (!resolvedCustomerName && callLog?.customerId) {
+          try {
+            const crmCustomer = await Customer.findByPk(callLog.customerId, {
+              attributes: ['id', 'firstName', 'lastName', 'company', 'phone', 'landline']
+            });
+            if (crmCustomer) {
+              const full = [crmCustomer.firstName, crmCustomer.lastName]
+                .filter(Boolean)
+                .join(' ')
+                .trim();
+              resolvedCustomerName =
+                full || crmCustomer.company || crmCustomer.phone || crmCustomer.landline || null;
+            }
+          } catch (e) {
+            console.warn('⚠️ Could not load customer for invite name:', e.message);
+          }
+        }
+        if (!resolvedCustomerName && customerPhone) {
+          resolvedCustomerName = customerPhone;
+        }
+
+        /** Snapshot for invitee (Twilio + CRM context we have on the server) */
+        const participants = [];
+        if (callLog) {
+          participants.push({
+            role: 'customer',
+            displayName: resolvedCustomerName || customerPhone || 'Customer',
+            phone: customerPhone || null,
+            callSid: callLog.customerCallSid || null,
+            customerId: callLog.customerId ?? null,
+            saleId: callLog.saleId ?? null,
+            status: callLog.status || null,
+            muted: null,
+            hold: null
+          });
+          const hostDisplay =
+            hostAgentUser &&
+            [hostAgentUser.firstName, hostAgentUser.lastName].filter(Boolean).join(' ').trim();
+          participants.push({
+            role: 'agent',
+            displayName: hostDisplay || `Agent #${callLog.agentId}`,
+            userId: callLog.agentId,
+            callSid: callLog.agentCallSid || null,
+            isPrimaryHost: Number(callLog.agentId) === Number(fromAgentId),
+            status: 'in-conference',
+            muted: null,
+            hold: null
+          });
+        }
+
+        const participantSnapshot = {
+          conferenceName,
+          conferenceSid: callLog?.conferenceSid || null,
+          direction: callLog?.direction || null,
+          callLogId: callLog?.id ?? null,
+          callStatus: callLog?.status || null,
+          fromNumber: callLog?.fromNumber || null,
+          toNumber: callLog?.toNumber || null,
+          participants,
+          invitedByName,
+          invitedByAgentId: fromAgentId
+        };
+
         // Agent joins via app only: send in-app invite via socket notification.
         const invitationPayload = {
           id: `call-invite-${callSid}-${toAgentId}-${Date.now()}`,
           type: 'call_participant_invite',
           title: 'Call Invitation',
-          message: 'You were invited to join a live call.',
+          message: invitedByName
+            ? `${invitedByName} invited you to join a live call.`
+            : 'You were invited to join a live call.',
           time: new Date().toISOString(),
           isRead: false,
           callSid,
           conferenceName,
           invitedByAgentId: fromAgentId,
           invitedAgentId: toAgentId,
-          customerName: callLog?.customerName || null,
-          mutedByDefault: true
+          customerName: resolvedCustomerName || null,
+          customerId: callLog?.customerId ?? null,
+          saleId: callLog?.saleId ?? null,
+          phoneNumber: customerPhone,
+          invitedByName,
+          mutedByDefault: true,
+          participantSnapshot
         };
 
         const inviteSent = socketManager.isReady()
@@ -165,6 +270,7 @@ export async function POST(request) {
             conferenceName: conferenceName,
             invitedViaApp: true,
             inviteSent,
+            participantSnapshot,
             message: 'Warm participant invite sent - invited agent can join from app (muted by default)'
           }
         });
