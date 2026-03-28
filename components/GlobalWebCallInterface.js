@@ -1949,12 +1949,6 @@ export default function GlobalWebCallInterface() {
 
   const durationToShow = finalDuration || callTimer;
   const displayError = error || callError;
-  const connectedAgentsCountFromParticipants = participants.filter(
-    (p) => p.role === 'agent' && p.status === 'connected'
-  ).length;
-  const connectedAgentsCount =
-    connectedAgentsCountFromParticipants || ((isWebCallConnected || isConnected) ? 1 : 0);
-  const isSingleConnectedAgent = connectedAgentsCount === 1;
 
   return (
     <div
@@ -2359,8 +2353,8 @@ export default function GlobalWebCallInterface() {
               </button>
             )}
 
-            {/* Hangup Button - highlight when call ended */}
-            {(((isWebCallConnected || isConnected) && isSingleConnectedAgent) || callStatus === 'ringing' || callStatus === 'connecting' || isCalling || isConnecting || callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') && (
+            {/* Hangup Button - highlight when call ended (shown for single- or multi-agent calls) */}
+            {(((isWebCallConnected || isConnected)) || callStatus === 'ringing' || callStatus === 'connecting' || isCalling || isConnecting || callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') && (
               <button
                 onClick={handleHangup}
                 className={`w-full px-4 py-2 font-medium rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
@@ -2380,24 +2374,43 @@ export default function GlobalWebCallInterface() {
       
         {/* Minimized view - just show timer and status */}
         {isMinimized && (
-          <div className="p-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="p-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
             {(callStatus === 'in-progress' || (isWebCallConnected || isConnected)) && (
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0"></div>
             )}
             {callStatus === 'ringing' && !(isWebCallConnected || isConnected) && (
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse flex-shrink-0"></div>
               )}
-              <span className="text-sm font-medium text-gray-700">
+              <span className="text-sm font-medium text-gray-700 truncate">
                 {callMetadata?.customerName || 'Call'}
               </span>
             </div>
-            {/* Timer in minimized view - only show when in-progress */}
-            {callStatus === 'in-progress' && (
-              <span className="text-sm font-bold text-green-600">
-                {formatTimer(durationToShow)}
-              </span>
-            )}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Timer in minimized view - only show when in-progress */}
+              {callStatus === 'in-progress' && (
+                <span className="text-sm font-bold text-green-600 tabular-nums">
+                  {formatTimer(durationToShow)}
+                </span>
+              )}
+              {(((isWebCallConnected || isConnected)) || callStatus === 'ringing' || callStatus === 'connecting' || isCalling || isConnecting || callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled') && (
+                <button
+                  type="button"
+                  onClick={handleHangup}
+                  title={callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled' ? 'Dismiss' : 'End call'}
+                  className={`p-2 rounded-lg transition-colors ${
+                    callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled'
+                      ? 'bg-green-600 hover:bg-green-700 text-white'
+                      : 'bg-red-600 hover:bg-red-700 text-white'
+                  }`}
+                  aria-label={callStatus === 'completed' || callStatus === 'failed' || callStatus === 'canceled' ? 'Dismiss call panel' : 'End call'}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
         )}
         </div>
