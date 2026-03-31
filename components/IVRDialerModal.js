@@ -16,6 +16,17 @@ export default function IVRDialerModal({
   onMakeCall,
   onHangup,
   onMute,
+  onToggleCustomerHold,
+  customerOnHold = false,
+  customerHoldLoading = false,
+  availableAgents = [],
+  isLoadingAgents = false,
+  selectedAgentId = '',
+  onSelectAgent,
+  onAddParticipant,
+  isAddingParticipant = false,
+  addParticipantError = '',
+  addParticipantSuccess = '',
   isConnected,
   isCalling = false,
   isConnecting = false,
@@ -730,6 +741,66 @@ export default function IVRDialerModal({
                     >
                       Hang Up
                     </button>
+                  )}
+                </div>
+              )}
+
+              {/* Hold customer / resume customer */}
+              {(isConnected || callStatus === 'in-progress') && onToggleCustomerHold && (
+                <div className="mt-2">
+                  <button
+                    onClick={onToggleCustomerHold}
+                    disabled={customerHoldLoading}
+                    className={`w-full px-2 py-1.5 rounded-lg font-medium text-xs ${
+                      customerOnHold
+                        ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                        : 'bg-slate-600 hover:bg-slate-700 text-white'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    {customerHoldLoading
+                      ? 'Updating...'
+                      : customerOnHold
+                        ? 'Resume customer'
+                        : 'Hold customer (music)'}
+                  </button>
+                </div>
+              )}
+
+              {/* Add internal participant (warm invite) */}
+              {(isConnected || callStatus === 'in-progress') && onAddParticipant && (
+                <div className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                  <div className="text-xs font-semibold text-slate-700 mb-1.5">Add Internal Participant</div>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={selectedAgentId}
+                      onChange={(e) => onSelectAgent && onSelectAgent(e.target.value)}
+                      className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded bg-white"
+                      disabled={isLoadingAgents || isAddingParticipant}
+                    >
+                      <option value="">Select agent</option>
+                      {availableAgents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {`${(agent.status || 'offline').toLowerCase() === 'online' ? '🟢' : (agent.status || 'offline').toLowerCase() === 'away' ? '🟡' : '🔴'} ${agent.name}`}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={onAddParticipant}
+                      disabled={!selectedAgentId || isAddingParticipant || isLoadingAgents}
+                      className="px-2 py-1.5 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isAddingParticipant ? 'Adding...' : 'Add'}
+                    </button>
+                  </div>
+                  {isLoadingAgents && (
+                    <div className="mt-1.5 text-[11px] text-slate-600">Loading internal agents...</div>
+                  )}
+                  {addParticipantError && (
+                    <div className="mt-1.5 text-[11px] text-red-600">{addParticipantError}</div>
+                  )}
+                  {addParticipantSuccess && (
+                    <div className="mt-1.5 text-[11px] text-green-700">{addParticipantSuccess}</div>
                   )}
                 </div>
               )}

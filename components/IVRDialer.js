@@ -37,6 +37,14 @@ export default function IVRDialer() {
     error: null,
     callTimer: 0
   });
+  const [customerOnHold, setCustomerOnHold] = useState(false);
+  const [customerHoldLoading, setCustomerHoldLoading] = useState(false);
+  const [availableAgents, setAvailableAgents] = useState([]);
+  const [isLoadingAgents, setIsLoadingAgents] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState('');
+  const [isAddingParticipant, setIsAddingParticipant] = useState(false);
+  const [addParticipantError, setAddParticipantError] = useState('');
+  const [addParticipantSuccess, setAddParticipantSuccess] = useState('');
 
   // Timer ref for call duration
   const timerIntervalRef = useRef(null);
@@ -332,6 +340,42 @@ export default function IVRDialer() {
     }
   }, []);
 
+  const getIvrParticipantLegCallSid = useCallback((call) => {
+    if (!call) return null;
+    try {
+      const p = call.parameters;
+      if (!p) return null;
+      if (typeof p.get === 'function') {
+        return p.get('CallSid') || null;
+      }
+      return p.CallSid || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const syncIvrConferenceBridgeMute = useCallback(async (call, mutedFlag) => {
+    const participantCallSid = getIvrParticipantLegCallSid(call);
+    const conferenceName = ivrCallState.conferenceName;
+    if (!participantCallSid || !conferenceName) return false;
+    try {
+      const response = await apiClient.post('/api/twilio/conference-participant', {
+        conferenceName,
+        participantCallSid,
+        muted: !!mutedFlag
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.success) {
+        console.warn('⚠️ [IVR] Conference mute sync failed:', data?.message || response.status);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.warn('⚠️ [IVR] Conference mute sync error:', error);
+      return false;
+    }
+  }, [getIvrParticipantLegCallSid, ivrCallState.conferenceName]);
+
   // Reset call state and cleanup device
   const resetIVRCallState = useCallback(() => {
     stopIVRTimer();
@@ -362,8 +406,103 @@ export default function IVRDialer() {
       error: null,
       callTimer: 0
     });
+    setCustomerOnHold(false);
+    setAvailableAgents([]);
+    setSelectedAgentId('');
+    setIsLoadingAgents(false);
+    setIsAddingParticipant(false);
+    setAddParticipantError('');
+    setAddParticipantSuccess('');
     ivrLocalMediaStream.current = null;
   }, [stopIVRTimer]);
+
+  const loadAvailableAgents = useCallback(async () => {
+    setIsLoadingAgents(true);
+    setAddParticipantError('');
+    try {
+      const res = await apiClient.get('/api/calls/agents');
+      const data = await res.json();
+      if (data?.success && Array.isArray(data?.data)) {
+        setAvailableAgents(data.data);
+      } else {
+        setAvailableAgents([]);
+        setAddParticipantError(data?.message || 'Failed to load internal agents');
+      }
+    } catch (err) {
+      console.error('❌ [IVR] Error loading internal agents:', err);
+      setAvailableAgents([]);
+      setAddParticipantError(err?.message || 'Failed to load internal agents');
+    } finally {
+      setIsLoadingAgents(false);
+    }
+  }, []);
+
+  const toggleIvrCustomerHold = useCallback(async () => {
+    if (!ivrCallState.conferenceName) {
+      console.warn('⚠️ [IVR] Customer hold: missing conferenceName');
+      return;
+    }
+    setCustomerHoldLoading(true);
+    setAddParticipantError('');
+    try {
+      const nextHold = !customerOnHold;
+      const res = await apiClient.post('/api/twilio/conference-participant', {
+        conferenceName: ivrCallState.conferenceName,
+        hold: nextHold
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        setAddParticipantError(data?.message || 'Failed to update customer hold state');
+        return;
+      }
+      setCustomerOnHold(nextHold);
+    } catch (err) {
+      console.error('❌ [IVR] Error toggling customer hold:', err);
+      setAddParticipantError(err?.message || 'Failed to update customer hold state');
+    } finally {
+      setCustomerHoldLoading(false);
+    }
+  }, [ivrCallState.conferenceName, customerOnHold]);
+
+  const handleAddParticipant = useCallback(async () => {
+    if (!ivrCallState.callSid) {
+      setAddParticipantError('Active IVR call not found');
+      return;
+    }
+    if (!ivrCallState.conferenceName) {
+      setAddParticipantError('Active conference not found');
+      return;
+    }
+    if (!selectedAgentId) {
+      setAddParticipantError('Please select an internal agent');
+      return;
+    }
+
+    setIsAddingParticipant(true);
+    setAddParticipantError('');
+    setAddParticipantSuccess('');
+    try {
+      const res = await apiClient.post('/api/calls/transfer', {
+        callSid: ivrCallState.callSid,
+        transferType: 'warm',
+        agentId: Number(selectedAgentId),
+        conferenceName: ivrCallState.conferenceName
+      });
+      const data = await res.json();
+      if (data?.success) {
+        setAddParticipantSuccess('Participant added. They join muted by default.');
+        setSelectedAgentId('');
+        await loadAvailableAgents();
+      } else {
+        setAddParticipantError(data?.message || 'Failed to add participant');
+      }
+    } catch (err) {
+      console.error('❌ [IVR] Error adding participant:', err);
+      setAddParticipantError(err?.message || 'Failed to add participant');
+    } finally {
+      setIsAddingParticipant(false);
+    }
+  }, [ivrCallState.callSid, ivrCallState.conferenceName, selectedAgentId, loadAvailableAgents]);
 
   // Join IVR conference
   const joinIVRConference = useCallback(async (deviceInstance, conferenceNameToJoin) => {
@@ -1088,8 +1227,16 @@ export default function IVRDialer() {
         participantRole: conferenceEventData?.participantRole
       });
 
-      // Handle specific conference events if needed
-      // For now, just log them
+      // Keep customer hold state in sync with backend conference events.
+      const confEvent = String(conferenceEventData?.event || '').toLowerCase();
+      const role = conferenceEventData?.participantRole;
+      if (role === 'customer') {
+        if (confEvent === 'hold') {
+          setCustomerOnHold(true);
+        } else if (confEvent === 'unhold') {
+          setCustomerOnHold(false);
+        }
+      }
     };
 
     // Register event listeners
@@ -1102,6 +1249,20 @@ export default function IVRDialer() {
       window.removeEventListener('conferenceEvent', handleConferenceEvent);
     };
   }, [ivrCallState.callSid, ivrCallState.conferenceName, ivrCallState.callStatus, getCallStatus, resetIVRCallState]);
+
+  useEffect(() => {
+    const isActiveIvrCall =
+      !!ivrCallState.conferenceName &&
+      (ivrCallState.isConnected || ivrCallState.callStatus === 'in-progress');
+    if (isActiveIvrCall) {
+      loadAvailableAgents();
+      return;
+    }
+    setAvailableAgents([]);
+    setSelectedAgentId('');
+    setAddParticipantError('');
+    setAddParticipantSuccess('');
+  }, [ivrCallState.conferenceName, ivrCallState.isConnected, ivrCallState.callStatus, loadAvailableAgents]);
 
   // Handle making a call
   const handleMakeCall = async (phoneNumber) => {
@@ -1290,6 +1451,7 @@ export default function IVRDialer() {
             ...prev,
             isMuted: !isCurrentlyMuted
           }));
+          void syncIvrConferenceBridgeMute(call, !isCurrentlyMuted);
           console.log(`✅ [IVR] Call ${!isCurrentlyMuted ? 'muted' : 'unmuted'} using SDK mute() method`);
           return;
         } catch (err) {
@@ -1309,6 +1471,7 @@ export default function IVRDialer() {
               ...prev,
               isMuted: !isCurrentlyMuted
             }));
+            void syncIvrConferenceBridgeMute(call, !isCurrentlyMuted);
             console.log(`✅ [IVR] Call ${!isCurrentlyMuted ? 'muted' : 'unmuted'} via local media stream`);
             return;
           }
@@ -1328,6 +1491,7 @@ export default function IVRDialer() {
             ...prev,
             isMuted: !isCurrentlyMuted
           }));
+          void syncIvrConferenceBridgeMute(call, !isCurrentlyMuted);
           console.log(`✅ [IVR] Call ${!isCurrentlyMuted ? 'muted' : 'unmuted'} via getIVRCallStreams`);
           return;
         }
@@ -1339,7 +1503,7 @@ export default function IVRDialer() {
     } catch (err) {
       console.error('❌ [IVR] Error muting/unmuting call:', err);
     }
-  }, [ivrCallState.isConnected, ivrCallState.isMuted, getIVRCallStreams]);
+  }, [ivrCallState.isConnected, ivrCallState.isMuted, getIVRCallStreams, syncIvrConferenceBridgeMute]);
 
   return (
     <IVRDialerModal
@@ -1353,6 +1517,17 @@ export default function IVRDialer() {
       onMakeCall={handleMakeCall}
       onHangup={handleIVRHangup}
       onMute={handleIVRMute}
+      onToggleCustomerHold={toggleIvrCustomerHold}
+      customerOnHold={customerOnHold}
+      customerHoldLoading={customerHoldLoading}
+      availableAgents={availableAgents}
+      isLoadingAgents={isLoadingAgents}
+      selectedAgentId={selectedAgentId}
+      onSelectAgent={setSelectedAgentId}
+      onAddParticipant={handleAddParticipant}
+      isAddingParticipant={isAddingParticipant}
+      addParticipantError={addParticipantError}
+      addParticipantSuccess={addParticipantSuccess}
       // Pass IVR call state
       isConnected={ivrCallState.isConnected}
       isCalling={ivrCallState.isCalling}
