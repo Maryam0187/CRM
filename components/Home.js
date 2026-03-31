@@ -140,6 +140,7 @@ export default function Home() {
     dateFilter: 'today',
     dateField: 'created_at',
     numberSearch: '',
+    idSearch: '',
     searchLastFour: false // Toggle for searching last 4 digits only
   });
   
@@ -148,6 +149,7 @@ export default function Home() {
   const dateFilter = filters.dateFilter;
   const dateField = filters.dateField;
   const numberSearch = filters.numberSearch;
+  const idSearch = filters.idSearch || '';
   const searchLastFour = filters.searchLastFour;
   
   // Other state
@@ -158,6 +160,7 @@ export default function Home() {
   
   // Debounced number search state
   const [debouncedNumberSearch, setDebouncedNumberSearch] = useState(numberSearch);
+  const [debouncedIdSearch, setDebouncedIdSearch] = useState(idSearch);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -277,7 +280,7 @@ export default function Home() {
 
   // Fetch sales data from API
   // options.silent = true: refresh without showing loader (e.g. real-time update from socket)
-  const fetchSalesData = async (statusesFilter = [], dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage, dateFieldValue = dateField, numberSearchValue = numberSearch, searchLastFourValue = searchLastFour, options = {}) => {
+  const fetchSalesData = async (statusesFilter = [], dateFilterValue = dateFilter, agentId = null, page = currentPage, limit = itemsPerPage, dateFieldValue = dateField, numberSearchValue = numberSearch, searchLastFourValue = searchLastFour, idSearchValue = debouncedIdSearch, options = {}) => {
     const { silent = false } = options;
     if (!silent) {
       setLoading(true);
@@ -300,6 +303,9 @@ export default function Home() {
       if (numberSearchValue) {
         params.append('numberSearch', numberSearchValue);
         params.append('searchLastFour', searchLastFourValue ? 'true' : 'false');
+      }
+      if (idSearchValue) {
+        params.append('idSearch', idSearchValue);
       }
       
       // Add pagination parameters
@@ -381,6 +387,17 @@ export default function Home() {
     };
   }, [numberSearch]);
 
+  // Debounce ID search - wait 500ms after user stops typing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedIdSearch(idSearch);
+    }, 500);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [idSearch]);
+
   // Listen for sale_updated from socket: refresh sales table without loader when on home and the update is relevant
   useEffect(() => {
     if (!socket || !isConnected || !user?.id) return;
@@ -393,7 +410,7 @@ export default function Home() {
       const isSupervisorOnAgentTab = user.role === 'supervisor' && !showingSupervisorSales && selectedAgent?.id === agentId;
 
       if (isAgentView || isSupervisorOnAgentTab) {
-        fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, { silent: true });
+        fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, debouncedIdSearch, { silent: true });
       }
     };
 
@@ -402,7 +419,7 @@ export default function Home() {
       socket.off('sale_updated', handleSaleUpdated);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, isConnected, pathname, user?.id, user?.role, showingSupervisorSales, selectedAgent?.id, statuses, dateFilter, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour]);
+  }, [socket, isConnected, pathname, user?.id, user?.role, showingSupervisorSales, selectedAgent?.id, statuses, dateFilter, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, debouncedIdSearch]);
 
   // Load sales data when user, filters, pagination, or supervisor view changes
   useEffect(() => {
@@ -412,17 +429,17 @@ export default function Home() {
     if (user.role === 'supervisor') {
       // Only fetch for supervisors if showingSupervisorSales is set (initialized)
       if (showingSupervisorSales !== undefined) {
-        fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+        fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, debouncedIdSearch);
       }
     } else if (user.role === 'admin') {
       // For admins, pass selectedUserId as agentId parameter
-      fetchSalesData(statuses, dateFilter, selectedUserId, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+      fetchSalesData(statuses, dateFilter, selectedUserId, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, debouncedIdSearch);
     } else {
       // For agents, fetch data directly (no supervisor dependencies)
-      fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+      fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, debouncedIdSearch);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, statuses, dateFilter, dateField, currentPage, itemsPerPage, debouncedNumberSearch, searchLastFour,
+  }, [user, statuses, dateFilter, dateField, currentPage, itemsPerPage, debouncedNumberSearch, searchLastFour, debouncedIdSearch,
       // Supervisor-specific dependencies only trigger for supervisors due to conditional logic above
       selectedAgent, showingSupervisorSales, selectedUserId]);
 
@@ -684,21 +701,21 @@ export default function Home() {
     updateFilter('dateFilter', filterValue);
     setCurrentPage(1); // Reset to first page when changing filters
     // Fetch sales data with the new date filter
-    fetchSalesData(statuses, filterValue, null, 1, itemsPerPage, dateField);
+    fetchSalesData(statuses, filterValue, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, debouncedIdSearch);
   };
 
   const handleStatusChange = (newStatuses) => {
     updateFilter('statuses', newStatuses);
     setCurrentPage(1); // Reset to first page when changing filters
     // Fetch sales data with the new status filter
-    fetchSalesData(newStatuses, dateFilter, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+    fetchSalesData(newStatuses, dateFilter, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, debouncedIdSearch);
   };
 
   const clearStatuses = () => {
     updateFilter('statuses', []);
     setCurrentPage(1); // Reset to first page when clearing filters
     // Fetch sales data without status filter
-    fetchSalesData([], dateFilter, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour);
+    fetchSalesData([], dateFilter, null, 1, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, debouncedIdSearch);
   };
 
   const handleNumberSearchChange = (e) => {
@@ -706,6 +723,18 @@ export default function Home() {
     updateFilter('numberSearch', value);
     setCurrentPage(1); // Reset to first page when changing search
     // Note: Actual search will be triggered by debouncedNumberSearch via useEffect
+  };
+
+  const handleIdSearchChange = (e) => {
+    const value = e.target.value.replace(/\D/g, ''); // Only allow digits
+    updateFilter('idSearch', value);
+    setCurrentPage(1);
+  };
+
+  const clearIdSearch = () => {
+    updateFilter('idSearch', '');
+    setDebouncedIdSearch('');
+    setCurrentPage(1);
   };
 
   const clearNumberSearch = () => {
@@ -720,7 +749,7 @@ export default function Home() {
   };
 
   const handleRefresh = () => {
-    fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage);
+    fetchSalesData(statuses, dateFilter, null, currentPage, itemsPerPage, dateField, debouncedNumberSearch, searchLastFour, debouncedIdSearch);
   };
 
   const handleEdit = (saleId) => {
@@ -925,6 +954,27 @@ export default function Home() {
                       />
                       <span className="font-medium">Last 4 only</span>
                     </label>
+                  )}
+                </div>
+                {/* ID Search */}
+                <div className="w-[170px] flex gap-2 items-start flex-shrink-0">
+                  <input
+                    type="text"
+                    placeholder="Search by ID..."
+                    value={idSearch}
+                    onChange={handleIdSearchChange}
+                    disabled={loading}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 disabled:opacity-50 disabled:cursor-not-allowed h-[42px]"
+                    maxLength={12}
+                  />
+                  {idSearch && (
+                    <button
+                      onClick={clearIdSearch}
+                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200 h-[42px]"
+                      title="Clear ID search"
+                    >
+                      ✕
+                    </button>
                   )}
                 </div>
                 {/* User Filter (Admin only) */}

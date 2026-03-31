@@ -9,12 +9,14 @@ export default function SalesList({ onClose }) {
   // Save filter state to localStorage
   const { filters, updateFilter } = useFilterStorage('salesListFilters', {
     status: '',
-    dateFilter: 'today'
+    dateFilter: 'today',
+    idSearch: ''
   });
   
   // Extract filter values
   const status = filters.status;
   const dateFilter = filters.dateFilter;
+  const idSearch = filters.idSearch;
   
   // Other state
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -96,7 +98,7 @@ export default function SalesList({ onClose }) {
 
   useEffect(() => {
     loadSalesData();
-  }, [currentPage, itemsPerPage, sortBy, sortOrder, status]);
+  }, [currentPage, itemsPerPage, sortBy, sortOrder, status, idSearch]);
 
   const loadSalesData = async () => {
     setLoading(true);
@@ -109,6 +111,13 @@ export default function SalesList({ onClose }) {
       if (status) {
         filteredData = sampleSalesData.filter(sale => 
           sale.status.toLowerCase() === status.toLowerCase()
+        );
+      }
+
+      // Filter by ID
+      if (idSearch.trim()) {
+        filteredData = filteredData.filter((sale) =>
+          String(sale.id).includes(idSearch.trim())
         );
       }
 
@@ -139,8 +148,14 @@ export default function SalesList({ onClose }) {
     setCurrentPage(1); // Reset to first page when filtering
   };
 
-  const clearStatus = () => {
+  const handleIdSearchChange = (e) => {
+    updateFilter('idSearch', e.target.value);
+    setCurrentPage(1);
+  };
+
+  const clearFilters = () => {
     updateFilter('status', '');
+    updateFilter('idSearch', '');
     setCurrentPage(1);
   };
 
@@ -275,6 +290,14 @@ export default function SalesList({ onClose }) {
           {/* Filters */}
           <div className="flex justify-end mb-6">
             <div className="min-w-[250px] flex gap-2">
+              <input
+                id="searchById"
+                type="text"
+                value={idSearch}
+                onChange={handleIdSearchChange}
+                placeholder="Search by ID"
+                className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+              />
               <select
                 id="status"
                 value={status}
@@ -288,7 +311,7 @@ export default function SalesList({ onClose }) {
                 <option value="cancelled">Cancelled</option>
               </select>
               <button
-                onClick={clearStatus}
+                onClick={clearFilters}
                 className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 hover:bg-gray-100 transition-colors duration-200"
               >
                 Clear
