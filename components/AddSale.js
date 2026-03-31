@@ -148,6 +148,7 @@ export default function AddSale() {
   const [hideCheckNumberSection, setHideCheckNumberSection] = useState(false); // Hide Check Number block after call button is clicked
   const fromCreateSaleDialer = !editId && searchParams.get('fromCall') === '1' && !!searchParams.get('landline')?.trim(); // true when opened via Create Sale from dialer/call logs
   const [callJustEnded, setCallJustEnded] = useState(false); // Track if call just ended to highlight action buttons
+  const [isActionsCollapsed, setIsActionsCollapsed] = useState(false); // Collapse sale action bar on smaller laptop screens
   const [sale, setSale] = useState(null); // Store full sale data including cards/banks for tag checking
   const [customerHasPayments, setCustomerHasPayments] = useState(null); // Create mode: whether selected customer has any payment (any sale)
 
@@ -904,6 +905,13 @@ export default function AddSale() {
     // This ensures the UI stays highlighted even after endCall clears the status
     // The callJustEnded flag will remain true until a new call starts
   }, [callStatus]);
+  
+  // Always re-open actions when a call just ended so outcome buttons are visible.
+  useEffect(() => {
+    if (callJustEnded) {
+      setIsActionsCollapsed(false);
+    }
+  }, [callJustEnded]);
 
   // Handle call completion
 
@@ -3245,7 +3253,8 @@ Room: `;
                  getCurrentStep() === 'third' ? ' Processing' : ' Final Actions'}`;
                 })()}
               </h3>
-              <div className="text-sm text-gray-500">
+              <div className="flex items-center gap-3">
+                <div className="text-sm text-gray-500">
                 {/* <div>Status: {saleForm.status || 'New'}</div>
                 <div>Edit Mode: {isEditMode ? 'Yes' : 'No'}</div>
                 <div>Step: {getCurrentStep()}</div> */}
@@ -3258,13 +3267,31 @@ Room: `;
                   }
                   return <div className="text-orange-600 font-medium">Read-only: Admin actions required</div>;
                 })()}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsActionsCollapsed((prev) => !prev)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                  aria-label={isActionsCollapsed ? 'Expand status actions' : 'Collapse status actions'}
+                  title={isActionsCollapsed ? 'Expand actions' : 'Collapse actions'}
+                >
+                  <span>{isActionsCollapsed ? 'Expand Actions' : 'Collapse Actions'}</span>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {isActionsCollapsed ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    )}
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
 
           {/* Call End Page Overlay - Makes customer info and below uneditable */}
           
-
+          {!isActionsCollapsed && (
+            <>
           {/* Step 1: Initial Contact Actions */}
           {getCurrentStep() === 'first' && !showPaymentSection && (
             <div className={`p-4 rounded-lg transition-all duration-500 ${
@@ -3982,6 +4009,8 @@ Room: `;
               );
             }
           })()}
+            </>
+          )}
         </div>
       </div>
 
