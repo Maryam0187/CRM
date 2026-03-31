@@ -69,8 +69,11 @@ async function resolveParticipantRole({ conferenceName, participantId, rawFrom }
         
         // If we only know customer SID and this participant is different, it's agent
         if (customerCallSid && participantId !== customerCallSid) return 'agent';
-        // If we only know agent SID and this participant is different, it's customer
-        if (agentCallSid && participantId !== agentCallSid) return 'customer';
+        // Only agent SID on file: another leg could be PSTN (customer) or a second browser agent (warm transfer).
+        if (agentCallSid && !customerCallSid && participantId !== agentCallSid) {
+          if (isPhoneNumber(fromStr)) return 'customer';
+          return 'agent';
+        }
       }
     } catch (err) {
       console.error('Error querying call log for role resolution:', err.message);

@@ -115,7 +115,10 @@ export default function GlobalWebCallInterface() {
   // Track known CallSids for matching conference participants
   const [knownSids, setKnownSids] = useState({
     customerCallSid: null,
-    agentCallSid: null
+    /** This browser's Voice SDK conference leg (agent_sid_captured). */
+    agentCallSid: null,
+    /** Call log primary / host agent leg — kept for invitees who never saw the host's join event. */
+    hostAgentCallSid: null
   });
   
   // Participant tracking (local state - no Redux)
@@ -189,7 +192,7 @@ export default function GlobalWebCallInterface() {
     if (!callSid) return 'unknown';
     if (knownSids.customerCallSid && callSid === knownSids.customerCallSid) return 'customer';
     if (knownSids.agentCallSid && callSid === knownSids.agentCallSid) return 'agent';
-    // If we know current call sid is customer's
+    if (knownSids.hostAgentCallSid && callSid === knownSids.hostAgentCallSid) return 'agent';
     if (currentCallSid && callSid === currentCallSid) return 'customer';
     return 'unknown';
   };
@@ -1524,10 +1527,10 @@ export default function GlobalWebCallInterface() {
         // Helper: Determine role by matching CallSid with known SIDs
         const determineRole = (sid, providedRole) => {
           if (providedRole && providedRole !== 'unknown') return providedRole;
-          // Match against known customer/agent SIDs
           if (sid && sid === knownSids.customerCallSid) return 'customer';
           if (sid && sid === knownSids.agentCallSid) return 'agent';
-          if (sid && sid === currentCallSid) return 'customer'; // currentCallSid is customer's
+          if (sid && sid === knownSids.hostAgentCallSid) return 'agent';
+          if (sid && sid === currentCallSid) return 'customer';
           return 'unknown';
         };
 
@@ -1547,10 +1550,11 @@ export default function GlobalWebCallInterface() {
             });
             
             // Store both SIDs for future matching
-            setKnownSids(prev => ({
+            setKnownSids((prev) => ({
               ...prev,
               agentCallSid: conferenceEventData.agentCallSid || prev.agentCallSid,
-              customerCallSid: conferenceEventData.customerCallSid || prev.customerCallSid
+              customerCallSid: conferenceEventData.customerCallSid || prev.customerCallSid,
+              hostAgentCallSid: prev.hostAgentCallSid
             }));
             
             // Update/add agent participant
@@ -1579,9 +1583,11 @@ export default function GlobalWebCallInterface() {
             
             // Update known SIDs if provided
             if (eventCustomerSid || eventAgentSid) {
-              setKnownSids(prev => ({
+              setKnownSids((prev) => ({
+                ...prev,
                 customerCallSid: eventCustomerSid || prev.customerCallSid,
-                agentCallSid: eventAgentSid || prev.agentCallSid
+                hostAgentCallSid: eventAgentSid || prev.hostAgentCallSid,
+                agentCallSid: prev.agentCallSid
               }));
             }
             
@@ -1593,6 +1599,7 @@ export default function GlobalWebCallInterface() {
               else if (callSid && callSid === currentCallSid) role = 'customer';
               else if (callSid && callSid === knownSids.customerCallSid) role = 'customer';
               else if (callSid && callSid === knownSids.agentCallSid) role = 'agent';
+              else if (callSid && callSid === knownSids.hostAgentCallSid) role = 'agent';
             }
             
             console.log('👤 [PARTICIPANT JOIN]', { 
@@ -1767,7 +1774,7 @@ export default function GlobalWebCallInterface() {
             // Conference ended - clear all participants
             console.log('🏁 [CONFERENCE END]', conferenceName);
             setParticipants([]);
-            setKnownSids({ customerCallSid: null, agentCallSid: null });
+            setKnownSids({ customerCallSid: null, agentCallSid: null, hostAgentCallSid: null });
             break;
             
           default:
@@ -1878,7 +1885,7 @@ export default function GlobalWebCallInterface() {
     const endedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
     if (callStatus && endedStatuses.includes(callStatus)) {
       setParticipants([]);
-      setKnownSids({ customerCallSid: null, agentCallSid: null });
+      setKnownSids({ customerCallSid: null, agentCallSid: null, hostAgentCallSid: null });
       setIsRecording(false);
       setActiveRecordingSid(null);
     }
@@ -1933,7 +1940,7 @@ export default function GlobalWebCallInterface() {
     // Clear when no longer calling
     if (!conferenceName && !isCalling) {
       setParticipants([]);
-      setKnownSids({ customerCallSid: null, agentCallSid: null });
+      setKnownSids({ customerCallSid: null, agentCallSid: null, hostAgentCallSid: null });
     }
   }, [conferenceName, currentCallSid, isCalling, callMetadata?.customerCallSid]);
 
@@ -2156,6 +2163,37 @@ export default function GlobalWebCallInterface() {
       mutedByDefault: notification.mutedByDefault !== false,
       customerCallSid: inviteCustomerSid || undefined
     });
+
+    // Invitee joins late — they never receive the host's participant-join event. Seed roster from snapshot.
+    const snapList = notification.participantSnapshot?.participants;
+    if (snapList && snapList.length > 0) {
+      setParticipants(
+        snapList.map((p, i) => {
+          const ca = p.callSid && String(p.callSid).startsWith('CA') ? p.callSid : null;
+          return {
+            callSid: ca || `seed-${p.role ?? 'p'}-${p.userId ?? i}`,
+            role: p.role === 'customer' ? 'customer' : p.role === 'agent' ? 'agent' : 'participant',
+            status: 'connected',
+            muted: p.muted === true,
+            hold: p.hold === true,
+            displayName: p.displayName || null
+          };
+        })
+      );
+    }
+    const hostEntry =
+      snapList?.find((p) => p.role === 'agent' && p.isPrimaryHost) ||
+      snapList?.find((p) => p.role === 'agent');
+    const hostSid =
+      hostEntry?.callSid && String(hostEntry.callSid).startsWith('CA') ? hostEntry.callSid : null;
+    if (inviteCustomerSid || hostSid) {
+      setKnownSids((prev) => ({
+        ...prev,
+        ...(inviteCustomerSid ? { customerCallSid: prev.customerCallSid || inviteCustomerSid } : {}),
+        ...(hostSid ? { hostAgentCallSid: prev.hostAgentCallSid || hostSid } : {})
+      }));
+    }
+
     setAddParticipantSuccess('');
     setAddParticipantError('');
   }, [pendingParticipantInvite, startCall]);
@@ -2468,7 +2506,9 @@ export default function GlobalWebCallInterface() {
                       p.role === 'customer'
                         ? (callMetadata?.customerName || callMetadata?.phoneNumber || 'Customer')
                         : p.role === 'agent'
-                        ? (isCurrentAgent ? (user?.firstName || user?.name || 'You') : 'Agent')
+                        ? (isCurrentAgent
+                            ? (user?.firstName || user?.name || 'You')
+                            : p.displayName || 'Agent')
                         : 'Participant';
 
                     return (
