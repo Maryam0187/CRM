@@ -122,6 +122,15 @@ module.exports = (sequelize) => {
       allowNull: true,
       field: 'promotional_bill'
     },
+    charge: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true
+    },
+    verifiedOn: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: 'verified_on'
+    },
     bundle: {
       type: DataTypes.ENUM('yes', 'no'),
       allowNull: true

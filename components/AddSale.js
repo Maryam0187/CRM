@@ -271,6 +271,8 @@ export default function AddSale() {
         { label: 'Security Answer', value: saleForm.answer },
         { label: 'Regular Bill', value: saleForm.regularBill },
         { label: 'Promotional Bill', value: saleForm.promotionalBill },
+        { label: 'Charge', value: saleForm.charge },
+        { label: 'Verified On', value: saleForm.verifiedOn },
         { label: 'Bundle', value: saleForm.bundle },
         { label: 'Company', value: saleForm.company },
         { label: 'Last Payment', value: saleForm.lastPayment },
@@ -319,6 +321,8 @@ export default function AddSale() {
     answer: '',
     regularBill: '',
     promotionalBill: '',
+    charge: '',
+    verifiedOn: '',
     bundle: '',
     company: '',
     lastPayment: '',
@@ -550,6 +554,8 @@ export default function AddSale() {
           answer: sale.securityAnswer || '',
           regularBill: sale.regularBill || '',
           promotionalBill: sale.promotionalBill || '',
+          charge: sale.charge || '',
+          verifiedOn: sale.verifiedOn || '',
           bundle: sale.bundle || '',
           company: sale.company || '',
           lastPayment: sale.lastPayment || '',
@@ -1222,7 +1228,7 @@ export default function AddSale() {
   const handleSaleFormChange = (field, value) => {
     // Format input based on field type
     let formattedValue = value;
-    if (field === 'regularBill' || field === 'promotionalBill' || field === 'lastPayment' || field === 'balance') {
+    if (field === 'regularBill' || field === 'promotionalBill' || field === 'charge' || field === 'lastPayment' || field === 'balance') {
       formattedValue = formatCurrency(value);
     }
     // Note: techVisitTime uses predefined options like "8am - 12pm", so no formatting needed
@@ -2353,6 +2359,8 @@ Room: `;
         securityAnswer: sanitizeValue(saleForm.answer),
         regularBill: sanitizeValue(saleForm.regularBill),
         promotionalBill: sanitizeValue(saleForm.promotionalBill),
+        charge: sanitizeValue(saleForm.charge),
+        verifiedOn: sanitizeValue(saleForm.verifiedOn),
         bundle: sanitizeEnumValue(saleForm.bundle),
         company: sanitizeValue(saleForm.company),
         lastPayment: sanitizeValue(saleForm.lastPayment),
@@ -3008,6 +3016,8 @@ Room: `;
         securityAnswer: sanitizeValue(saleForm.answer),
         regularBill: sanitizeValue(saleForm.regularBill),
         promotionalBill: sanitizeValue(saleForm.promotionalBill),
+        charge: sanitizeValue(saleForm.charge),
+        verifiedOn: sanitizeValue(saleForm.verifiedOn),
         bundle: sanitizeEnumValue(saleForm.bundle),
         company: sanitizeValue(saleForm.company),
         lastPayment: sanitizeValue(saleForm.lastPayment),
@@ -5213,6 +5223,41 @@ Room: `;
                       placeholder="$123.45"
                     />
                   </div>
+                </div>
+
+                {/* Charge */}
+                <div>
+                  <label htmlFor="charge" className="block mb-2 text-sm font-medium text-gray-900">
+                    Charge
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                      <span className="text-gray-500">$</span>
+                    </div>
+                    <input
+                      type="text"
+                      id="charge"
+                      value={saleForm.charge}
+                      onChange={(e) => handleSaleFormChange('charge', e.target.value)}
+                      className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full pl-10 p-2.5"
+                      placeholder="$123.45"
+                    />
+                  </div>
+                </div>
+
+                {/* Verified On */}
+                <div>
+                  <label htmlFor="verifiedOn" className="block mb-2 text-sm font-medium text-gray-900">
+                    Verified On
+                  </label>
+                  <input
+                    type="text"
+                    id="verifiedOn"
+                    value={saleForm.verifiedOn}
+                    onChange={(e) => handleSaleFormChange('verifiedOn', e.target.value)}
+                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                    placeholder="Enter verification note/date"
+                  />
                 </div>
 
                 {/* Bundled */}
