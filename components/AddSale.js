@@ -96,18 +96,14 @@ const getTimeAgo = (dateString) => {
   }
 };
 
-/** True when the sale is in the first workflow step (initial contact statuses). Uses existing API `lastSale.status` only. */
-function isFirstWorkflowStageSale(sale) {
-  return !!(sale?.status && getStepForStatus(sale.status) === 'first');
-}
-
 /**
  * Who may see "Go to previous sale": owning agent, admin (any sale), or supervisor (supervised agents only).
+ * Any last/previous sale qualifies (no status filter).
  */
 function shouldShowGoToPreviousSaleButton(sale, user) {
-  if (!isFirstWorkflowStageSale(sale) || !user) return false;
+  if (!sale?.id || !user) return false;
   const agentId = sale.agent?.id;
-  if (agentId == null) return false;
+  if (agentId == null) return isAdmin(user);
   if (isAdmin(user)) return true;
   if (Number(user.id) === Number(agentId)) return true;
   if (
@@ -5742,6 +5738,27 @@ Room: `;
                                     </div>
                                   );
                                 })()}
+                                {shouldShowGoToPreviousSaleButton(customer.lastSale, user) && (
+                                    <div
+                                      className="mt-2"
+                                      onClick={(e) => e.stopPropagation()}
+                                      onKeyDown={(e) => e.stopPropagation()}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setShowCustomerDialog(false);
+                                          setCustomerWarning(null);
+                                          setIsCheckNumberMode(false);
+                                          router.push(`/add-sale?id=${customer.lastSale.id}`);
+                                        }}
+                                        className="px-2.5 py-1 text-xs font-medium text-amber-900 bg-amber-100 border border-amber-300 rounded-md hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                                      >
+                                        Go to previous sale
+                                      </button>
+                                    </div>
+                                  )}
                               </div>
                             )}
                             {!customer.lastSale && (
@@ -5762,34 +5779,6 @@ Room: `;
                     </div>
                   ))}
                 </div>
-
-                {isCheckNumberMode && (() => {
-                  const sel = customerWarning.selectedCustomerId;
-                  const list = customerWarning.landlineCustomers ?? [];
-                  let cust = sel ? list.find((c) => c.id === sel) : null;
-                  if (!cust && customerWarning.hasExactMatch && customerWarning.exactMatchCustomer) {
-                    cust = customerWarning.exactMatchCustomer;
-                  }
-                  const ls = cust?.lastSale;
-                  if (!shouldShowGoToPreviousSaleButton(ls, user)) return null;
-                  return (
-                    <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <p className="text-xs text-amber-900 mb-2">Go to the previous sale in the first workflow stage.</p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowCustomerDialog(false);
-                          setCustomerWarning(null);
-                          setIsCheckNumberMode(false);
-                          router.push(`/add-sale?id=${ls.id}`);
-                        }}
-                        className="w-full px-3 py-2 text-sm font-medium text-amber-900 bg-amber-100 border border-amber-300 rounded-md hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400"
-                      >
-                        Go to previous sale
-                      </button>
-                    </div>
-                  );
-                })()}
                 
                 {/* Only show "Create New Customer" button if there's no exact match */}
                 {!customerWarning.hasExactMatch && (
