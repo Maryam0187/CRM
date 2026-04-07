@@ -96,6 +96,29 @@ const getTimeAgo = (dateString) => {
   }
 };
 
+/** True when the sale is in the first workflow step (initial contact statuses). Uses existing API `lastSale.status` only. */
+function isFirstWorkflowStageSale(sale) {
+  return !!(sale?.status && getStepForStatus(sale.status) === 'first');
+}
+
+/**
+ * Who may see "Go to previous sale": owning agent, admin (any sale), or supervisor (supervised agents only).
+ */
+function shouldShowGoToPreviousSaleButton(sale, user) {
+  if (!isFirstWorkflowStageSale(sale) || !user) return false;
+  const agentId = sale.agent?.id;
+  if (agentId == null) return false;
+  if (isAdmin(user)) return true;
+  if (Number(user.id) === Number(agentId)) return true;
+  if (
+    isSupervisor(user) &&
+    user.supervisedAgents?.some((a) => Number(a.id) === Number(agentId))
+  ) {
+    return true;
+  }
+  return false;
+}
+
 
 export default function AddSale() {
   const router = useRouter();
@@ -4395,6 +4418,17 @@ Room: `;
                               {lastSaleInfo.lastSale.notes && (
                                 <div><strong>Notes:</strong> {lastSaleInfo.lastSale.notes}</div>
                               )}
+                              {shouldShowGoToPreviousSaleButton(lastSaleInfo.lastSale, user) && (
+                                <div className="mt-2 pt-2 border-t border-blue-100">
+                                  <button
+                                    type="button"
+                                    onClick={() => router.push(`/add-sale?id=${lastSaleInfo.lastSale.id}`)}
+                                    className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-amber-900 bg-amber-100 border border-amber-300 rounded-md hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                                  >
+                                    Go to previous sale
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <div className="text-gray-600 text-xs italic">
@@ -4512,6 +4546,17 @@ Room: `;
                               })()}
                               {lastSaleInfo.lastSale.notes && (
                                 <div><strong>Notes:</strong> {lastSaleInfo.lastSale.notes}</div>
+                              )}
+                              {shouldShowGoToPreviousSaleButton(lastSaleInfo.lastSale, user) && (
+                                <div className="mt-2 pt-2 border-t border-gray-200">
+                                  <button
+                                    type="button"
+                                    onClick={() => router.push(`/add-sale?id=${lastSaleInfo.lastSale.id}`)}
+                                    className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-amber-900 bg-amber-100 border border-amber-300 rounded-md hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                                  >
+                                    Go to previous sale
+                                  </button>
+                                </div>
                               )}
                             </div>
                           ) : (
@@ -5678,11 +5723,25 @@ Room: `;
                                     {getStatusDisplayName(customer.lastSale.status) || customer.lastSale.status}
                                   </span>
                                 </div>
-                                {customer.lastSale.agent && user && 
-                                 (user.id === customer.lastSale.agent.id || 
-                                  (user.firstName === customer.lastSale.agent.firstName && user.lastName === customer.lastSale.agent.lastName)) && (
-                                  <div><strong>Agent:</strong> {customer.lastSale.agent.firstName} {customer.lastSale.agent.lastName}</div>
-                                )}
+                                {customer.lastSale.agent && user && (() => {
+                                  const agentId = customer.lastSale.agent.id;
+                                  const canShow =
+                                    isAdmin(user) ||
+                                    user.id === agentId ||
+                                    (user.firstName === customer.lastSale.agent.firstName &&
+                                      user.lastName === customer.lastSale.agent.lastName) ||
+                                    (isSupervisor(user) &&
+                                      user.supervisedAgents?.some((a) => a.id === agentId));
+                                  if (!canShow) {
+                                    return <div><strong>Agent:</strong> Other agent</div>;
+                                  }
+                                  return (
+                                    <div>
+                                      <strong>Agent:</strong> {customer.lastSale.agent.firstName}{' '}
+                                      {customer.lastSale.agent.lastName}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             )}
                             {!customer.lastSale && (
@@ -5703,6 +5762,34 @@ Room: `;
                     </div>
                   ))}
                 </div>
+
+                {isCheckNumberMode && (() => {
+                  const sel = customerWarning.selectedCustomerId;
+                  const list = customerWarning.landlineCustomers ?? [];
+                  let cust = sel ? list.find((c) => c.id === sel) : null;
+                  if (!cust && customerWarning.hasExactMatch && customerWarning.exactMatchCustomer) {
+                    cust = customerWarning.exactMatchCustomer;
+                  }
+                  const ls = cust?.lastSale;
+                  if (!shouldShowGoToPreviousSaleButton(ls, user)) return null;
+                  return (
+                    <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <p className="text-xs text-amber-900 mb-2">Go to the previous sale in the first workflow stage.</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCustomerDialog(false);
+                          setCustomerWarning(null);
+                          setIsCheckNumberMode(false);
+                          router.push(`/add-sale?id=${ls.id}`);
+                        }}
+                        className="w-full px-3 py-2 text-sm font-medium text-amber-900 bg-amber-100 border border-amber-300 rounded-md hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      >
+                        Go to previous sale
+                      </button>
+                    </div>
+                  );
+                })()}
                 
                 {/* Only show "Create New Customer" button if there's no exact match */}
                 {!customerWarning.hasExactMatch && (
@@ -5717,7 +5804,7 @@ Room: `;
                         }));
                       }}
                       className={`w-full text-left p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer ${
-                        !customerWarning.selectedCustomerId
+                        customerWarning.selectedCustomerId === null
                           ? 'bg-green-100 border-green-400 text-green-800 shadow-md'
                           : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-green-50 hover:border-green-300 hover:shadow-sm'
                       }`}
@@ -5731,7 +5818,7 @@ Room: `;
                             This will create a new customer with the entered name
                           </div>
                         </div>
-                        {!customerWarning.selectedCustomerId && (
+                        {customerWarning.selectedCustomerId === null && (
                           <div className="ml-2">
                             <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
                               <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
@@ -5974,6 +6061,20 @@ Room: `;
                         })()}
                         {lastSaleInfo.lastSale.notes && (
                           <p><span className="font-medium">Notes:</span> {lastSaleInfo.lastSale.notes}</p>
+                        )}
+                        {shouldShowGoToPreviousSaleButton(lastSaleInfo.lastSale, user) && (
+                          <div className="mt-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowCustomerInfoModal(false);
+                                router.push(`/add-sale?id=${lastSaleInfo.lastSale.id}`);
+                              }}
+                              className="w-full px-3 py-2 text-sm font-medium text-amber-900 bg-amber-100 border border-amber-300 rounded-md hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            >
+                              Go to previous sale
+                            </button>
+                          </div>
                         )}
                       </div>
                     ) : (
