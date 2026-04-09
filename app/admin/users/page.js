@@ -296,6 +296,11 @@ export default function AdminUsersPage() {
   };
 
   const visibleColumns = columnConfig.filter(c => c.visible);
+  const userColumnIsFirst = visibleColumns[0]?.id === 'user';
+  const stickyUserBase =
+    userColumnIsFirst
+      ? 'sticky left-0 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)]'
+      : '';
 
   // Sort users: online first, then away, then offline; within same status sort by last seen (most recent first), then by name
   const statusOrder = { online: 0, away: 1, offline: 2 };
@@ -392,7 +397,12 @@ export default function AdminUsersPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     {visibleColumns.map((col) => (
-                      <th key={col.id} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th
+                        key={col.id}
+                        className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${
+                          col.id === 'user' && userColumnIsFirst ? `${stickyUserBase} z-20 bg-gray-50` : ''
+                        }`}
+                      >
                         {col.label}
                       </th>
                     ))}
@@ -409,7 +419,7 @@ export default function AdminUsersPage() {
                     sortedUsers.map((userItem) => (
                       <tr 
                         key={userItem.id} 
-                        className="hover:bg-gray-50 cursor-pointer"
+                        className="group hover:bg-gray-50 cursor-pointer"
                         onClick={() => setSelectedUser(userItem)}
                       >
                         {visibleColumns.map((col) => {
@@ -417,7 +427,14 @@ export default function AdminUsersPage() {
                           const cellClass = 'px-6 py-4 whitespace-nowrap text-sm';
                           if (key === 'user') {
                             return (
-                              <td key={col.id} className={cellClass}>
+                              <td
+                                key={col.id}
+                                className={`${cellClass} ${
+                                  userColumnIsFirst
+                                    ? `${stickyUserBase} z-10 bg-white group-hover:bg-gray-50`
+                                    : ''
+                                }`}
+                              >
                                 <div className="flex items-center">
                                   <div className="flex-shrink-0 h-10 w-10">
                                     <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
