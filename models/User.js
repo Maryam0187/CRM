@@ -171,6 +171,13 @@ module.exports = (sequelize) => {
       field: 'twilio_enabled',
       comment: 'Enable/disable Twilio calling functionality for user'
     },
+    requireLocationForLogin: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+      field: 'require_location_for_login',
+      comment: 'When false, user may sign in without browser location permission'
+    },
     additionalInfo: {
       type: DataTypes.TEXT,
       allowNull: true,

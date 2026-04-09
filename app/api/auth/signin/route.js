@@ -23,22 +23,6 @@ export async function POST(request) {
       );
     }
 
-    // Location is REQUIRED for login
-    if (!location || !location.latitude || !location.longitude) {
-      return NextResponse.json(
-        { error: 'Location access is required to login. Please enable location services and grant permission.' },
-        { status: 400 }
-      );
-    }
-
-    // Validate location permission
-    if (!locationPermission || locationPermission === 'denied') {
-      return NextResponse.json(
-        { error: 'Location permission is required to login. Please grant location permission in your browser settings.' },
-        { status: 400 }
-      );
-    }
-
     // Find user by email with supervisor/agent information based on role
     const user = await User.findOne({
       where: { email: email.toLowerCase() },
@@ -92,6 +76,22 @@ export async function POST(request) {
         { error: 'Invalid email or password' },
         { status: 401 }
       );
+    }
+
+    const requireLocationForLogin = user.requireLocationForLogin !== false;
+    if (requireLocationForLogin) {
+      if (!location || !location.latitude || !location.longitude) {
+        return NextResponse.json(
+          { error: 'Location access is required to login. Please enable location services and grant permission.' },
+          { status: 400 }
+        );
+      }
+      if (!locationPermission || locationPermission === 'denied') {
+        return NextResponse.json(
+          { error: 'Location permission is required to login. Please grant location permission in your browser settings.' },
+          { status: 400 }
+        );
+      }
     }
 
     // Update user status to online and record login time
@@ -292,6 +292,7 @@ export async function POST(request) {
       location_timestamp: user.locationTimestamp,
       location_permission: user.locationPermission,
       twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
+      require_location_for_login: user.requireLocationForLogin !== false,
       supervisor: supervisorInfo,
       supervisedAgents: supervisedAgents,
     };

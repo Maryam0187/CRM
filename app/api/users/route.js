@@ -17,7 +17,7 @@ export async function GET(request) {
     }
 
     const users = await User.findAll({
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'lastSeenAt', 'cnic', 'phone', 'address', 'additionalInfo', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'twilioEnabled', 'created_at', 'updated_at'],
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'status', 'lastLoginTime', 'lastLogoutTime', 'lastSeenAt', 'cnic', 'phone', 'address', 'additionalInfo', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'twilioEnabled', 'requireLocationForLogin', 'created_at', 'updated_at'],
       include: [
         {
           model: require('../../../models').SupervisorAgent,
@@ -63,6 +63,7 @@ export async function GET(request) {
         location_permission: user.locationPermission,
         call_status: user.callStatus || 'offline',
         twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
+        require_location_for_login: user.requireLocationForLogin !== false,
         additional_info: user.additionalInfo ?? null,
         superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
         supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
@@ -107,7 +108,8 @@ export async function POST(request) {
       cnic,
       address,
       additional_info,
-      superiorId
+      superiorId,
+      require_location_for_login
     } = await request.json();
 
     // Validate required fields
@@ -161,7 +163,8 @@ export async function POST(request) {
       phone: phone || null,
       address: address || null,
       additionalInfo: additional_info && additional_info.trim() ? additional_info.trim() : null,
-      callStatus: 'offline'
+      callStatus: 'offline',
+      requireLocationForLogin: typeof require_location_for_login === 'boolean' ? require_location_for_login : true
     });
 
     // If it's a lead agent and superiorId is provided, create supervisor relationship
@@ -187,6 +190,7 @@ export async function POST(request) {
       address: newUser.address,
       additional_info: newUser.additionalInfo ?? null,
       call_status: newUser.callStatus || 'offline',
+      require_location_for_login: newUser.requireLocationForLogin !== false,
       created_at: newUser.created_at
     };
 

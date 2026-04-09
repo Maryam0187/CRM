@@ -66,18 +66,15 @@ export default function SignIn() {
     setErrors({});
     
     try {
-      // Location is REQUIRED for login - check permission and get location
       let permissionStatus = 'not_set';
       let location = null;
-      
+
       try {
         permissionStatus = await checkGeolocationPermission();
         console.log('📍 Location permission status:', permissionStatus);
-        
-        // Location is required - try to get it (with fallback if timeout)
+
         if (permissionStatus === 'granted' || permissionStatus === 'prompt') {
           try {
-            // Prefer high accuracy; accept cached location up to 1 min old for faster login
             try {
               location = await getUserLocation({
                 timeout: 20000,
@@ -85,7 +82,6 @@ export default function SignIn() {
                 enableHighAccuracy: true
               });
             } catch (firstError) {
-              // If timeout or unavailable, retry with lower accuracy (faster: uses network/cell/wifi)
               if (firstError.message?.includes('timeout') || firstError.message?.includes('unavailable')) {
                 console.warn('📍 High-accuracy location failed, retrying with network location...');
                 location = await getUserLocation({
@@ -98,39 +94,25 @@ export default function SignIn() {
               }
             }
             console.log('📍 Location retrieved successfully:', {
-              latitude: location.latitude,
-              longitude: location.longitude,
-              accuracy: location.accuracy
+              latitude: location?.latitude,
+              longitude: location?.longitude,
+              accuracy: location?.accuracy
             });
-            // If we got location, permission should be granted
             if (location) {
               permissionStatus = 'granted';
             }
           } catch (locationError) {
             console.error('❌ Could not get location:', locationError.message);
-            // User explicitly denied (e.g. clicked "Block" on browser prompt) → block login
-            if (locationError.message.includes('denied')) {
+            if (locationError.message?.includes('denied')) {
               permissionStatus = 'denied';
-              setErrors({
-                submit: 'Location access is required to login. Please enable location in your browser settings and try again.'
-              });
-              setIsLoading(false);
-              return;
             }
-            // Timeout, unavailable, or other technical/network issue → allow login without location
             location = null;
           }
         } else if (permissionStatus === 'denied') {
-          // User had previously denied location → block login
-          console.warn('📍 Location permission denied by user.');
-          setErrors({
-            submit: 'Location access is required to login. Please enable location services in your browser settings and try again.'
-          });
-          setIsLoading(false);
-          return;
+          console.warn('📍 Location permission denied by user (server may still allow sign-in for this account).');
+          location = null;
         }
       } catch (permissionError) {
-        // Permission check failed (network/API/unsupported) → allow login without location
         console.error('❌ Could not check location permission:', permissionError.message);
         location = null;
         permissionStatus = 'unknown';
@@ -319,7 +301,7 @@ export default function SignIn() {
                 type="submit"
                 disabled={isLoading}
                 className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
-                  isLoading 
+                  isLoading
                     ? 'bg-blue-400 cursor-not-allowed' 
                     : 'bg-blue-600 hover:bg-blue-700'
                 } transition-colors duration-200`}

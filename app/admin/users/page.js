@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
 import { useSocket } from '../../../contexts/SocketContext';
@@ -23,6 +24,7 @@ const DEFAULT_COLUMNS = [
   { id: 'online_status', label: 'Online Status', key: 'online_status', visible: true },
   { id: 'last_seen', label: 'Last seen', key: 'last_seen', visible: true },
   { id: 'created', label: 'Created', key: 'created', visible: true },
+  { id: 'loc_signin', label: 'Loc. sign-in', key: 'loc_signin', visible: true },
   { id: 'actions', label: 'Actions', key: 'actions', visible: true },
 ];
 
@@ -66,7 +68,41 @@ export default function AdminUsersPage() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [columnConfig, setColumnConfig] = useState([]);
   const [showColumnConfig, setShowColumnConfig] = useState(false);
+  const [userActionsMenu, setUserActionsMenu] = useState(null);
   const { socket, isConnected } = useSocket();
+
+  const toggleUserActionsMenu = useCallback((e, userItem) => {
+    e.stopPropagation();
+    const el = e.currentTarget;
+    if (!el) return;
+
+    // Read geometry here: React clears e.currentTarget before setState updaters run.
+    const rect = el.getBoundingClientRect();
+    const w = 224;
+    const left = Math.max(8, Math.min(rect.right - w, window.innerWidth - w - 8));
+    const top = rect.bottom + 4;
+
+    setUserActionsMenu((prev) => {
+      if (prev?.userItem.id === userItem.id) return null;
+      return { userItem, top, left };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!userActionsMenu) return;
+    const close = () => setUserActionsMenu(null);
+    const onKey = (ev) => {
+      if (ev.key === 'Escape') close();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [userActionsMenu]);
 
   useEffect(() => {
     setColumnConfig(loadColumnConfig());
@@ -161,6 +197,32 @@ export default function AdminUsersPage() {
     } catch (err) {
       showError('Failed to update user status');
       console.error('Error updating user status:', err);
+    }
+  };
+
+  const handleToggleUserRequireLocation = async (userId, currentRequired) => {
+    if (!user) {
+      setError('User not authenticated');
+      return;
+    }
+    try {
+      const response = await apiClient.put(`/api/users/${userId}`, {
+        require_location_for_login: !currentRequired
+      });
+      const data = await response.json();
+      if (data.success) {
+        showSuccess(
+          !currentRequired
+            ? 'Location is now required for this user to sign in.'
+            : 'This user can now sign in without location permission.'
+        );
+        fetchUsers();
+      } else {
+        showError(data.error || 'Failed to update location sign-in setting');
+      }
+    } catch (err) {
+      showError('Failed to update location sign-in setting');
+      console.error(err);
     }
   };
 
@@ -435,20 +497,42 @@ export default function AdminUsersPage() {
                             const timeStr = d.toLocaleTimeString();
                             return <td key={col.id} className={`${cellClass} text-gray-500`}>{userItem.last_seen_at ? `${dateStr}, ${timeStr}` : '—'}</td>;
                           }
+                          if (key === 'loc_signin') {
+                            const req = userItem.require_location_for_login !== false;
+                            return (
+                              <td key={col.id} className={cellClass}>
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                  req ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700'
+                                }`}>
+                                  {req ? 'Required' : 'Optional'}
+                                </span>
+                              </td>
+                            );
+                          }
                           if (key === 'created') return <td key={col.id} className={`${cellClass} text-gray-500`}>{new Date(userItem.created_at).toLocaleDateString()}</td>;
                           if (key === 'actions') {
                             return (
                               <td key={col.id} className={`${cellClass} font-medium`}>
-                                <div className="flex space-x-2 flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
-                                  <button onClick={() => handleEditUser(userItem)} className="text-blue-600 hover:text-blue-900">Edit</button>
-                                  <button onClick={() => handleForceLogoutClick(userItem.id, `${userItem.first_name} ${userItem.last_name}`)} className="text-orange-600 hover:text-orange-900" title="Force logout user from all devices">Force Logout</button>
-                                  <button onClick={() => handleToggleUserStatus(userItem.id, userItem.is_active)} className={userItem.is_active ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'}>{userItem.is_active ? 'Deactivate' : 'Activate'}</button>
+                                <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                                   <button
-                                    onClick={(e) => { e.stopPropagation(); handleToggleTwilio(userItem.id, userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true); }}
-                                    className={(userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) ? 'text-orange-600 hover:text-orange-900' : 'text-blue-600 hover:text-blue-900'}
-                                    title={(userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) ? 'Disable Twilio calling' : 'Enable Twilio calling'}
+                                    type="button"
+                                    onClick={() => handleEditUser(userItem)}
+                                    className="text-blue-600 hover:text-blue-900 text-sm font-medium px-2 py-1 rounded-md hover:bg-blue-50"
                                   >
-                                    {(userItem.twilio_enabled !== undefined ? userItem.twilio_enabled : true) ? '📞 Disable Twilio' : '📞 Enable Twilio'}
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => toggleUserActionsMenu(e, userItem)}
+                                    className={`p-1.5 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900 ${
+                                      userActionsMenu?.userItem.id === userItem.id ? 'bg-gray-100 text-gray-900' : ''
+                                    }`}
+                                    aria-label="More actions"
+                                    title="More actions"
+                                  >
+                                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+                                      <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+                                    </svg>
                                   </button>
                                 </div>
                               </td>
@@ -574,6 +658,84 @@ export default function AdminUsersPage() {
             </div>
           }
         />
+
+        {userActionsMenu &&
+          typeof document !== 'undefined' &&
+          createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-[100]"
+                onClick={() => setUserActionsMenu(null)}
+                aria-hidden
+              />
+              <div
+                role="menu"
+                className="fixed z-[101] w-56 rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-xl"
+                style={{ top: userActionsMenu.top, left: userActionsMenu.left }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full px-3 py-2 text-left text-gray-700 hover:bg-gray-50"
+                  onClick={() => {
+                    const u = userActionsMenu.userItem;
+                    setUserActionsMenu(null);
+                    handleForceLogoutClick(u.id, `${u.first_name} ${u.last_name}`);
+                  }}
+                >
+                  Force logout
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={`w-full px-3 py-2 text-left hover:bg-gray-50 ${
+                    userActionsMenu.userItem.is_active ? 'text-red-700' : 'text-green-700'
+                  }`}
+                  onClick={() => {
+                    const u = userActionsMenu.userItem;
+                    setUserActionsMenu(null);
+                    handleToggleUserStatus(u.id, u.is_active);
+                  }}
+                >
+                  {userActionsMenu.userItem.is_active ? 'Deactivate account' : 'Activate account'}
+                </button>
+                <div className="my-1 border-t border-gray-100" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full px-3 py-2 text-left text-gray-700 hover:bg-gray-50"
+                  onClick={() => {
+                    const u = userActionsMenu.userItem;
+                    const twilioOn = u.twilio_enabled !== undefined ? u.twilio_enabled : true;
+                    setUserActionsMenu(null);
+                    handleToggleTwilio(u.id, twilioOn);
+                  }}
+                >
+                  {(userActionsMenu.userItem.twilio_enabled !== undefined
+                    ? userActionsMenu.userItem.twilio_enabled
+                    : true)
+                    ? 'Disable Twilio'
+                    : 'Enable Twilio'}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full px-3 py-2 text-left text-gray-700 hover:bg-gray-50"
+                  onClick={() => {
+                    const u = userActionsMenu.userItem;
+                    const locReq = u.require_location_for_login !== false;
+                    setUserActionsMenu(null);
+                    handleToggleUserRequireLocation(u.id, locReq);
+                  }}
+                >
+                  {userActionsMenu.userItem.require_location_for_login !== false
+                    ? 'Allow sign-in without location'
+                    : 'Require location for sign-in'}
+                </button>
+              </div>
+            </>,
+            document.body
+          )}
 
       </div>
       </AdminRoute>

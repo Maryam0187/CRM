@@ -20,7 +20,8 @@ export default function UserForm({ user, onClose, onSuccess }) {
     cnic: '',
     address: '',
     additional_info: '',
-    superiorId: ''
+    superiorId: '',
+    require_location_for_login: true
   });
   
   const [roles, setRoles] = useState([]);
@@ -52,7 +53,8 @@ export default function UserForm({ user, onClose, onSuccess }) {
         cnic: user.cnic ? formatCNIC(user.cnic) : '',
         address: user.address || '',
         additional_info: user.additional_info || '',
-        superiorId: user.superiorId || ''
+        superiorId: user.superiorId || '',
+        require_location_for_login: user.require_location_for_login !== false
       });
       
       // Ensure admin role is always set for admin users
@@ -82,6 +84,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
         address: '',
         additional_info: '',
         superiorId: '',
+        require_location_for_login: true,
         extension: '',
         sip_username: '',
         sip_password: '',
@@ -105,6 +108,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
         address: '',
         additional_info: '',
         superiorId: '',
+        require_location_for_login: true,
         extension: '',
         sip_username: '',
         sip_password: '',
@@ -192,8 +196,9 @@ export default function UserForm({ user, onClose, onSuccess }) {
   };
 
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    
+    const { name, value, type, checked } = e.target;
+    const nextValue = type === 'checkbox' ? checked : value;
+
     // Format CNIC input
     if (name === 'cnic') {
       const formattedValue = formatCNIC(value);
@@ -213,7 +218,7 @@ export default function UserForm({ user, onClose, onSuccess }) {
     else {
       setFormData(prev => ({
         ...prev,
-        [name]: value
+        [name]: nextValue
       }));
     }
 
@@ -352,7 +357,8 @@ export default function UserForm({ user, onClose, onSuccess }) {
         phone: formData.phone ? formData.phone.replace(/\D/g, '') : '',
         cnic: formData.cnic ? formData.cnic.replace(/\D/g, '') : '',
         address: formData.address,
-        additional_info: formData.additional_info ? formData.additional_info.trim() : ''
+        additional_info: formData.additional_info ? formData.additional_info.trim() : '',
+        require_location_for_login: !!formData.require_location_for_login
       };
 
       // Only include role if not editing an admin user
@@ -534,6 +540,25 @@ export default function UserForm({ user, onClose, onSuccess }) {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-vertical"
                 placeholder="Enter any additional information for this user"
               />
+            </div>
+
+            <div className="md:col-span-2 flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <input
+                type="checkbox"
+                id="require_location_for_login"
+                name="require_location_for_login"
+                checked={!!formData.require_location_for_login}
+                onChange={handleInputChange}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <div>
+                <label htmlFor="require_location_for_login" className="text-sm font-medium text-gray-900 cursor-pointer">
+                  Require browser location to sign in
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  When unchecked, this user can sign in without granting location permission.
+                </p>
+              </div>
             </div>
 
             {/* Role */}

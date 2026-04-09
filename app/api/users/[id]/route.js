@@ -18,7 +18,7 @@ export async function GET(request, { params }) {
     const userId = (await params).id;
 
     const user = await User.findByPk(userId, {
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'additionalInfo', 'status', 'lastLoginTime', 'lastLogoutTime', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'twilioEnabled', 'created_at', 'updated_at'],
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'cnic', 'phone', 'address', 'additionalInfo', 'status', 'lastLoginTime', 'lastLogoutTime', 'latitude', 'longitude', 'locationAccuracy', 'locationTimestamp', 'locationPermission', 'callStatus', 'twilioEnabled', 'requireLocationForLogin', 'created_at', 'updated_at'],
       include: [
         {
           model: require('../../../../models').SupervisorAgent,
@@ -68,6 +68,7 @@ export async function GET(request, { params }) {
         location_permission: user.locationPermission,
         call_status: user.callStatus || 'offline',
         twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
+        require_location_for_login: user.requireLocationForLogin !== false,
       additional_info: user.additionalInfo ?? null,
       superiorId: supervisorRelationship ? supervisorRelationship.supervisor.id : null,
       supervisor_name: supervisorRelationship ? `${supervisorRelationship.supervisor.firstName} ${supervisorRelationship.supervisor.lastName}` : null,
@@ -113,7 +114,8 @@ export async function PUT(request, { params }) {
       address,
       additional_info,
       superiorId,
-      twilio_enabled
+      twilio_enabled,
+      require_location_for_login
     } = await request.json();
 
     // Find user
@@ -186,6 +188,10 @@ export async function PUT(request, { params }) {
     if (typeof is_active === 'boolean') updateData.isActive = is_active;
     
     if (typeof twilio_enabled === 'boolean') updateData.twilioEnabled = twilio_enabled;
+
+    if (typeof require_location_for_login === 'boolean') {
+      updateData.requireLocationForLogin = require_location_for_login;
+    }
     
     // Handle optional phone field - clean and convert empty string to null
     if (phone !== undefined) {
@@ -221,6 +227,7 @@ export async function PUT(request, { params }) {
 
     try {
       await user.update(updateData);
+      await user.reload();
     } catch (validationError) {
       // Handle validation errors with user-friendly messages
       if (validationError.name === 'SequelizeValidationError') {
@@ -278,6 +285,7 @@ export async function PUT(request, { params }) {
       additional_info: user.additionalInfo ?? null,
       call_status: user.callStatus || 'offline',
       twilio_enabled: user.twilioEnabled !== undefined ? user.twilioEnabled : true,
+      require_location_for_login: user.requireLocationForLogin !== false,
       created_at: user.created_at,
       updated_at: user.updated_at
     };
