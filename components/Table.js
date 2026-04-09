@@ -1,6 +1,45 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
+
+const VARIANT_STYLES = {
+  default: {
+    wrapper: 'bg-white rounded-lg shadow-sm border border-gray-200',
+    thead: 'bg-blue-50',
+    th: 'px-6 py-4 text-left text-xs font-semibold text-blue-700 uppercase tracking-wider',
+    tbody: 'bg-white divide-y divide-gray-100',
+    tr: (onRowClick) =>
+      `hover:bg-blue-50 transition-colors duration-150 ${onRowClick ? 'cursor-pointer' : ''}`,
+    trStriped: (rowIndex) => (rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'),
+    td: 'px-6 py-4 whitespace-nowrap text-sm',
+    paginationWrap: 'bg-blue-50 px-4 py-3 flex items-center justify-between border-t border-blue-200 sm:px-6',
+    paginationText: 'text-sm text-blue-700',
+    paginationStrong: 'font-medium text-blue-900',
+    paginationBtn: 'border border-blue-300 text-blue-700 bg-white hover:bg-blue-50',
+    paginationNavBtn: 'border border-blue-300 bg-white text-blue-500 hover:bg-blue-50',
+    paginationPage: 'border border-blue-300 bg-white text-blue-500 hover:bg-blue-50',
+    paginationPageActive: 'z-10 bg-blue-600 border-blue-600 text-white',
+    paginationEllipsis: 'border border-blue-300 bg-white text-blue-700 cursor-default',
+  },
+  management: {
+    wrapper: 'bg-white overflow-hidden rounded-lg border border-gray-200',
+    thead: 'bg-gray-50',
+    th: 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider',
+    tbody: 'bg-white divide-y divide-gray-200',
+    tr: (onRowClick) =>
+      `group hover:bg-gray-50 transition-colors duration-150 ${onRowClick ? 'cursor-pointer' : ''}`,
+    trStriped: () => 'bg-white',
+    td: 'px-6 py-4 whitespace-nowrap text-sm',
+    paginationWrap: 'bg-gray-50 px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6',
+    paginationText: 'text-sm text-gray-600',
+    paginationStrong: 'font-medium text-gray-900',
+    paginationBtn: 'border border-gray-300 text-gray-700 bg-white hover:bg-gray-50',
+    paginationNavBtn: 'border border-gray-300 bg-white text-gray-600 hover:bg-gray-50',
+    paginationPage: 'border border-gray-300 bg-white text-gray-600 hover:bg-gray-50',
+    paginationPageActive: 'z-10 bg-blue-600 border-blue-600 text-white',
+    paginationEllipsis: 'border border-gray-300 bg-white text-gray-600 cursor-default',
+  },
+};
 
 export default function Table({ 
   data = [], 
@@ -9,8 +48,10 @@ export default function Table({
   showPagination = true,
   className = "",
   onRowClick = null,
-  emptyMessage = "No data available"
+  emptyMessage = "No data available",
+  variant = 'default',
 }) {
+  const vs = VARIANT_STYLES[variant] || VARIANT_STYLES.default;
   const [currentPage, setCurrentPage] = useState(1);
 
   // Calculate pagination
@@ -82,7 +123,7 @@ export default function Table({
 
   if (data.length === 0) {
     return (
-      <div className={`bg-white rounded-lg shadow-sm border border-gray-200 ${className}`}>
+      <div className={`${vs.wrapper} ${className}`}>
         <div className="p-8 text-center">
           <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
             <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -96,16 +137,16 @@ export default function Table({
   }
 
   return (
-    <div className={`bg-white rounded-lg shadow-sm border border-gray-200 ${className}`}>
+    <div className={`${vs.wrapper} ${className}`}>
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-blue-50">
+          <thead className={vs.thead}>
             <tr>
               {columns.map((column, index) => (
                 <th
                   key={index}
-                  className={`px-6 py-4 text-left text-xs font-semibold text-blue-700 uppercase tracking-wider ${
+                  className={`${vs.th} ${column.stickyHeaderClass || ''} ${
                     column.className || ''
                   }`}
                 >
@@ -114,19 +155,17 @@ export default function Table({
               ))}
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-100">
+          <tbody className={vs.tbody}>
             {currentData.map((row, rowIndex) => (
               <tr
                 key={rowIndex}
-                className={`hover:bg-blue-50 transition-colors duration-150 ${
-                  onRowClick ? 'cursor-pointer' : ''
-                } ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}
+                className={`${vs.tr(onRowClick)} ${vs.trStriped(rowIndex)}`}
                 onClick={() => handleRowClick(row, startIndex + rowIndex)}
               >
                 {columns.map((column, colIndex) => (
                   <td
                     key={colIndex}
-                    className={`px-6 py-4 whitespace-nowrap text-sm ${
+                    className={`${vs.td} ${column.stickyBodyClass || ''} ${
                       column.cellClassName || 'text-gray-700'
                     }`}
                   >
@@ -141,19 +180,19 @@ export default function Table({
 
       {/* Pagination */}
       {showPagination && totalPages > 1 && (
-        <div className="bg-blue-50 px-4 py-3 flex items-center justify-between border-t border-blue-200 sm:px-6">
+        <div className={vs.paginationWrap}>
           <div className="flex-1 flex justify-between sm:hidden">
             <button
               onClick={goToPrevious}
               disabled={currentPage === 1}
-              className="relative inline-flex items-center px-4 py-2 border border-blue-300 text-sm font-medium rounded-md text-blue-700 bg-white hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed ${vs.paginationBtn}`}
             >
               Previous
             </button>
             <button
               onClick={goToNext}
               disabled={currentPage === totalPages}
-              className="ml-3 relative inline-flex items-center px-4 py-2 border border-blue-300 text-sm font-medium rounded-md text-blue-700 bg-white hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className={`ml-3 relative inline-flex items-center px-4 py-2 border text-sm font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed ${vs.paginationBtn}`}
             >
               Next
             </button>
@@ -161,13 +200,13 @@ export default function Table({
           
           <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm text-blue-700">
+              <p className={vs.paginationText}>
                 Showing{' '}
-                <span className="font-medium text-blue-900">{startIndex + 1}</span>
+                <span className={vs.paginationStrong}>{startIndex + 1}</span>
                 {' '}to{' '}
-                <span className="font-medium text-blue-900">{Math.min(endIndex, data.length)}</span>
+                <span className={vs.paginationStrong}>{Math.min(endIndex, data.length)}</span>
                 {' '}of{' '}
-                <span className="font-medium text-blue-900">{data.length}</span>
+                <span className={vs.paginationStrong}>{data.length}</span>
                 {' '}results
               </p>
             </div>
@@ -177,7 +216,7 @@ export default function Table({
                 <button
                   onClick={goToPrevious}
                   disabled={currentPage === 1}
-                  className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-blue-300 bg-white text-sm font-medium text-blue-500 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={`relative inline-flex items-center px-2 py-2 rounded-l-md border text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed ${vs.paginationNavBtn}`}
                 >
                   <span className="sr-only">Previous</span>
                   <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -192,10 +231,10 @@ export default function Table({
                     disabled={page === '...'}
                     className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
                       page === currentPage
-                        ? 'z-10 bg-blue-600 border-blue-600 text-white'
+                        ? vs.paginationPageActive
                         : page === '...'
-                        ? 'border-blue-300 bg-white text-blue-700 cursor-default'
-                        : 'border-blue-300 bg-white text-blue-500 hover:bg-blue-50'
+                        ? vs.paginationEllipsis
+                        : vs.paginationPage
                     }`}
                   >
                     {page}
@@ -205,7 +244,7 @@ export default function Table({
                 <button
                   onClick={goToNext}
                   disabled={currentPage === totalPages}
-                  className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-blue-300 bg-white text-sm font-medium text-blue-500 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={`relative inline-flex items-center px-2 py-2 rounded-r-md border text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed ${vs.paginationNavBtn}`}
                 >
                   <span className="sr-only">Next</span>
                   <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">

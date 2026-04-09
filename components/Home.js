@@ -495,25 +495,34 @@ export default function Home() {
     }
   };
 
-  // Sales table columns configuration
+  const salesStickyIdHeader =
+    'sticky left-0 z-50 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[80px]';
+  const salesStickyIdBody =
+    'sticky left-0 z-20 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[80px]';
+  const salesStickyNameHeader =
+    'sticky left-[80px] z-40 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[200px]';
+  const salesStickyNameBody =
+    'sticky left-[80px] z-30 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[200px]';
+  const salesStickyLandlineHeader =
+    'sticky left-[280px] z-[60] bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[128px]';
+  const salesStickyLandlineBody =
+    'sticky left-[280px] z-40 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[128px]';
+
+  // Sales table columns — fixed: ID, Customer Name, Landline; then Status
   const salesColumns = [
     {
       header: 'ID',
       key: 'id',
-      className: 'font-medium text-gray-900'
-    },
-    {
-      header: 'Status',
-      key: 'status',
-      render: (value) => (
-        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeClasses(value || '')}`}>
-          {getStatusDisplayName(value) || 'N/A'}
-        </span>
-      )
+      className: 'font-medium text-gray-900',
+      stickyHeaderClass: salesStickyIdHeader,
+      stickyBodyClass: salesStickyIdBody
     },
     {
       header: 'Customer Name',
       key: 'customer',
+      className: 'text-gray-900',
+      stickyHeaderClass: salesStickyNameHeader,
+      stickyBodyClass: salesStickyNameBody,
       render: (customer) => (
         <span className="font-medium text-gray-900">
           {customer?.firstName || 'N/A'}
@@ -523,9 +532,21 @@ export default function Home() {
     {
       header: 'Landline No',
       key: 'customer',
+      className: 'text-gray-500',
+      stickyHeaderClass: salesStickyLandlineHeader,
+      stickyBodyClass: salesStickyLandlineBody,
       render: (customer) => (
-        <span className="text-gray-500">
+        <span className="text-gray-600">
           {customer?.landline ? formatLandline(customer.landline) : 'N/A'}
+        </span>
+      )
+    },
+    {
+      header: 'Status',
+      key: 'status',
+      render: (value) => (
+        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeClasses(value || '')}`}>
+          {getStatusDisplayName(value) || 'N/A'}
         </span>
       )
     },
@@ -576,6 +597,7 @@ export default function Home() {
     {
       header: 'Tags',
       key: 'tags',
+      cellClassName: 'text-gray-700 align-top max-w-xs whitespace-normal',
       render: (tags, row) => {
         // Get tags from sale
         const saleTags = Array.isArray(tags) ? tags : (tags ? [tags] : []);
@@ -1053,6 +1075,7 @@ export default function Home() {
                   itemsPerPage={itemsPerPage}
                   onRowClick={handleRowClick}
                   emptyMessage={loading ? "Loading sales data..." : "No sales found for the selected criteria"}
+                  variant="management"
                 />
                 
                 {/* Pagination Controls */}

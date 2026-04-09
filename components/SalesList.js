@@ -185,11 +185,40 @@ export default function SalesList({ onClose }) {
     return date.toLocaleDateString(undefined, options);
   };
 
+  const stickyIdHeader =
+    'sticky left-0 z-50 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[80px]';
+  const stickyIdBody =
+    'sticky left-0 z-20 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[80px]';
+  const stickyNameHeader =
+    'sticky left-[80px] z-40 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[200px]';
+  const stickyNameBody =
+    'sticky left-[80px] z-30 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[200px]';
+  const stickyLandlineHeader =
+    'sticky left-[280px] z-[60] bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[128px]';
+  const stickyLandlineBody =
+    'sticky left-[280px] z-40 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[128px]';
+
   const columns = [
     {
       header: 'ID',
       key: 'id',
-      className: 'font-medium text-gray-900'
+      className: 'font-medium text-gray-900',
+      stickyHeaderClass: stickyIdHeader,
+      stickyBodyClass: stickyIdBody
+    },
+    {
+      header: 'Customer Name',
+      key: 'name',
+      className: 'font-medium text-gray-900',
+      stickyHeaderClass: stickyNameHeader,
+      stickyBodyClass: stickyNameBody
+    },
+    {
+      header: 'Landline No',
+      key: 'landline',
+      className: 'text-gray-500',
+      stickyHeaderClass: stickyLandlineHeader,
+      stickyBodyClass: stickyLandlineBody
     },
     {
       header: 'Status',
@@ -204,16 +233,6 @@ export default function SalesList({ onClose }) {
           {value}
         </span>
       )
-    },
-    {
-      header: 'Name',
-      key: 'name',
-      className: 'font-medium text-gray-900'
-    },
-    {
-      header: 'Landline No',
-      key: 'landline',
-      className: 'text-gray-500'
     },
     {
       header: 'Cell No',
@@ -339,6 +358,7 @@ export default function SalesList({ onClose }) {
                 onRowClick={handleRowClick}
                 emptyMessage="No sales found for the selected criteria"
                 showPagination={true}
+                variant="management"
               />
             )}
           </div>
