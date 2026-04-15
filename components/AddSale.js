@@ -4411,9 +4411,6 @@ Room: `;
                                   <div><strong>Agent:</strong> {`${lastSaleInfo.lastSale.agent?.firstName || ''} ${lastSaleInfo.lastSale.agent?.lastName || ''}`.trim() || 'N/A'}</div>
                                 ) : null;
                               })()}
-                              {lastSaleInfo.lastSale.notes && (
-                                <div><strong>Notes:</strong> {lastSaleInfo.lastSale.notes}</div>
-                              )}
                               {shouldShowGoToPreviousSaleButton(lastSaleInfo.lastSale, user) && (
                                 <div className="mt-2 pt-2 border-t border-blue-100">
                                   <button
@@ -4540,9 +4537,6 @@ Room: `;
                                   <div><strong>Agent:</strong> {`${lastSaleInfo.lastSale.agent?.firstName || ''} ${lastSaleInfo.lastSale.agent?.lastName || ''}`.trim() || 'N/A'}</div>
                                 ) : null;
                               })()}
-                              {lastSaleInfo.lastSale.notes && (
-                                <div><strong>Notes:</strong> {lastSaleInfo.lastSale.notes}</div>
-                              )}
                               {shouldShowGoToPreviousSaleButton(lastSaleInfo.lastSale, user) && (
                                 <div className="mt-2 pt-2 border-t border-gray-200">
                                   <button
@@ -6048,9 +6042,6 @@ Room: `;
                             <p><span className="font-medium">Agent:</span> {`${lastSaleInfo.lastSale.agent?.firstName || ''} ${lastSaleInfo.lastSale.agent?.lastName || ''}`.trim() || 'Unknown'}</p>
                           ) : null;
                         })()}
-                        {lastSaleInfo.lastSale.notes && (
-                          <p><span className="font-medium">Notes:</span> {lastSaleInfo.lastSale.notes}</p>
-                        )}
                         {shouldShowGoToPreviousSaleButton(lastSaleInfo.lastSale, user) && (
                           <div className="mt-3">
                             <button
