@@ -15,7 +15,7 @@ import apiClient from '../lib/apiClient';
 import { SALES_STATUSES, SALES_STATUS_ARRAY, getStatusBadgeClasses, getStatusDisplayName, getTagDisplayName, getTagBadgeClasses, SALE_TAGS, DISPLAY_TAGS, hasTag } from '../lib/salesStatuses';
 import StatusMultiSelect from './StatusMultiSelect';
 import { formatLandline, formatPhoneNumber } from '../lib/validation';
-import { downloadSaleDoc, buildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
+import { downloadSaleDoc, fetchSalePaymentDetailsForDownload } from '../lib/docUtils';
 
 export default function Home() {
   const router = useRouter();
@@ -23,68 +23,7 @@ export default function Home() {
   const { user } = useAuth();
   const { socket, isConnected } = useSocket();
 
-  const buildPaymentSections = (sale) => {
-    const cards = Array.isArray(sale?.cards) ? sale.cards : [];
-    const banks = Array.isArray(sale?.banks) ? sale.banks : [];
-
-    const cardSections = cards
-      .map((card, idx) => {
-        const rows = [
-          { label: 'Card Type', value: card?.cardType || card?.card_type },
-          { label: 'Provider', value: card?.provider },
-          { label: 'Customer Name', value: card?.customerName || card?.customer_name },
-          { label: 'Masked Card Number', value: card?.maskedCardNumber || card?.masked_card_number || card?.cardNumber || card?.card_number },
-          { label: 'Expiry Date', value: card?.expiryDate || card?.expiry_date },
-          { label: 'Notes', value: card?.notes }
-        ];
-
-        return `
-          <h3 style="margin-top: 16px; font-size: 16px; color: #1f2937;">Card ${idx + 1}</h3>
-          <table style="${DOC_TABLE_STYLE}">
-            ${DOC_TABLE_COLGROUP}
-            ${buildTableRows(rows)}
-          </table>
-        `;
-      })
-      .join('');
-
-    const bankSections = banks
-      .map((bank, idx) => {
-        const rows = [
-          { label: 'Bank Name', value: bank?.bankName || bank?.bank_name },
-          { label: 'Account Holder', value: bank?.accountHolder || bank?.account_holder },
-          { label: 'Masked Account Number', value: bank?.maskedAccountNumber || bank?.masked_account_number || bank?.accountNumber || bank?.account_number },
-          { label: 'Routing Number', value: bank?.routingNumber || bank?.routing_number },
-          { label: 'Check Number', value: bank?.checkNumber || bank?.check_number },
-          { label: 'Notes', value: bank?.notes }
-        ];
-
-        return `
-          <h3 style="margin-top: 16px; font-size: 16px; color: #1f2937;">Bank ${idx + 1}</h3>
-          <table style="${DOC_TABLE_STYLE}">
-            ${DOC_TABLE_COLGROUP}
-            ${buildTableRows(rows)}
-          </table>
-        `;
-      })
-      .join('');
-
-    if (!cardSections && !bankSections) {
-      return `
-        <table style="${DOC_TABLE_STYLE}">
-          ${DOC_TABLE_COLGROUP}
-          ${buildTableRows([{ label: 'Payment Methods', value: 'No payment information available' }])}
-        </table>
-      `;
-    }
-
-    return `
-      ${cardSections || ''}
-      ${bankSections || ''}
-    `;
-  };
-
-  const handleDownloadSaleDoc = (sale) => {
+  const handleDownloadSaleDoc = async (sale) => {
     if (!sale) return;
 
     try {
@@ -93,41 +32,22 @@ export default function Home() {
       const fileName = `${customerFirstName.toString().trim().replace(/\s+/g, '-').toLowerCase()}-sale-${saleId}.doc`;
 
       const customer = sale.customer || {};
+      const primaryCard = Array.isArray(sale?.cards) ? sale.cards[0] : null;
+      const primaryBank = Array.isArray(sale?.banks) ? sale.banks[0] : null;
 
-      const saleRows = [
-        { label: 'Sale ID', value: saleId },
-        { label: 'Status', value: getStatusDisplayName(sale?.status) || sale?.status },
-        { label: 'Agent ID', value: sale?.agentId },
-        { label: 'Customer ID', value: sale?.customerId },
-        { label: 'Created At', value: sale?.created_at || sale?.createdAt ? formatDateTimeShort(sale.created_at ?? sale.createdAt) : 'N/A' },
-        { label: 'Updated At', value: sale?.updated_at || sale?.updatedAt ? formatDateTimeShort(sale.updated_at ?? sale.updatedAt) : 'N/A' },
-        { label: 'Spoke To', value: sale?.spokeTo || sale?.spoke_to },
-        { label: 'PIN Code', value: sale?.pinCode || sale?.pin_code },
-        { label: 'Carrier', value: sale?.carrier },
-        { label: 'Bundle', value: sale?.bundle },
-        { label: 'Company', value: sale?.company },
-        { label: 'Notes', value: sale?.notes }
-      ];
-
-      const customerRows = [
-        { label: 'First Name', value: customer?.firstName },
-        { label: 'Last Name', value: customer?.lastName },
-        { label: 'Email', value: customer?.email },
-        { label: 'Phone', value: customer?.phone },
-        { label: 'Landline', value: customer?.landline },
-        { label: 'City', value: customer?.city },
-        { label: 'State', value: customer?.state },
-        { label: 'Country', value: customer?.country },
-        { label: 'Address', value: customer?.address }
-      ];
-
-      const paymentContent = buildPaymentSections(sale);
+      let paymentsInfo = null;
+      const saleIdNum = parseInt(String(saleId), 10);
+      if (!Number.isNaN(saleIdNum)) {
+        paymentsInfo = await fetchSalePaymentDetailsForDownload(apiClient, saleIdNum);
+      }
 
       downloadSaleDoc({
         fileName,
-        saleRows,
-        customerRows,
-        paymentContent
+        sale,
+        customer,
+        card: primaryCard,
+        bank: primaryBank,
+        paymentsInfo
       });
     } catch (error) {
       console.error('Failed to generate sale document:', error);

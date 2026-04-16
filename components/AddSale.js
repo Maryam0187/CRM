@@ -31,7 +31,7 @@ import {
 } from '../lib/validation.js';
 import { useToast } from '../contexts/ToastContext';
 import { SALES_STATUSES, SALE_TAGS, DISPLAY_TAGS, getStepForStatus, getStatusDisplayName, getStatusColorClass, getStatusBadgeClasses, hasTag, toggleTag, getTagDisplayName, getTagBadgeClasses } from '../lib/salesStatuses.js';
-import { downloadSaleDoc, escapeHtml as docEscapeHtml, buildTableRows as docBuildTableRows, DOC_TABLE_STYLE, DOC_TABLE_COLGROUP } from '../lib/docUtils';
+import { downloadSaleDoc, fetchSalePaymentDetailsForDownload } from '../lib/docUtils';
 import { isAdmin, isSupervisor } from '../lib/roleUtils';
 
 // Helper function to calculate time ago
@@ -258,106 +258,32 @@ export default function AddSale() {
     }
   }, [successMessage]);
 
-  const escapeHtml = docEscapeHtml;
-  const buildTableRows = docBuildTableRows;
-
-  const buildPaymentContent = () => {
-    const tableStyle = DOC_TABLE_STYLE;
-
-    if (selectedPaymentType === 'card') {
-      const rows = [
-        { label: 'Payment Type', value: 'Card' },
-        { label: 'Card Type', value: cardFormData.cardType },
-        { label: 'Provider', value: cardFormData.provider },
-        { label: 'Customer Name', value: cardFormData.customerName },
-        { label: 'Card Number', value: cardFormData.cardNumber },
-        { label: 'CVV', value: cardFormData.cvv },
-        { label: 'Expiry Date', value: cardFormData.expiryDate },
-        { label: 'Notes', value: cardFormData.notes }
-      ];
-      return `<table style="${tableStyle}">${DOC_TABLE_COLGROUP}${buildTableRows(rows)}</table>`;
-    }
-
-    if (selectedPaymentType === 'bank') {
-      const rows = [
-        { label: 'Payment Type', value: 'Bank' },
-        { label: 'Bank Name', value: bankFormData.bankName },
-        { label: 'Account Holder', value: bankFormData.accountHolder },
-        { label: 'Account Number', value: bankFormData.accountNumber },
-        { label: 'Routing Number', value: bankFormData.routingNumber },
-        { label: 'Check Number', value: bankFormData.checkNumber },
-        { label: "Driver's License", value: bankFormData.driverLicense },
-        { label: 'Name on License', value: bankFormData.nameOnLicense },
-        { label: 'State ID', value: bankFormData.stateId },
-        { label: 'Notes', value: bankFormData.notes }
-      ];
-      return `<table style="${tableStyle}">${DOC_TABLE_COLGROUP}${buildTableRows(rows)}</table>`;
-    }
-
-    return `<table style="${tableStyle}">${DOC_TABLE_COLGROUP}${buildTableRows([{ label: 'Payment Details', value: 'No payment information provided' }])}</table>`;
-  };
-
-  const handleDownloadDoc = () => {
+  const handleDownloadDoc = async () => {
     try {
       const customerFileName =
         customer.firstName && customer.firstName.trim().length > 0
           ? customer.firstName.trim().replace(/\s+/g, '-').toLowerCase()
           : 'customer';
 
-      const customerRows = [
-        { label: 'First Name', value: customer.firstName },
-        { label: 'Landline', value: customer.landline ? formatLandline(customer.landline) : customer.landline },
-        { label: 'Phone', value: customer.phone ? formatCellNumber(customer.phone) : customer.phone },
-        { label: 'Address', value: customer.address },
-        { label: 'City', value: customer.city },
-        { label: 'State', value: customer.state },
-        { label: 'Zipcode', value: customer.zipcode },
-        { label: 'Country', value: customer.country },
-        { label: 'Mailing Address', value: customer.mailingAddress },
-        { label: 'Customer Feedback', value: customer.customerFeedback }
-      ];
+      const saleIdForPayments =
+        saleForm.id != null && saleForm.id !== ''
+          ? saleForm.id
+          : editId != null && String(editId).trim() !== ''
+            ? editId
+            : null;
 
-      const saleRows = [
-        { label: 'Sale ID', value: saleForm.id || 'N/A' },
-        { label: 'Status', value: saleForm.status },
-        { label: 'Spoke To', value: saleForm.spoke_to },
-        { label: 'PIN Code', value: saleForm.pin_code },
-        { label: 'PIN Code Status', value: saleForm.pin_code_status },
-        { label: 'SSN Name', value: saleForm.ssnName },
-        { label: 'SSN Number', value: saleForm.ssnNumber },
-        { label: 'SSN Number Status', value: saleForm.ssn_number_status },
-        { label: 'Carrier', value: saleForm.carrier },
-        { label: 'Basic Package', value: saleForm.basicPackage },
-        { label: 'New Package', value: saleForm.newPackage },
-        { label: 'Basic Package Status', value: saleForm.basicPackageStatus },
-        { label: '# of TV', value: saleForm.NoFTV },
-        { label: 'Account Holder', value: saleForm.AccHolder },
-        { label: 'Account Number', value: saleForm.AccNumber },
-        { label: '# of Receivers', value: saleForm.NoReceiver },
-        { label: 'Security Question', value: saleForm.question },
-        { label: 'Security Answer', value: saleForm.answer },
-        { label: 'Regular Bill', value: saleForm.regularBill },
-        { label: 'Promotional Bill', value: saleForm.promotionalBill },
-        { label: 'Charge', value: saleForm.charge },
-        { label: 'Verified On', value: saleForm.verifiedOn },
-        { label: 'Bundle', value: saleForm.bundle },
-        { label: 'Company', value: saleForm.company },
-        { label: 'Last Payment', value: saleForm.lastPayment },
-        { label: 'Last Payment Date', value: saleForm.lastPaymentDate },
-        { label: 'Breakdown', value: saleForm.breakdown },
-        { label: 'Additional Info', value: saleForm.additionalInfo },
-        { label: 'Notes', value: saleForm.notes },
-        { label: 'Balance', value: saleForm.balance },
-        { label: 'Due On', value: saleForm.dueonDate }
-      ];
-
-      const paymentContent = buildPaymentContent();
+      let paymentsInfo = null;
+      if (saleIdForPayments != null && String(saleIdForPayments).trim() !== '') {
+        paymentsInfo = await fetchSalePaymentDetailsForDownload(apiClient, saleIdForPayments);
+      }
 
       downloadSaleDoc({
-        fileName: `${customerFileName}-sale-${saleForm.id || 'id'}.doc`,
-        saleRows,
-        customerRows,
-        paymentContent
+        fileName: `${customerFileName}-sale-${saleForm.id || editId || 'id'}.doc`,
+        sale: saleForm,
+        customer,
+        card: selectedPaymentType === 'card' ? cardFormData : null,
+        bank: selectedPaymentType === 'bank' ? bankFormData : null,
+        paymentsInfo
       });
 
       showSuccess('Sale summary downloaded successfully.');

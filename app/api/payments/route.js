@@ -26,6 +26,10 @@ export async function GET(request) {
     // Only admins can request full details
     const showFullDetails = userRole === 'admin' && requestedFullDetails;
 
+    /** With saleId + passing auth, return decrypted card/bank/cheque values for sale document download. */
+    const exportDocument = searchParams.get('exportDocument') === 'true';
+    let allowFullSensitiveForExport = false;
+
     // No nested User include on payment models (would cause duplicate alias). We batch-load addedBy users below.
     const includePaymentModels = [
       { model: Customer, as: 'customer', attributes: ['id', 'firstName', 'lastName', 'email', 'phone', 'landline'] },
@@ -83,6 +87,10 @@ export async function GET(request) {
         }
       }
 
+      if (exportDocument) {
+        allowFullSensitiveForExport = true;
+      }
+
       const customerIdFromSale = sale.customerId;
       const customerSales = await Sale.findAll({
         where: { customerId: customerIdFromSale },
@@ -125,6 +133,8 @@ export async function GET(request) {
     }
 
     // Note: Card masking is now handled by the Card model's getDataForRole method
+    const useFullSensitivePayments =
+      (userRole === 'admin' && showFullDetails) || allowFullSensitiveForExport;
 
     // Batch-load users who added payment records (avoid duplicate JOIN alias with nested include)
     const addedByUserIds = new Set();
@@ -187,17 +197,8 @@ export async function GET(request) {
         cards: (sale.cards || [])
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) // Newest first
           .map(card => {
-          // Determine what level of detail to show
-          const isAdminWithFullDetails = userRole === 'admin' && showFullDetails;
-          
-          // Get the appropriate role for card data
-          let cardRole;
-          if (isAdminWithFullDetails) {
-            cardRole = 'admin'; // Show full details
-          } else {
-            cardRole = 'agent'; // Show masked details (last 4 digits, hidden CVV)
-          }
-          
+          const cardRole = useFullSensitivePayments ? 'admin' : 'agent';
+
           // Use the card's getDataForRole method for proper decryption and masking
           const roleBasedData = card.getDataForRole ? card.getDataForRole(cardRole) : card;
           
@@ -211,7 +212,7 @@ export async function GET(request) {
             customerName: roleBasedData.customerName,
             cardNumber: roleBasedData.cardNumber,
             expiryDate: roleBasedData.expiryDate,
-            cvv: isAdminWithFullDetails ? roleBasedData.cvv : '***', // Show *** for non-admin, full CVV for admin with full details
+            cvv: useFullSensitivePayments ? roleBasedData.cvv : '***',
             status: roleBasedData.status,
             created_at: roleBasedData.created_at,
             expirationStatus: expirationStatus,
@@ -226,17 +227,8 @@ export async function GET(request) {
         banks: (sale.banks || [])
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) // Newest first
           .map(bank => {
-          // Determine what level of detail to show (same logic as cards)
-          const isAdminWithFullDetails = userRole === 'admin' && showFullDetails;
-          
-          // Get the appropriate role for bank data
-          let bankRole;
-          if (isAdminWithFullDetails) {
-            bankRole = 'admin'; // Show full details
-          } else {
-            bankRole = 'agent'; // Show masked details
-          }
-          
+          const bankRole = useFullSensitivePayments ? 'admin' : 'agent';
+
           const bankData = bank.getDataForRole ? bank.getDataForRole(bankRole) : bank;
           
           return {
@@ -260,8 +252,7 @@ export async function GET(request) {
         chequesElectronic: (sale.chequesElectronic || [])
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
           .map(cheque => {
-          const isAdminWithFullDetails = userRole === 'admin' && showFullDetails;
-          const chequeRole = isAdminWithFullDetails ? 'admin' : 'agent';
+          const chequeRole = useFullSensitivePayments ? 'admin' : 'agent';
           const chequeData = cheque.getDataForRole ? cheque.getDataForRole(chequeRole) : cheque;
           
           return {
@@ -284,8 +275,7 @@ export async function GET(request) {
         chequesMail: (sale.chequesMail || [])
           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
           .map(cheque => {
-          const isAdminWithFullDetails = userRole === 'admin' && showFullDetails;
-          const chequeRole = isAdminWithFullDetails ? 'admin' : 'agent';
+          const chequeRole = useFullSensitivePayments ? 'admin' : 'agent';
           const chequeData = cheque.getDataForRole ? cheque.getDataForRole(chequeRole) : cheque;
           
           return {
