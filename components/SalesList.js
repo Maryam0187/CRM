@@ -186,37 +186,40 @@ export default function SalesList({ onClose }) {
   };
 
   const stickyIdHeader =
-    'sticky left-0 z-50 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[80px]';
+    'sticky left-0 z-50 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[64px]';
   const stickyIdBody =
-    'sticky left-0 z-20 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[80px]';
+    'sticky left-0 z-20 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[64px]';
   const stickyNameHeader =
-    'sticky left-[80px] z-40 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[200px]';
+    'sticky left-[64px] z-40 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[96px] w-[96px] max-w-[96px]';
   const stickyNameBody =
-    'sticky left-[80px] z-30 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[200px]';
+    'sticky left-[64px] z-30 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[96px] w-[96px] max-w-[96px]';
   const stickyLandlineHeader =
-    'sticky left-[280px] z-[60] bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[128px]';
+    'sticky left-[160px] z-[60] bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[112px]';
   const stickyLandlineBody =
-    'sticky left-[280px] z-40 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[128px]';
+    'sticky left-[160px] z-40 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[112px]';
 
   const columns = [
     {
       header: 'ID',
       key: 'id',
-      className: 'font-medium text-gray-900',
+      className: 'font-medium text-gray-900 px-3 py-2',
+      cellClassName: 'text-gray-700 px-3 py-2',
       stickyHeaderClass: stickyIdHeader,
       stickyBodyClass: stickyIdBody
     },
     {
       header: 'Customer Name',
       key: 'name',
-      className: 'font-medium text-gray-900',
+      className: 'font-medium text-gray-900 px-3 py-2',
+      cellClassName: 'text-gray-700 px-3 py-2 truncate',
       stickyHeaderClass: stickyNameHeader,
       stickyBodyClass: stickyNameBody
     },
     {
       header: 'Landline No',
       key: 'landline',
-      className: 'text-gray-500',
+      className: 'text-gray-500 px-3 py-2',
+      cellClassName: 'text-gray-500 px-3 py-2',
       stickyHeaderClass: stickyLandlineHeader,
       stickyBodyClass: stickyLandlineBody
     },

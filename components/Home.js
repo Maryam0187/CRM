@@ -498,33 +498,35 @@ export default function Home() {
   const salesStickyIdHeader =
     'sticky left-0 z-50 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[80px]';
   const salesStickyIdBody =
-    'sticky left-0 z-20 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[80px]';
+    'sticky left-0 z-20 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[64px] w-[64px] max-w-[64px]';
   const salesStickyNameHeader =
-    'sticky left-[80px] z-40 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[200px]';
+    'sticky left-[64px] z-40 bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[180px] w-[180px] max-w-[180px]';
   const salesStickyNameBody =
-    'sticky left-[80px] z-30 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[200px]';
+    'sticky left-[64px] z-30 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[180px] w-[180px] max-w-[180px]';
   const salesStickyLandlineHeader =
-    'sticky left-[280px] z-[60] bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[128px]';
+    'sticky left-[244px] z-[60] bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[112px] w-[112px] max-w-[112px]';
   const salesStickyLandlineBody =
-    'sticky left-[280px] z-40 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[128px]';
+    'sticky left-[244px] z-40 bg-white group-hover:bg-gray-50 shadow-[4px_0_12px_-4px_rgba(0,0,0,0.12)] min-w-[112px] w-[112px] max-w-[112px]';
 
   // Sales table columns — fixed: ID, Customer Name, Landline; then Status
   const salesColumns = [
     {
       header: 'ID',
       key: 'id',
-      className: 'font-medium text-gray-900',
+      className: 'font-medium text-gray-900 !px-3 !py-2',
+      cellClassName: 'text-gray-700 !px-3 !py-2 truncate',
       stickyHeaderClass: salesStickyIdHeader,
       stickyBodyClass: salesStickyIdBody
     },
     {
       header: 'Customer Name',
       key: 'customer',
-      className: 'text-gray-900',
+      className: 'text-gray-900 !px-3 !py-2',
+      cellClassName: 'text-gray-700 !px-3 !py-2',
       stickyHeaderClass: salesStickyNameHeader,
       stickyBodyClass: salesStickyNameBody,
       render: (customer) => (
-        <span className="font-medium text-gray-900">
+        <span className="block w-full truncate font-medium text-gray-900">
           {customer?.firstName || 'N/A'}
         </span>
       )
@@ -532,7 +534,8 @@ export default function Home() {
     {
       header: 'Landline No',
       key: 'customer',
-      className: 'text-gray-500',
+      className: 'text-gray-500 !px-3 !py-2',
+      cellClassName: 'text-gray-500 !px-3 !py-2',
       stickyHeaderClass: salesStickyLandlineHeader,
       stickyBodyClass: salesStickyLandlineBody,
       render: (customer) => (
