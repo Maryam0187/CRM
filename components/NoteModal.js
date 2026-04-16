@@ -1,12 +1,25 @@
 'use client';
 
 import { useState } from 'react';
-import StateSelector, { getStateTimezone, convertToTimezone, getTimezoneInfo } from './StateSelector';
+import { convertToTimezone, getTimezoneInfo } from './StateSelector';
 
-export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '', initialTime = '', initialNote = '', customerState = '', showState = false }) {
+/** Inserted into the note field only; agent still clicks Add Note to save */
+const CALL_CUSTOMER_APPOINTMENT_LINE = 'Called customer at appointment time';
+
+export default function NoteModal({
+  title,
+  onClose,
+  onNoteAdd,
+  initialDate = '',
+  initialTime = '',
+  initialNote = '',
+  customerState = '',
+  showState = false
+}) {
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [selectedTime, setSelectedTime] = useState(initialTime);
   const [noteText, setNoteText] = useState(initialNote);
+
   const handleDateChange = (e) => {
     setSelectedDate(e.target.value);
   };
@@ -19,16 +32,26 @@ export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '',
     setNoteText(e.target.value);
   };
 
-  const handleAdd = () => {
-    if (noteText.trim()) {
-      const noteData = {
-        date: selectedDate,
-        time: selectedTime,
-        note: noteText.trim(),
-        ...(showState && customerState && { state: customerState })
-      };
-      onNoteAdd(noteData);
+  const insertCallCustomerAppointmentNote = () => {
+    let line = CALL_CUSTOMER_APPOINTMENT_LINE;
+    if (selectedDate && selectedTime) {
+      line = `${CALL_CUSTOMER_APPOINTMENT_LINE} (${selectedDate} ${selectedTime})`;
     }
+    setNoteText((prev) => {
+      const t = prev.trim();
+      return t ? `${t}\n${line}` : line;
+    });
+  };
+
+  const handleAdd = () => {
+    if (!noteText.trim()) return;
+    const noteData = {
+      date: selectedDate,
+      time: selectedTime,
+      note: noteText.trim(),
+      ...(showState && customerState && { state: customerState })
+    };
+    onNoteAdd(noteData);
   };
 
   const handleCancel = () => {
@@ -39,12 +62,17 @@ export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '',
   };
 
   return (
-    <div className="fixed inset-0 bg-black flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 my-4 max-h-[calc(100vh-2rem)] overflow-y-auto flex flex-col">
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="relative z-[201] bg-white rounded-lg shadow-xl max-w-md w-full mx-4 my-4 max-h-[calc(100vh-2rem)] overflow-y-auto flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
           <button
+            type="button"
             onClick={handleCancel}
             className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
           >
@@ -105,13 +133,14 @@ export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '',
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <p className="mt-1 text-xs text-gray-500">Required if appointment date is set</p>
-            
+
             {/* Pakistan Time Display */}
             {selectedDate && selectedTime && customerState && (
               <div className="mt-2">
                 <div className="p-2 bg-blue-50 rounded-md">
                   <p className="text-sm text-blue-700">
-                    <span className="font-medium">Pakistan Time (Your Time):</span> {convertToTimezone(selectedDate, selectedTime, customerState, 'Asia/Karachi')}
+                    <span className="font-medium">Pakistan Time (Your Time):</span>{' '}
+                    {convertToTimezone(selectedDate, selectedTime, customerState, 'Asia/Karachi')}
                     <span className="ml-2 text-xs opacity-75">(PKT)</span>
                   </p>
                 </div>
@@ -121,9 +150,18 @@ export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '',
 
           {/* Note Text Input */}
           <div>
-            <label htmlFor="note-text" className="block text-sm font-medium text-gray-700 mb-2">
-              Note <span className="text-red-500">*</span>
-            </label>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor="note-text" className="block text-sm font-medium text-gray-700">
+                Note <span className="text-red-500">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={insertCallCustomerAppointmentNote}
+                className="shrink-0 rounded border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-800 hover:bg-blue-100"
+              >
+                Call customer at appointment time
+              </button>
+            </div>
             <textarea
               id="note-text"
               rows={4}
@@ -137,6 +175,9 @@ export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '',
               {noteText.length}/500 characters
             </p>
             <p className="mt-1 text-xs text-gray-500">
+              The button only fills the note — use <span className="font-medium">Add Note</span> to save.
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
               Note format: "YYYY-MM-DD HH:MM - [your note] [Appointment: YYYY-MM-DD HH:MM]"
             </p>
           </div>
@@ -145,17 +186,19 @@ export default function NoteModal({ title, onClose, onNoteAdd, initialDate = '',
         {/* Footer */}
         <div className="flex items-center justify-end space-x-3 p-6 border-t border-gray-200">
           <button
+            type="button"
             onClick={handleCancel}
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleAdd}
             disabled={!noteText.trim()}
             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
           >
-            Add Note
+            {title?.toLowerCase().includes('edit') ? 'Save changes' : 'Add Note'}
           </button>
         </div>
       </div>

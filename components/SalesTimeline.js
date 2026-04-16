@@ -5,6 +5,90 @@ import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../lib/apiClient.js';
 import { getStatusBadgeClasses } from '../lib/salesStatuses';
 
+/** One structured note (matches AddSale JSON note blobs, optionally joined by |||). */
+const parseSingleNoteChunk = (chunk) => {
+  if (!chunk || !String(chunk).trim()) return null;
+  const trimmed = String(chunk).trim();
+  try {
+    const obj = JSON.parse(trimmed);
+    if (obj && typeof obj === 'object') {
+      return {
+        timestamp: obj.timestamp ?? null,
+        userName: (obj.userName || obj.user_name || '').trim() || null,
+        note: obj.note != null ? String(obj.note) : '',
+        appointment: obj.appointment != null && obj.appointment !== '' ? String(obj.appointment) : null
+      };
+    }
+  } catch {
+    /* plain text */
+  }
+  return { timestamp: null, userName: null, note: trimmed, appointment: null };
+};
+
+const splitLogNotesIntoEntries = (noteRaw) => {
+  if (noteRaw == null) return [];
+  if (typeof noteRaw === 'object' && !Array.isArray(noteRaw)) {
+    const o = noteRaw;
+    return [
+      {
+        timestamp: o.timestamp ?? null,
+        userName: (o.userName || o.user_name || '').trim() || null,
+        note: o.note != null ? String(o.note) : '',
+        appointment: o.appointment != null && o.appointment !== '' ? String(o.appointment) : null
+      }
+    ];
+  }
+  const str = String(noteRaw).trim();
+  if (!str) return [];
+  if (str.includes('|||')) {
+    return str
+      .split('|||')
+      .map((c) => parseSingleNoteChunk(c.trim()))
+      .filter(Boolean);
+  }
+  const one = parseSingleNoteChunk(str);
+  return one ? [one] : [];
+};
+
+const formatNoteDateTime = (ts) => {
+  if (ts == null || ts === '' || ts === 'Legacy') return null;
+  const raw = String(ts).trim();
+  let d = new Date(raw);
+  if (Number.isNaN(d.getTime())) {
+    // Notes from AddSale use "YYYY-MM-DD HH:mm" (space, not ISO T) — not reliably parsed in all engines
+    const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (m) {
+      d = new Date(
+        Number(m[1]),
+        Number(m[2]) - 1,
+        Number(m[3]),
+        Number(m[4]),
+        Number(m[5]),
+        m[6] != null && m[6] !== '' ? Number(m[6]) : 0
+      );
+    }
+  }
+  if (!Number.isNaN(d.getTime())) {
+    return d.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+  }
+  return raw;
+};
+
+/** Format note appointment string (often "YYYY-MM-DD HH:mm") for display */
+const formatNoteAppointment = (appt) => {
+  if (appt == null || String(appt).trim() === '') return null;
+  const s = String(appt).trim();
+  const asDateTime = formatNoteDateTime(s);
+  return asDateTime && asDateTime !== s ? asDateTime : s;
+};
+
 export default function SalesTimeline({ isOpen, onClose, saleId }) {
   const { user } = useAuth();
   const [timelineData, setTimelineData] = useState([]);
@@ -127,8 +211,13 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="sales-timeline-title"
+    >
+      <div className="relative z-[201] bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-blue-50">
           <div className="flex items-center space-x-4">
@@ -138,7 +227,9 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
               </svg>
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">Sales Timeline</h2>
+              <h2 id="sales-timeline-title" className="text-xl font-semibold text-gray-900">
+                Sales Timeline
+              </h2>
               <p className="text-sm text-gray-600 mt-1">Sale ID: {saleId}</p>
               {timelineData.length > 0 && (
                 <p className="text-xs text-gray-500 mt-1">
@@ -321,18 +412,70 @@ export default function SalesTimeline({ isOpen, onClose, saleId }) {
                           </div>
                         )}
 
-                        {/* Notes */}
-                        {log.note && (
-                          <div className="bg-white rounded-md p-3 mb-3 border border-gray-200">
-                            <div className="flex items-center space-x-2 mb-2">
-                              <svg className="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                              <span className="font-medium text-gray-900">Notes</span>
-                            </div>
-                            <div className="text-sm text-gray-700 whitespace-pre-wrap">{log.note}</div>
-                          </div>
-                        )}
+                        {/* Notes (JSON blobs and/or |||-joined — show user, time, text, appointment) */}
+                        {log.note &&
+                          (() => {
+                            const entries = splitLogNotesIntoEntries(log.note);
+                            if (!entries.length) return null;
+                            return (
+                              <div className="mb-3 space-y-3">
+                                <div className="flex items-center space-x-2">
+                                  <svg
+                                    className="w-4 h-4 text-yellow-600"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={2}
+                                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                    />
+                                  </svg>
+                                  <span className="font-medium text-gray-900">Notes</span>
+                                </div>
+                                {entries.map((entry, ni) => {
+                                  const when = formatNoteDateTime(entry.timestamp);
+                                  return (
+                                    <div
+                                      key={ni}
+                                      className="bg-white rounded-md p-3 border border-gray-200 border-l-4 border-l-yellow-400"
+                                    >
+                                      <div className="text-xs font-semibold text-gray-500 mb-2">
+                                        {entries.length > 1 ? `Note ${ni + 1}` : 'Note'}
+                                      </div>
+                                      <div className="text-sm text-gray-700 space-y-1.5">
+                                        {when && (
+                                          <div>
+                                            <span className="font-medium text-gray-900">Date & time:</span>{' '}
+                                            <span>{when}</span>
+                                          </div>
+                                        )}
+                                        {entry.userName && (
+                                          <div>
+                                            <span className="font-medium text-gray-900">User:</span>{' '}
+                                            <span>{entry.userName}</span>
+                                          </div>
+                                        )}
+                                        {entry.note ? (
+                                          <div className="whitespace-pre-wrap">
+                                            <span className="font-medium text-gray-900">Note:</span> {entry.note}
+                                          </div>
+                                        ) : null}
+                                        {entry.appointment && (
+                                          <div>
+                                            <span className="font-medium text-gray-900">Appointment:</span>{' '}
+                                            <span>{formatNoteAppointment(entry.appointment)}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
 
                         {/* Appointment Information */}
                         {log.appointmentDateTime && (

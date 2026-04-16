@@ -1717,8 +1717,11 @@ Room: `;
     // Log the comment action
     await logNoteAction('add_comment', {
       noteId: commentingNote.id,
-      commentContent: comment.comment,
-      timestamp: comment.timestamp
+      noteContent: comment.comment,
+      timestamp: comment.timestamp,
+      userName: comment.userName,
+      userId: comment.userId,
+      appointment: null
     });
 
     // Close modal and reset
@@ -1813,7 +1816,9 @@ Room: `;
         noteId: noteObject.id,
         noteContent: noteObject.note,
         appointment: noteObject.appointment,
-        timestamp: noteObject.timestamp
+        timestamp: noteObject.timestamp,
+        userName: noteObject.userName,
+        userId: noteObject.userId
       });
       
       // Trigger scroll only when adding a new note
@@ -1926,7 +1931,9 @@ Room: `;
         noteId: noteId,
         noteContent: editedNote.note,
         appointment: editedNote.appointment,
-        timestamp: editedNote.timestamp
+        timestamp: editedNote.timestamp,
+        userName: editedNote.userName,
+        userId: editedNote.userId
       });
     }
   };
@@ -2464,7 +2471,9 @@ Room: `;
             noteId: note.id,
             noteContent: note.note,
             appointment: note.appointment,
-            timestamp: note.timestamp
+            timestamp: note.timestamp,
+            userName: note.userName,
+            userId: note.userId
           });
         }
       }
@@ -2476,6 +2485,31 @@ Room: `;
     } finally {
       setSaving(false);
     }
+  };
+
+  /** Same JSON shape as sale `notes` entries so Sales Timeline can show user, time, text, appointment */
+  const buildStructuredSalesLogNote = (noteData) => {
+    const text =
+      noteData.noteContent != null && noteData.noteContent !== ''
+        ? String(noteData.noteContent)
+        : noteData.commentContent != null && noteData.commentContent !== ''
+          ? String(noteData.commentContent)
+          : '';
+    const obj = {
+      timestamp: noteData.timestamp ?? null,
+      note: text,
+      appointment:
+        noteData.appointment != null && noteData.appointment !== ''
+          ? String(noteData.appointment)
+          : null,
+      userName:
+        noteData.userName && String(noteData.userName).trim()
+          ? String(noteData.userName).trim()
+          : null,
+      userId: noteData.userId ?? null
+    };
+    if (noteData.noteId != null) obj.id = noteData.noteId;
+    return JSON.stringify(obj);
   };
 
   // Log note actions without triggering full sale update
@@ -2507,7 +2541,7 @@ Room: `;
         agentId: user.id,
         action: action,
         status: saleForm.status,
-        note: noteData.noteContent || '',
+        note: buildStructuredSalesLogNote(noteData),
         appointment_datetime: saleForm.appointmentDateTime || null,
         currentSaleData: {
           noteId: noteData.noteId,
@@ -2540,7 +2574,7 @@ Room: `;
         agentId: user.id,
         action: action,
         status: saleForm.status,
-        note: noteData.noteContent || '',
+        note: buildStructuredSalesLogNote(noteData),
         appointment_datetime: saleForm.appointmentDateTime || null,
         currentSaleData: {
           noteId: noteData.noteId,
@@ -3099,7 +3133,9 @@ Room: `;
               noteId: note.id,
               noteContent: note.note,
               appointment: note.appointment,
-              timestamp: note.timestamp
+              timestamp: note.timestamp,
+              userName: note.userName,
+              userId: note.userId
             });
           }
         }
