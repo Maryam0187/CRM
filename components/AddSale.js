@@ -96,6 +96,86 @@ const getTimeAgo = (dateString) => {
   }
 };
 
+const INITIAL_CUSTOMER = {
+  firstName: '',
+  landline: '',
+  phone: '',
+  address: '',
+  state: '',
+  city: '',
+  zipcode: '',
+  country: 'USA',
+  mailingAddress: '',
+  customerFeedback: ''
+};
+
+const INITIAL_CUSTOMER_VALIDATION = {
+  firstName: { isValid: true, message: '' },
+  landline: { isValid: true, message: '' }
+};
+
+const INITIAL_CARD_FORM_DATA = {
+  cardType: '',
+  provider: '',
+  customerName: '',
+  cardNumber: '',
+  cvv: '',
+  expiryDate: '',
+  notes: ''
+};
+
+const INITIAL_BANK_FORM_DATA = {
+  bankName: '',
+  accountHolder: '',
+  accountNumber: '',
+  routingNumber: '',
+  checkNumber: '',
+  driverLicense: '',
+  nameOnLicense: '',
+  stateId: '',
+  notes: ''
+};
+
+const INITIAL_SALE_FORM = {
+  status: 'new',
+  spoke_to: '',
+  pin_code: '',
+  pin_code_status: '',
+  ssnName: '',
+  ssnNumber: '',
+  ssn_number_status: '',
+  carrier: '',
+  basicPackage: '',
+  basicPackageStatus: '',
+  newPackage: '',
+  NoFTV: '',
+  AccHolder: '',
+  AccNumber: '',
+  NoReceiver: '',
+  question: '',
+  answer: '',
+  regularBill: '',
+  promotionalBill: '',
+  charge: '',
+  verifiedOn: '',
+  bundle: '',
+  company: '',
+  lastPayment: '',
+  lastPaymentDate: '',
+  breakdown: '',
+  additionalInfo: '',
+  notes: '',
+  balance: '',
+  dueonDate: '',
+  techVisitDate: '',
+  techVisitTime: '',
+  appointmentDateTime: '',
+  services: [],
+  receivers: {},
+  receiversInfo: {},
+  processingRequired: null
+};
+
 /**
  * Who may see "Go to previous sale": owning agent, admin (any sale), or supervisor (supervised agents only).
  * Any last/previous sale qualifies (no status filter).
@@ -132,24 +212,10 @@ export default function AddSale() {
   const isEditMode = !!editId;
   
   // Customer form state
-  const [customer, setCustomer] = useState({
-    firstName: '',
-    landline: '',
-    phone: '',
-    address: '',
-    state: '',
-    city: '',
-    zipcode: '',
-    country: 'USA',
-    mailingAddress: '',
-    customerFeedback: ''
-  });
+  const [customer, setCustomer] = useState(INITIAL_CUSTOMER);
 
   // Customer validation state
-  const [customerValidation, setCustomerValidation] = useState({
-    firstName: { isValid: true, message: '' },
-    landline: { isValid: true, message: '' }
-  });
+  const [customerValidation, setCustomerValidation] = useState(INITIAL_CUSTOMER_VALIDATION);
 
   // Call functionality state
   const [callData, setCallData] = useState(null);
@@ -176,26 +242,8 @@ export default function AddSale() {
   const [selectedPaymentType, setSelectedPaymentType] = useState('card'); // 'card' or 'bank'
   
   // Preserve form data when toggling between payment options
-  const [cardFormData, setCardFormData] = useState({
-    cardType: '',
-    provider: '',
-    customerName: '',
-    cardNumber: '',
-    cvv: '',
-    expiryDate: '',
-    notes: ''
-  });
-  const [bankFormData, setBankFormData] = useState({
-    bankName: '',
-    accountHolder: '',
-    accountNumber: '',
-    routingNumber: '',
-    checkNumber: '',
-    driverLicense: '',
-    nameOnLicense: '',
-    stateId: '',
-    notes: ''
-  });
+  const [cardFormData, setCardFormData] = useState(INITIAL_CARD_FORM_DATA);
+  const [bankFormData, setBankFormData] = useState(INITIAL_BANK_FORM_DATA);
   
   // Success message state
   const [successMessage, setSuccessMessage] = useState('');
@@ -320,45 +368,7 @@ export default function AddSale() {
   };
 
   // Sale form state
-  const [saleForm, setSaleForm] = useState({
-    status: 'new', // Add status field
-    spoke_to: '',
-    pin_code: '',
-    pin_code_status: '',
-    ssnName: '',
-    ssnNumber: '',
-    ssn_number_status: '',
-    carrier: '',
-    basicPackage: '',
-    basicPackageStatus: '',
-    newPackage: '',
-    NoFTV: '',
-    AccHolder: '',
-    AccNumber: '',
-    NoReceiver: '',
-    question: '',
-    answer: '',
-    regularBill: '',
-    promotionalBill: '',
-    charge: '',
-    verifiedOn: '',
-    bundle: '',
-    company: '',
-    lastPayment: '',
-    lastPaymentDate: '',
-    breakdown: '',
-    additionalInfo: '',
-    notes: '',
-    balance: '',
-    dueonDate: '',
-    techVisitDate: '',
-    techVisitTime: '',
-    appointmentDateTime: '',
-    services: [],
-    receivers: {},
-    receiversInfo: {},
-    processingRequired: null // null | true | false - only relevant when status is active
-  });
+  const [saleForm, setSaleForm] = useState(INITIAL_SALE_FORM);
 
   // Modal states
   const [isDateModalOpen, setIsDateModalOpen] = useState(false);
@@ -665,6 +675,60 @@ export default function AddSale() {
   useEffect(() => {
     fetchCarriers();
   }, []);
+
+  // Reset stale edit-mode state when returning to plain /add-sale without an id.
+  useEffect(() => {
+    if (isEditMode) return;
+
+    setCustomer(INITIAL_CUSTOMER);
+    setCustomerValidation(INITIAL_CUSTOMER_VALIDATION);
+    setCallData(null);
+    setShowCallHistory(false);
+    setCreatedSale(null);
+    setCheckedCustomer(null);
+    setShowCallInfo(false);
+    setShowCheckNumber(false);
+    setIsCheckingNumber(false);
+    setShowCustomerInfoModal(false);
+    setLastSaleInfo(null);
+    setLastSaleCheckLoading(false);
+    lastFetchedLandlineRef.current = null;
+    setIsCheckNumberMode(false);
+    setHideCheckNumberSection(false);
+    setCallJustEnded(false);
+    setIsActionsCollapsed(false);
+    setSale(null);
+    setCustomerHasPayments(null);
+    setShowPaymentSection(false);
+    setSelectedPaymentType('card');
+    setCardFormData(INITIAL_CARD_FORM_DATA);
+    setBankFormData(INITIAL_BANK_FORM_DATA);
+    setSuccessMessage('');
+    setSaleForm(INITIAL_SALE_FORM);
+    setIsDateModalOpen(false);
+    setIsNoteModalOpen(false);
+    setIsNoteEditModalOpen(false);
+    setEditingNote(null);
+    setShouldScrollToBottom(false);
+    setSelectedReceiver([]);
+    setShowOtherReceiverInput(false);
+    setOtherReceiverName('');
+    setSavingOtherReceiver(false);
+    setModalId(null);
+    setSaleStatus('');
+    setSelectedDate('');
+    setLoading(false);
+    setError(null);
+    setSaving(false);
+    setShowCustomerDialog(false);
+    setCustomerWarning(null);
+    setProcessButtonEnabled(true);
+    setIsCommentModalOpen(false);
+    setCommentingNote(null);
+    setCommentText('');
+    setReceiverTemplates({});
+    setExpandedReceivers({});
+  }, [isEditMode]);
 
   // Pre-fill from call: fromCall=1&landline=XXX&firstName=YYY (Create Sale during active call)
   useEffect(() => {
