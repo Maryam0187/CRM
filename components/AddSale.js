@@ -277,9 +277,19 @@ export default function AddSale() {
         paymentsInfo = await fetchSalePaymentDetailsForDownload(apiClient, saleIdForPayments);
       }
 
-      downloadSaleDoc({
+      await downloadSaleDoc({
         fileName: `${customerFileName}-sale-${saleForm.id || editId || 'id'}.docx`,
-        sale: saleForm,
+        sale: {
+          ...saleForm,
+          agent:
+            saleForm.agent ||
+            (user
+              ? {
+                  firstName: user.firstName || user.first_name,
+                  lastName: user.lastName || user.last_name
+                }
+              : undefined)
+        },
         customer,
         card: selectedPaymentType === 'card' ? cardFormData : null,
         bank: selectedPaymentType === 'bank' ? bankFormData : null,

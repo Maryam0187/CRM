@@ -41,7 +41,7 @@ export default function Home() {
         paymentsInfo = await fetchSalePaymentDetailsForDownload(apiClient, saleIdNum);
       }
 
-      downloadSaleDoc({
+      await downloadSaleDoc({
         fileName,
         sale,
         customer,
