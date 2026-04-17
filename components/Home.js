@@ -29,7 +29,7 @@ export default function Home() {
     try {
       const saleId = sale.id || sale.saleId || sale.sale_id || sale.uuid || 'sale';
       const customerFirstName = sale?.customer?.firstName || sale?.customerName || 'customer';
-      const fileName = `${customerFirstName.toString().trim().replace(/\s+/g, '-').toLowerCase()}-sale-${saleId}.doc`;
+      const fileName = `${customerFirstName.toString().trim().replace(/\s+/g, '-').toLowerCase()}-sale-${saleId}.docx`;
 
       const customer = sale.customer || {};
       const primaryCard = Array.isArray(sale?.cards) ? sale.cards[0] : null;

@@ -278,7 +278,7 @@ export default function AddSale() {
       }
 
       downloadSaleDoc({
-        fileName: `${customerFileName}-sale-${saleForm.id || editId || 'id'}.doc`,
+        fileName: `${customerFileName}-sale-${saleForm.id || editId || 'id'}.docx`,
         sale: saleForm,
         customer,
         card: selectedPaymentType === 'card' ? cardFormData : null,
