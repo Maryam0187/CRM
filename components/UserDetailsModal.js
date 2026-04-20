@@ -59,6 +59,8 @@ export default function UserDetailsModal({ user, onClose }) {
   // Track if sales and call logs have been loaded
   const [salesLoaded, setSalesLoaded] = useState(false);
   const [callLogsLoaded, setCallLogsLoaded] = useState(false);
+  const [callMetrics, setCallMetrics] = useState(null);
+  const [callMetricsError, setCallMetricsError] = useState('');
   
   // Call logs view mode and filters (admin only)
   const [callLogsViewMode, setCallLogsViewMode] = useState('list'); // 'list' | 'table'
@@ -185,6 +187,37 @@ export default function UserDetailsModal({ user, onClose }) {
       fetchCallLogs();
     }
   }, [user, dateRange, callLogsPagination.offset, activeTab, appliedCallLogsFilters]);
+
+  const fetchCallMetrics = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      setLoading(true);
+      setCallMetricsError('');
+      const params = new URLSearchParams();
+      params.append('startDate', dateRange.startDate);
+      params.append('endDate', dateRange.endDate);
+      const response = await apiClient.get(`/api/users/${user.id}/call-metrics?${params}`);
+      const data = await response.json();
+      if (data.success && data.metrics) {
+        setCallMetrics(data.metrics);
+      } else {
+        setCallMetrics(null);
+        setCallMetricsError(data.error || 'Failed to load call metrics');
+      }
+    } catch (error) {
+      console.error('Error fetching call metrics:', error);
+      setCallMetrics(null);
+      setCallMetricsError('Failed to load call metrics');
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id, dateRange.startDate, dateRange.endDate]);
+
+  useEffect(() => {
+    if (user && activeTab === 'callMetrics') {
+      fetchCallMetrics();
+    }
+  }, [user, activeTab, dateRange.startDate, dateRange.endDate, fetchCallMetrics]);
 
 
   const fetchUserData = async () => {
@@ -391,6 +424,16 @@ export default function UserDetailsModal({ user, onClose }) {
     return labels[type] || type;
   };
 
+  const formatTotalCallDuration = (totalSeconds) => {
+    const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}h ${m}m ${sec}s`;
+    if (m > 0) return `${m}m ${sec}s`;
+    return `${sec}s`;
+  };
+
   const getLocationPermissionBadge = (permission) => {
     const config = {
       granted: { bg: 'bg-green-100', text: 'text-green-800', label: 'Granted' },
@@ -503,6 +546,16 @@ export default function UserDetailsModal({ user, onClose }) {
               }`}
             >
               Call Logs{activeTab === 'callLogs' && callLogsLoaded ? ` (${callLogsPagination.total})` : ''}
+            </button>
+            <button
+              onClick={() => setActiveTab('callMetrics')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+                activeTab === 'callMetrics'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Metrics
             </button>
             <button
               onClick={() => setActiveTab('info')}
@@ -1144,6 +1197,46 @@ export default function UserDetailsModal({ user, onClose }) {
                         </button>
                       </div>
                     </div>
+                  )}
+                </div>
+              )}
+
+              {/* Call metrics (date range uses header filter; counts by call log status) */}
+              {activeTab === 'callMetrics' && (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-500">
+                    Totals for <span className="font-medium text-gray-700">{dateRange.startDate}</span>
+                    {' — '}
+                    <span className="font-medium text-gray-700">{dateRange.endDate}</span>
+                    {' '}(by Twilio call status on each log).
+                  </p>
+                  {callMetricsError ? (
+                    <p className="text-red-600 text-center py-6">{callMetricsError}</p>
+                  ) : callMetrics ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {[
+                        { label: 'Total calls', value: callMetrics.totalCalls, tone: 'border-gray-200 bg-white' },
+                        { label: 'Completed', value: callMetrics.completedCalls, tone: 'border-green-200 bg-green-50' },
+                        { label: 'Failed', value: callMetrics.failedCalls, tone: 'border-red-200 bg-red-50' },
+                        { label: 'Busy', value: callMetrics.busyCalls, tone: 'border-amber-200 bg-amber-50' },
+                        { label: 'No answer', value: callMetrics.noAnswerCalls, tone: 'border-yellow-200 bg-yellow-50' },
+                        {
+                          label: 'Total call duration',
+                          value: formatTotalCallDuration(callMetrics.totalDurationSeconds),
+                          tone: 'border-blue-200 bg-blue-50'
+                        }
+                      ].map((card) => (
+                        <div
+                          key={card.label}
+                          className={`rounded-lg border p-4 shadow-sm ${card.tone}`}
+                        >
+                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{card.label}</p>
+                          <p className="mt-2 text-2xl font-semibold text-gray-900">{card.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-center py-8">No data</p>
                   )}
                 </div>
               )}
