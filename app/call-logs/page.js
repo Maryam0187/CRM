@@ -1195,19 +1195,24 @@ export default function CallLogsPage() {
                             <button
                               onClick={() => handleCallFromRow(call.toNumber, getDisplayName(call))}
                               disabled={hasActiveCall || !isTwilioEnabled || !call.toNumber}
-                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-700 bg-green-100 hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed rounded"
+                              className="inline-flex items-center justify-center w-7 h-7 text-green-700 bg-green-100 hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed rounded"
+                              title="Call"
+                              aria-label="Call"
                             >
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                               </svg>
-                              Call
                             </button>
                             <button
                               onClick={() => openCreateSale(call.toNumber, getDisplayName(call))}
                               disabled={!call.toNumber}
-                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed rounded"
+                              className="inline-flex items-center justify-center w-7 h-7 text-blue-700 bg-blue-100 hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed rounded"
+                              title="Create sale"
+                              aria-label="Create sale"
                             >
-                              Create sale
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
                             </button>
                           </div>
                         </td>
