@@ -61,6 +61,7 @@ export default function CallLogsPage() {
   const [postCallNote, setPostCallNote] = useState('');
   const [postCallOutcome, setPostCallOutcome] = useState('');
   const [savingPostCall, setSavingPostCall] = useState(false);
+  const [savingOutcomeCallId, setSavingOutcomeCallId] = useState(null);
 
   const lastActiveCallSidRef = useRef(null);
   const pendingPostCallMetaRef = useRef(null);
@@ -519,6 +520,30 @@ export default function CallLogsPage() {
     setPostCallNote('');
     pendingPostCallMetaRef.current = null;
     resetDialFields();
+  };
+
+  const handleOutcomeChange = async (call, selectedOutcome) => {
+    if (!call?.callSid) return;
+    setSavingOutcomeCallId(call.id);
+    try {
+      const outcomeValue = selectedOutcome || null;
+      const res = await apiClient.post('/api/calls/notes', {
+        callSid: call.callSid,
+        callOutcome: outcomeValue,
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCalls((prev) =>
+          prev.map((c) =>
+            c.id === call.id ? { ...c, callOutcome: selectedOutcome || null } : c
+          )
+        );
+      }
+    } catch (err) {
+      console.error('Error updating call outcome:', err);
+    } finally {
+      setSavingOutcomeCallId(null);
+    }
   };
 
   return (
@@ -1126,13 +1151,23 @@ export default function CallLogsPage() {
                         <td className="px-4 py-3 text-sm text-gray-600">{formatDuration(call.duration)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{getCallPurposeDisplay(call.callPurpose)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">
-                          {call.callOutcome ? (
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getOutcomeBadgeClasses(call.callOutcome)}`}>
-                              {postCallOutcomeOptions.find((option) => option.value === call.callOutcome)?.label || call.callOutcome}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
+                          <select
+                            value={call.callOutcome || ''}
+                            onChange={(e) => handleOutcomeChange(call, e.target.value)}
+                            disabled={savingOutcomeCallId === call.id}
+                            className={`w-full min-w-[150px] px-2.5 py-1.5 text-xs font-medium rounded-lg border border-transparent focus:ring-2 focus:ring-blue-500 ${
+                              call.callOutcome
+                                ? getOutcomeBadgeClasses(call.callOutcome)
+                                : 'bg-gray-100 text-gray-700'
+                            } ${savingOutcomeCallId === call.id ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          >
+                            <option value="">Select outcome</option>
+                            {postCallOutcomeOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px]">
                           {call.callNotes ? (
