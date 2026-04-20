@@ -7,7 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useCall } from '../../contexts/CallContext';
 import ProtectedRoute from '../../components/ProtectedRoute';
 import apiClient from '../../lib/apiClient';
-import { getCallStatusDisplayName, getCallStatusBadgeClasses } from '../../lib/salesStatuses';
+import { getCallStatusDisplayName, getCallStatusBadgeClasses, getStatusBadgeClasses } from '../../lib/salesStatuses';
 import { formatLandline } from '../../lib/validation';
 import { isAdmin, isSupervisor } from '../../lib/roleUtils';
 import { getCallPurposeDisplay } from '../../lib/twilio';
@@ -81,6 +81,17 @@ export default function CallLogsPage() {
     { value: 'hangup', label: 'Hangup' },
     { value: 'no_response', label: 'No Response' },
   ];
+  const outcomeToSalesStatus = {
+    voicemail: 'voicemail',
+    lead_call: 'lead-call',
+    hangup: 'hang-up',
+    no_response: 'no_response',
+  };
+  const getOutcomeBadgeClasses = (outcome) => {
+    const mappedStatus = outcomeToSalesStatus[outcome];
+    if (!mappedStatus) return 'bg-gray-100 text-gray-800';
+    return getStatusBadgeClasses(mappedStatus);
+  };
 
   useEffect(() => {
     if (user?.id) fetchCalls();
@@ -1115,7 +1126,13 @@ export default function CallLogsPage() {
                         <td className="px-4 py-3 text-sm text-gray-600">{formatDuration(call.duration)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{getCallPurposeDisplay(call.callPurpose)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">
-                          {postCallOutcomeOptions.find((option) => option.value === call.callOutcome)?.label || '—'}
+                          {call.callOutcome ? (
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getOutcomeBadgeClasses(call.callOutcome)}`}>
+                              {postCallOutcomeOptions.find((option) => option.value === call.callOutcome)?.label || call.callOutcome}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px]">
                           {call.callNotes ? (
@@ -1309,10 +1326,10 @@ export default function CallLogsPage() {
                       key={option.value}
                       type="button"
                       onClick={() => setPostCallOutcome(option.value)}
-                      className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
+                      className={`px-3 py-2 text-sm rounded-lg border transition-colors font-medium ${
                         postCallOutcome === option.value
-                          ? 'border-blue-600 bg-blue-50 text-blue-700'
-                          : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                          ? `border-transparent ${getOutcomeBadgeClasses(option.value)}`
+                          : `${getOutcomeBadgeClasses(option.value)} opacity-70 hover:opacity-100 border-transparent`
                       }`}
                     >
                       {option.label}
