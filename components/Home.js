@@ -695,8 +695,8 @@ export default function Home() {
   ];
 
   const handleRowClick = (row, index) => {
-    console.log('Sale clicked:', row, 'Index:', index);
-    // You can add navigation or modal opening logic here
+    if (!row?.id) return;
+    handleEdit(row.id);
   };
 
   const handleFilterChange = (filterValue) => {
