@@ -247,6 +247,7 @@ export default function AddSale() {
   
   // Success message state
   const [successMessage, setSuccessMessage] = useState('');
+  const [isDownloadingDoc, setIsDownloadingDoc] = useState(false);
   
   // Clear success message after 5 seconds
   useEffect(() => {
@@ -259,7 +260,9 @@ export default function AddSale() {
   }, [successMessage]);
 
   const handleDownloadDoc = async () => {
+    if (isDownloadingDoc) return;
     try {
+      setIsDownloadingDoc(true);
       const customerFileName =
         customer.firstName && customer.firstName.trim().length > 0
           ? customer.firstName.trim().replace(/\s+/g, '-').toLowerCase()
@@ -300,6 +303,8 @@ export default function AddSale() {
     } catch (error) {
       console.error('Error generating sale document:', error);
       showError('Unable to generate the sale document. Please try again.');
+    } finally {
+      setIsDownloadingDoc(false);
     }
   };
 
@@ -3211,6 +3216,14 @@ Room: `;
   //   };
   // }, []);
 
+  const saleHeadingId = saleForm.id || editId || 'new';
+  const saleHeadingAgentName =
+    `${saleForm?.agent?.firstName || saleForm?.agent?.first_name || user?.firstName || user?.first_name || ''} ${
+      saleForm?.agent?.lastName || saleForm?.agent?.last_name || user?.lastName || user?.last_name || ''
+    }`.trim() || 'Unknown Agent';
+  const saleHeadingCustomerName =
+    `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim() || customer?.firstName || 'Unknown Customer';
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -3219,7 +3232,7 @@ Room: `;
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
-                {isEditMode ? 'Edit Sale' : 'Add New Sale'}
+                {`Sale #${saleHeadingId} by ${saleHeadingAgentName} of ${saleHeadingCustomerName}`}
               </h1>
               <p className="mt-1 text-sm text-gray-600">
                 {isEditMode 
@@ -3232,12 +3245,24 @@ Room: `;
               {user?.role === 'admin' && (
                 <button
                   onClick={handleDownloadDoc}
-                  className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
+                  disabled={isDownloadingDoc}
+                  className={`inline-flex items-center px-4 py-2 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-200 ${
+                    isDownloadingDoc
+                      ? 'bg-blue-400 text-white cursor-not-allowed focus:ring-blue-400'
+                      : 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500'
+                  }`}
                 >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
-                  </svg>
-                  Download DOC
+                  {isDownloadingDoc ? (
+                    <svg className="w-4 h-4 mr-2 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle>
+                      <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"></path>
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+                    </svg>
+                  )}
+                  {isDownloadingDoc ? 'Preparing DOC...' : 'Download DOC'}
                 </button>
               )}
               <button
@@ -4513,9 +4538,6 @@ Room: `;
                               <div><strong>Agent:</strong> {`${saleForm.agent.firstName || ''} ${saleForm.agent.lastName || ''}`.trim() || 'N/A'}</div>
                             );
                           })()}
-                          {saleForm.notes && (
-                            <div><strong>Notes:</strong> {saleForm.notes}</div>
-                          )}
                         </div>
                       </div>
 

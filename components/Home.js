@@ -58,6 +58,7 @@ export default function Home() {
       console.error('Failed to generate sale document:', error);
     } finally {
       setDownloadingSaleId((prev) => (prev === saleId ? null : prev));
+      setOpenActionsMenuSaleId((prev) => (prev === saleId ? null : prev));
     }
   };
 
@@ -147,6 +148,7 @@ export default function Home() {
   // Timeline modal state
   const [isTimelineModalVisible, setIsTimelineModalVisible] = useState(false);
   const [selectedTimelineSaleId, setSelectedTimelineSaleId] = useState(null);
+  const [openActionsMenuSaleId, setOpenActionsMenuSaleId] = useState(null);
 
 
   // Set supervised agents from user session data
@@ -370,6 +372,20 @@ export default function Home() {
       // Supervisor-specific dependencies only trigger for supervisors due to conditional logic above
       selectedAgent, showingSupervisorSales, selectedUserId]);
 
+  // Close actions menu on outside click.
+  useEffect(() => {
+    const handleDocumentClick = (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-actions-menu-root="true"]')) {
+        return;
+      }
+      setOpenActionsMenuSaleId(null);
+    };
+
+    document.addEventListener('mousedown', handleDocumentClick);
+    return () => document.removeEventListener('mousedown', handleDocumentClick);
+  }, []);
+
 
   // Handler functions for supervisor interface
   const handleAgentSelect = (agent) => {
@@ -578,77 +594,99 @@ export default function Home() {
         // Customer-based: show View Payment if this customer has any payment on any sale
         const hasPayments = row.customerHasPayments === true;
         const isDownloadingSale = downloadingSaleId === row.id;
+        const isMenuOpen = openActionsMenuSaleId === row.id;
         
         return (
-          <div className="flex gap-2">
+          <div className="relative inline-flex" data-actions-menu-root="true">
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                handleEdit(row.id);
+                setOpenActionsMenuSaleId((prev) => (prev === row.id ? null : row.id));
               }}
-              className="inline-flex items-center px-3 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors duration-200"
+              className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-800 transition-colors duration-200 cursor-pointer"
+              title="Actions"
+              aria-label="Open actions menu"
+              aria-expanded={isMenuOpen}
             >
-              <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M10 4a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 7.5A1.5 1.5 0 1010 8a1.5 1.5 0 000 3.5zM11.5 17a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
               </svg>
-              Edit Sale
             </button>
-            {hasPayments && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleViewPayment(row.id, row.customerId);
-                }}
-                className="inline-flex items-center px-3 py-1 text-xs font-medium text-purple-600 bg-purple-50 rounded-md hover:bg-purple-100 transition-colors duration-200"
-              >
-                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                View Payment
-              </button>
-            )}
-            {user?.role === 'admin' && (
-              <>
+
+            {isMenuOpen && (
+              <div className="absolute right-0 top-9 z-50 min-w-[200px] rounded-lg border border-gray-200 bg-gray-50 shadow-lg p-2 flex flex-col gap-2 items-stretch">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleDownloadSaleDoc(row);
+                    handleEdit(row.id);
+                    setOpenActionsMenuSaleId(null);
                   }}
-                  disabled={isDownloadingSale}
-                  className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md transition-colors duration-200 ${
-                    isDownloadingSale
-                      ? 'text-green-400 bg-green-50 cursor-not-allowed'
-                      : 'text-green-600 bg-green-50 hover:bg-green-100'
-                  }`}
-                  title={isDownloadingSale ? 'Preparing file...' : 'Download Sale DOC'}
+                  className="inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors duration-200 cursor-pointer"
                 >
-                  {isDownloadingSale ? (
-                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle>
-                      <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"></path>
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
-                    </svg>
-                  )}
-                  <span className="sr-only">Download sale document</span>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedTimelineSaleId(row.id);
-                    setIsTimelineModalVisible(true);
-                  }}
-                  className="inline-flex items-center px-3 py-1 text-xs font-medium text-purple-600 bg-purple-50 rounded-md hover:bg-purple-100 transition-colors duration-200"
-                >
-                  <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
-                  Timeline
+                  Edit Sale
                 </button>
-              </>
+                {hasPayments && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleViewPayment(row.id, row.customerId);
+                      setOpenActionsMenuSaleId(null);
+                    }}
+                    className="inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-purple-600 bg-purple-50 rounded-md hover:bg-purple-100 transition-colors duration-200 cursor-pointer"
+                  >
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    View Payment
+                  </button>
+                )}
+                {user?.role === 'admin' && (
+                  <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownloadSaleDoc(row);
+                      }}
+                      disabled={isDownloadingSale}
+                      className={`inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 ${
+                        isDownloadingSale
+                          ? 'text-green-400 bg-green-50 cursor-not-allowed'
+                          : 'text-green-600 bg-green-50 hover:bg-green-100 cursor-pointer'
+                      }`}
+                    >
+                      {isDownloadingSale ? (
+                        <svg className="w-4 h-4 flex-shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle>
+                          <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"></path>
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+                        </svg>
+                      )}
+                      {isDownloadingSale ? 'Preparing DOC...' : 'Download DOC'}
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedTimelineSaleId(row.id);
+                        setIsTimelineModalVisible(true);
+                        setOpenActionsMenuSaleId(null);
+                      }}
+                      className="inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-purple-600 bg-purple-50 rounded-md hover:bg-purple-100 transition-colors duration-200 cursor-pointer"
+                    >
+                      <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Timeline
+                    </button>
+                  </>
+                )}
+              </div>
             )}
           </div>
         );
