@@ -79,7 +79,7 @@ export default function CallLogsPage() {
     if (currentCallSid) lastActiveCallSidRef.current = currentCallSid;
   }, [currentCallSid]);
 
-  // When call ends: save note, customer name, city, zipcode to call log and clear the form
+  // When call ends: save note/customer details and clear only name + number inputs
   useEffect(() => {
     if (currentCallSid || isCalling || isWebCallConnected) return;
     const sid = lastActiveCallSidRef.current;
@@ -102,8 +102,6 @@ export default function CallLogsPage() {
     setQuickDialNumber('');
     setQuickDialName('');
     setQuickDialNote('');
-    setFreshCity('');
-    setFreshZipcode('');
     setQuickDialValidation({ isValid: true, message: '' });
     setCheckResult(null);
   }, [currentCallSid, isCalling, isWebCallConnected]);
