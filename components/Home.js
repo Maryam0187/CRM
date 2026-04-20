@@ -31,9 +31,13 @@ export default function Home() {
       const customerFirstName = sale?.customer?.firstName || sale?.customerName || 'customer';
       const fileName = `${customerFirstName.toString().trim().replace(/\s+/g, '-').toLowerCase()}-sale-${saleId}.docx`;
 
-      const customer = sale.customer || {};
-      const primaryCard = Array.isArray(sale?.cards) ? sale.cards[0] : null;
-      const primaryBank = Array.isArray(sale?.banks) ? sale.banks[0] : null;
+      const customer = {
+        ...(sale?.customer || {}),
+        // Some list payloads keep street address on sale.address.
+        // Keep a normalized snapshot so repeated downloads are stable.
+        address: sale?.customer?.address ?? sale?.address ?? ''
+      };
+      const saleSnapshot = { ...sale };
 
       let paymentsInfo = null;
       const saleIdNum = parseInt(String(saleId), 10);
@@ -43,10 +47,8 @@ export default function Home() {
 
       await downloadSaleDoc({
         fileName,
-        sale,
+        sale: saleSnapshot,
         customer,
-        card: primaryCard,
-        bank: primaryBank,
         paymentsInfo
       });
     } catch (error) {
