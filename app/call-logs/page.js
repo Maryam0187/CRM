@@ -56,8 +56,14 @@ export default function CallLogsPage() {
   const [editingNote, setEditingNote] = useState(false);
   const [editNoteValue, setEditNoteValue] = useState('');
   const [savingNote, setSavingNote] = useState(false);
+  const [showPostCallDialog, setShowPostCallDialog] = useState(false);
+  const [postCallSid, setPostCallSid] = useState('');
+  const [postCallNote, setPostCallNote] = useState('');
+  const [postCallOutcome, setPostCallOutcome] = useState('');
+  const [savingPostCall, setSavingPostCall] = useState(false);
 
   const lastActiveCallSidRef = useRef(null);
+  const pendingPostCallMetaRef = useRef(null);
   const quickDialNoteRef = useRef(quickDialNote);
   quickDialNoteRef.current = quickDialNote;
   const quickDialNameRef = useRef(quickDialName);
@@ -69,6 +75,12 @@ export default function CallLogsPage() {
 
   const hasActiveCall = currentCallSid || isCalling || isWebCallConnected;
   const isTwilioEnabled = user?.twilio_enabled !== undefined ? user.twilio_enabled : true;
+  const postCallOutcomeOptions = [
+    { value: 'voicemail', label: 'Voicemail' },
+    { value: 'lead_call', label: 'Lead Call' },
+    { value: 'hangup', label: 'Hangup' },
+    { value: 'no_response', label: 'No Response' },
+  ];
 
   useEffect(() => {
     if (user?.id) fetchCalls();
@@ -79,31 +91,29 @@ export default function CallLogsPage() {
     if (currentCallSid) lastActiveCallSidRef.current = currentCallSid;
   }, [currentCallSid]);
 
-  // When call ends: save note/customer details and clear only name + number inputs
-  useEffect(() => {
-    if (currentCallSid || isCalling || isWebCallConnected) return;
-    const sid = lastActiveCallSidRef.current;
-    if (!sid) return;
-    lastActiveCallSidRef.current = null;
-    const noteToSave = (quickDialNoteRef.current || '').trim();
-    const nameToSave = (quickDialNameRef.current || '').trim();
-    const cityToSave = (freshCityRef.current || '').trim();
-    const zipcodeToSave = (freshZipcodeRef.current || '').trim();
-    
-    // Only call API if there's something to save
-    if (noteToSave || nameToSave || cityToSave || zipcodeToSave) {
-      const updateData = { callSid: sid };
-      if (noteToSave) updateData.notes = noteToSave;
-      if (nameToSave) updateData.customerName = nameToSave;
-      if (cityToSave) updateData.city = cityToSave;
-      if (zipcodeToSave) updateData.zipcode = zipcodeToSave;
-      apiClient.post('/api/calls/notes', updateData).catch(() => {});
-    }
+  const resetDialFields = () => {
     setQuickDialNumber('');
     setQuickDialName('');
     setQuickDialNote('');
     setQuickDialValidation({ isValid: true, message: '' });
     setCheckResult(null);
+  };
+
+  // When call ends: for lead/quick dial open post-call outcome dialog
+  useEffect(() => {
+    if (currentCallSid || isCalling || isWebCallConnected) return;
+    const sid = lastActiveCallSidRef.current;
+    if (!sid) return;
+    lastActiveCallSidRef.current = null;
+    const meta = pendingPostCallMetaRef.current;
+    if (meta && (meta.callSource === 'lead_dialing' || meta.callSource === 'quick_dialing')) {
+      setPostCallSid(sid);
+      setPostCallNote(meta.note || '');
+      setPostCallOutcome('');
+      setShowPostCallDialog(true);
+      return;
+    }
+    resetDialFields();
   }, [currentCallSid, isCalling, isWebCallConnected]);
 
   const handleApplyFilters = () => {
@@ -302,6 +312,13 @@ export default function CallLogsPage() {
     const v = validatePhone(quickDialNumber);
     setQuickDialValidation(v);
     if (!v.isValid || !user?.id || !isTwilioEnabled || hasActiveCall) return;
+    pendingPostCallMetaRef.current = {
+      callSource: 'lead_dialing',
+      note: quickDialNote.trim(),
+      customerName: quickDialName.trim(),
+      city: freshCity.trim(),
+      zipcode: freshZipcode.trim(),
+    };
     await initiateCall({
       customerId: null,
       saleId: null,
@@ -323,6 +340,13 @@ export default function CallLogsPage() {
     const v = validatePhone(quickDialNumber);
     setQuickDialValidation(v);
     if (!v.isValid || !user?.id || !isTwilioEnabled || hasActiveCall) return;
+    pendingPostCallMetaRef.current = {
+      callSource: 'quick_dialing',
+      note: quickDialNote.trim(),
+      customerName: quickDialName.trim(),
+      city: freshCity.trim(),
+      zipcode: freshZipcode.trim(),
+    };
     await initiateCall({
       customerId: null,
       saleId: null,
@@ -338,6 +362,7 @@ export default function CallLogsPage() {
 
   const handleCallFromRow = async (phoneNumber, customerName) => {
     if (!phoneNumber || !user?.id || !isTwilioEnabled || hasActiveCall) return;
+    pendingPostCallMetaRef.current = null;
     await initiateCall({
       customerId: null,
       saleId: null,
@@ -436,6 +461,53 @@ export default function CallLogsPage() {
     setNoteModalCallId(null);
     setEditingNote(false);
     setEditNoteValue('');
+  };
+
+  const handleSavePostCallDialog = async () => {
+    if (!postCallSid || !postCallOutcome) return;
+    setSavingPostCall(true);
+    try {
+      const meta = pendingPostCallMetaRef.current || {};
+      const payload = {
+        callSid: postCallSid,
+        callOutcome: postCallOutcome,
+        notes: postCallNote.trim(),
+      };
+      if (meta.customerName) payload.customerName = meta.customerName;
+      if (meta.city) payload.city = meta.city;
+      if (meta.zipcode) payload.zipcode = meta.zipcode;
+      const res = await apiClient.post('/api/calls/notes', payload);
+      const data = await res.json();
+      if (data.success) {
+        setCalls((prev) =>
+          prev.map((c) =>
+            c.callSid === postCallSid
+              ? { ...c, callNotes: postCallNote.trim(), callOutcome: postCallOutcome }
+              : c
+          )
+        );
+        setShowPostCallDialog(false);
+        setPostCallSid('');
+        setPostCallOutcome('');
+        setPostCallNote('');
+        pendingPostCallMetaRef.current = null;
+        resetDialFields();
+        fetchCalls();
+      }
+    } catch (err) {
+      console.error('Error saving post-call outcome:', err);
+    } finally {
+      setSavingPostCall(false);
+    }
+  };
+
+  const handleClosePostCallDialog = () => {
+    setShowPostCallDialog(false);
+    setPostCallSid('');
+    setPostCallOutcome('');
+    setPostCallNote('');
+    pendingPostCallMetaRef.current = null;
+    resetDialFields();
   };
 
   return (
@@ -546,7 +618,7 @@ export default function CallLogsPage() {
 
               {/* 3. Number & Call button - only when state is selected */}
               {freshState && (
-              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
+              <div className="flex flex-col sm:flex-row gap-3 items-start">
                 <div className="flex-1 max-w-md">
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number *</label>
                   <input
@@ -568,14 +640,14 @@ export default function CallLogsPage() {
                     placeholder="Paste or enter phone number"
                     className={`w-full px-5 py-3.5 text-xl font-mono border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm ${quickDialValidation.isValid ? 'border-blue-400 bg-blue-50/30' : 'border-red-500 bg-red-50/30'}`}
                   />
-                  {quickDialValidation.message && (
-                    <p className={`mt-1 text-xs ${quickDialValidation.isValid ? 'text-gray-500' : 'text-red-600'}`}>{quickDialValidation.message}</p>
-                  )}
+                  <p className={`mt-1 text-xs min-h-[1rem] ${quickDialValidation.message ? (quickDialValidation.isValid ? 'text-gray-500' : 'text-red-600') : 'invisible'}`}>
+                    {quickDialValidation.message || 'placeholder'}
+                  </p>
                 </div>
                 <button
                   onClick={handleQuickDialCall}
                   disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled}
-                  className="w-full sm:w-auto px-8 py-3.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
+                  className="w-full sm:w-auto sm:mt-6 px-8 py-3.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
@@ -621,7 +693,7 @@ export default function CallLogsPage() {
             <p className="text-sm text-gray-500 mb-3">Enter number and optional name and note, then Call. No check step.</p>
             <div className="space-y-4">
               {/* Number & Call button */}
-              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
+              <div className="flex flex-col sm:flex-row gap-3 items-start">
                 <div className="flex-1 max-w-md">
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number *</label>
                   <input
@@ -643,14 +715,14 @@ export default function CallLogsPage() {
                     placeholder="Paste or enter phone number"
                     className={`w-full px-5 py-3.5 text-xl font-mono border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm ${quickDialValidation.isValid ? 'border-blue-400 bg-blue-50/30' : 'border-red-500 bg-red-50/30'}`}
                   />
-                  {quickDialValidation.message && (
-                    <p className={`mt-1 text-xs ${quickDialValidation.isValid ? 'text-gray-500' : 'text-red-600'}`}>{quickDialValidation.message}</p>
-                  )}
+                  <p className={`mt-1 text-xs min-h-[1rem] ${quickDialValidation.message ? (quickDialValidation.isValid ? 'text-gray-500' : 'text-red-600') : 'invisible'}`}>
+                    {quickDialValidation.message || 'placeholder'}
+                  </p>
                 </div>
                 <button
                   onClick={handleQuickDialCallNoCheck}
                   disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled}
-                  className="w-full sm:w-auto px-8 py-3.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
+                  className="w-full sm:w-auto sm:mt-6 px-8 py-3.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
@@ -1022,6 +1094,7 @@ export default function CallLogsPage() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Purpose</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Outcome</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note</th>
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
                     </tr>
@@ -1041,6 +1114,9 @@ export default function CallLogsPage() {
                         <td className="px-4 py-3 text-sm text-gray-600">{formatDate(call.created_at || call.createdAt)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{formatDuration(call.duration)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{getCallPurposeDisplay(call.callPurpose)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {postCallOutcomeOptions.find((option) => option.value === call.callOutcome)?.label || '—'}
+                        </td>
                         <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px]">
                           {call.callNotes ? (
                             <button
@@ -1200,6 +1276,81 @@ export default function CallLogsPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {showPostCallDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+              <h3 className="text-lg font-semibold text-gray-900">Post-call details</h3>
+              <p className="text-sm text-gray-500 mt-1">Select one outcome and add notes.</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleClosePostCallDialog}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100"
+                aria-label="Close post-call modal"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-2">Call outcome *</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {postCallOutcomeOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setPostCallOutcome(option.value)}
+                      className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
+                        postCallOutcome === option.value
+                          ? 'border-blue-600 bg-blue-50 text-blue-700'
+                          : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <textarea
+                  value={postCallNote}
+                  onChange={(e) => setPostCallNote(e.target.value)}
+                  placeholder="Add call note..."
+                  rows={4}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={handleClosePostCallDialog}
+                disabled={savingPostCall}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={handleSavePostCallDialog}
+                disabled={!postCallOutcome || savingPostCall}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
+              >
+                {savingPostCall ? 'Saving...' : 'Save'}
+              </button>
+            </div>
           </div>
         </div>
       )}

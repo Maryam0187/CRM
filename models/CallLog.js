@@ -123,6 +123,12 @@ module.exports = (sequelize) => {
       allowNull: true,
       field: 'call_notes'
     },
+    callOutcome: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: 'call_outcome',
+      comment: 'Agent-selected post-call outcome'
+    },
     callPurpose: {
       type: DataTypes.ENUM('follow_up', 'cold_call', 'support', 'sales', 'appointment', 'other', 'ivr_dialer'),
       allowNull: true,

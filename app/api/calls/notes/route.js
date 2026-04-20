@@ -16,7 +16,7 @@ export async function POST(request) {
     }
 
 const body = await request.json();
-    const { callSid, notes, callPurpose, customerName, city, zipcode } = body;
+    const { callSid, notes, callPurpose, customerName, city, zipcode, callOutcome } = body;
 
     if (!callSid) {
       return NextResponse.json(
@@ -60,6 +60,17 @@ const body = await request.json();
       updateData.zipcode = zipcode;
     }
 
+    if (callOutcome !== undefined) {
+      const allowedOutcomes = ['voicemail', 'lead_call', 'hangup', 'no_response'];
+      if (callOutcome !== null && callOutcome !== '' && !allowedOutcomes.includes(callOutcome)) {
+        return NextResponse.json(
+          { success: false, message: 'Invalid call outcome value' },
+          { status: 400 }
+        );
+      }
+      updateData.callOutcome = callOutcome || null;
+    }
+
     await callLog.update(updateData);
 
     return NextResponse.json({
@@ -68,7 +79,8 @@ const body = await request.json();
       data: {
         callSid: callLog.callSid,
         notes: callLog.callNotes,
-        purpose: callLog.callPurpose
+        purpose: callLog.callPurpose,
+        callOutcome: callLog.callOutcome
       }
     });
 

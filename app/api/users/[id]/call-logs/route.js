@@ -112,6 +112,7 @@ export async function GET(request, { params }) {
         status: callLog.status,
         duration: callLog.duration,
         callPurpose: callLog.callPurpose,
+        callOutcome: callLog.callOutcome,
         callSource: callLog.callSource,
         callNotes: callLog.callNotes,
         customerName: callLog.customerName,
