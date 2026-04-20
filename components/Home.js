@@ -22,12 +22,15 @@ export default function Home() {
   const pathname = usePathname();
   const { user } = useAuth();
   const { socket, isConnected } = useSocket();
+  const [downloadingSaleId, setDownloadingSaleId] = useState(null);
 
   const handleDownloadSaleDoc = async (sale) => {
     if (!sale) return;
+    const saleId = sale.id || sale.saleId || sale.sale_id || sale.uuid || 'sale';
+    if (downloadingSaleId === saleId) return;
 
     try {
-      const saleId = sale.id || sale.saleId || sale.sale_id || sale.uuid || 'sale';
+      setDownloadingSaleId(saleId);
       const customerFirstName = sale?.customer?.firstName || sale?.customerName || 'customer';
       const fileName = `${customerFirstName.toString().trim().replace(/\s+/g, '-').toLowerCase()}-sale-${saleId}.docx`;
 
@@ -53,6 +56,8 @@ export default function Home() {
       });
     } catch (error) {
       console.error('Failed to generate sale document:', error);
+    } finally {
+      setDownloadingSaleId((prev) => (prev === saleId ? null : prev));
     }
   };
 
@@ -572,6 +577,7 @@ export default function Home() {
       render: (value, row) => {
         // Customer-based: show View Payment if this customer has any payment on any sale
         const hasPayments = row.customerHasPayments === true;
+        const isDownloadingSale = downloadingSaleId === row.id;
         
         return (
           <div className="flex gap-2">
@@ -609,12 +615,24 @@ export default function Home() {
                     e.stopPropagation();
                     handleDownloadSaleDoc(row);
                   }}
-                  className="inline-flex items-center px-2.5 py-1 text-xs font-medium text-green-600 bg-green-50 rounded-md hover:bg-green-100 transition-colors duration-200"
-                  title="Download Sale DOC"
+                  disabled={isDownloadingSale}
+                  className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md transition-colors duration-200 ${
+                    isDownloadingSale
+                      ? 'text-green-400 bg-green-50 cursor-not-allowed'
+                      : 'text-green-600 bg-green-50 hover:bg-green-100'
+                  }`}
+                  title={isDownloadingSale ? 'Preparing file...' : 'Download Sale DOC'}
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
-                  </svg>
+                  {isDownloadingSale ? (
+                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle>
+                      <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"></path>
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+                    </svg>
+                  )}
                   <span className="sr-only">Download sale document</span>
                 </button>
                 <button
