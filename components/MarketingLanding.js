@@ -5,6 +5,36 @@ import Link from 'next/link';
 
 export default function MarketingLanding() {
   const [activeDemo, setActiveDemo] = useState('dashboard');
+  const keyHighlights = [
+    {
+      title: 'VoIP Calling Built In',
+      detail: 'Handle inbound and outbound calls directly inside the CRM without switching tools.'
+    },
+    {
+      title: 'Twilio Integration',
+      detail: 'Use Twilio-powered telephony for reliable call workflows and scalable communication.'
+    },
+    {
+      title: 'Conference Calls',
+      detail: 'Bring agents, managers, and clients together quickly with built-in conference support.'
+    },
+    {
+      title: 'Call Recording',
+      detail: 'Record and review calls for quality checks, training, and better follow-up.'
+    },
+    {
+      title: 'Modern, Clean UI',
+      detail: 'A simple interface designed for fast onboarding and efficient day-to-day execution.'
+    },
+    {
+      title: 'Sales Management',
+      detail: 'Track leads, activities, pipeline, and outcomes in one centralized platform.'
+    },
+    {
+      title: 'Admin, Supervisor & Agent Roles',
+      detail: 'Role-based access gives each team member the right tools and permissions based on responsibility.'
+    }
+  ];
 
   const features = [
     {
@@ -76,7 +106,7 @@ export default function MarketingLanding() {
     {
       icon: '🔐',
       title: 'Role-Based Access',
-      description: 'Secure access control with customizable roles and permissions for different user types.',
+      description: 'Secure access control with dedicated Admin, Supervisor, and Agent permissions.',
       color: 'from-slate-500 to-gray-500'
     }
   ];
@@ -120,9 +150,21 @@ export default function MarketingLanding() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <span className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                  SalesCRM
-                </span>
+                <Link href="/marketing" className="flex items-center space-x-3">
+                  <div className="relative">
+                    <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-xl flex items-center justify-center shadow-lg">
+                      <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                      </svg>
+                    </div>
+                    <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white flex items-center justify-center">
+                      <div className="w-2 h-2 bg-white rounded-full"></div>
+                    </div>
+                  </div>
+                  <span className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                    SalesCRM
+                  </span>
+                </Link>
               </div>
             </div>
             <div className="hidden md:flex items-center space-x-8">
@@ -155,21 +197,21 @@ export default function MarketingLanding() {
               <span className="text-gray-800">for Modern Sales Teams</span>
             </h1>
             <p className="text-xl md:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto">
-              Manage customers, track sales, and make calls all in one place. 
-              Everything you need to grow your business, built for the modern web.
+              Built to help sales teams communicate faster and close more deals with
+              integrated VoIP, Twilio, conference calling, recordings, and streamlined sales workflows.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <Link 
+              <Link
                 href="/signin"
                 className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-4 rounded-xl text-lg font-semibold hover:shadow-2xl hover:scale-105 transition-all duration-300"
               >
-                Start Free Trial
+                Book a Demo
               </Link>
-              <a 
-                href="#demo"
+              <a
+                href="#contact"
                 className="bg-white text-gray-800 px-8 py-4 rounded-xl text-lg font-semibold border-2 border-gray-300 hover:border-blue-600 hover:shadow-lg transition-all duration-300"
               >
-                Watch Demo
+                Contact Me
               </a>
             </div>
             <div className="mt-12 flex justify-center items-center space-x-8 text-gray-600">
@@ -192,6 +234,31 @@ export default function MarketingLanding() {
           <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob"></div>
           <div className="absolute top-0 right-1/4 w-96 h-96 bg-purple-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000"></div>
           <div className="absolute -bottom-8 left-1/3 w-96 h-96 bg-indigo-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-4000"></div>
+        </div>
+      </section>
+
+      {/* Key Highlights Section */}
+      <section className="py-20 bg-gradient-to-b from-white to-blue-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+              Key <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Highlights</span>
+            </h2>
+            <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+              The exact features businesses ask for when they want one CRM for communication and sales growth.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {keyHighlights.map((highlight) => (
+              <div
+                key={highlight.title}
+                className="bg-white border border-gray-200 rounded-2xl p-6 hover:shadow-lg transition-shadow duration-300"
+              >
+                <h3 className="text-xl font-bold text-gray-900 mb-3">{highlight.title}</h3>
+                <p className="text-gray-600">{highlight.detail}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -360,26 +427,48 @@ export default function MarketingLanding() {
       </section>
 
       {/* CTA Section */}
-      <section className="py-20 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600">
+      <section id="contact" className="py-20 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="text-4xl md:text-5xl font-bold text-white mb-6">
-            Ready to Transform Your Sales Process?
+            Looking for a CRM Like This?
           </h2>
           <p className="text-xl text-blue-100 mb-8">
-            Join thousands of sales teams who are already using SalesCRM to close more deals and grow their business.
+            If you want this kind of CRM for your business, approach me directly.
+            I am available to discuss your requirements and demo the full workflow.
+          </p>
+          <p className="text-blue-100 mb-8">
+            Contact us at{' '}
+            <a
+              href="mailto:INFO@itechsoft.net"
+              className="font-semibold text-white underline underline-offset-4 hover:text-blue-200 transition-colors"
+            >
+              INFO@itechsoft.net
+            </a>
+          </p>
+          <p className="text-blue-100 mb-8">
+            Need product walkthrough details? Open the{' '}
+            <a
+              href="/docs/agent-guide"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-white underline underline-offset-4 hover:text-blue-200 transition-colors"
+            >
+              User Guide
+            </a>
+            .
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
               href="/signin"
               className="bg-white text-blue-600 px-8 py-4 rounded-xl text-lg font-semibold hover:shadow-2xl hover:scale-105 transition-all duration-300"
             >
-              Start Free Trial
+              Start With a Demo
             </Link>
             <a
               href="#demo"
               className="bg-blue-500/20 backdrop-blur-sm text-white border-2 border-white/30 px-8 py-4 rounded-xl text-lg font-semibold hover:bg-blue-500/30 transition-all duration-300"
             >
-              Schedule a Demo
+              View Product Walkthrough
             </a>
           </div>
         </div>
@@ -390,7 +479,19 @@ export default function MarketingLanding() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-4 gap-8">
             <div>
-              <div className="text-2xl font-bold text-white mb-4">SalesCRM</div>
+              <div className="flex items-center space-x-3 mb-4">
+                <div className="relative">
+                  <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-xl flex items-center justify-center shadow-lg">
+                    <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                    </svg>
+                  </div>
+                  <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-gray-900 flex items-center justify-center">
+                    <div className="w-2 h-2 bg-white rounded-full"></div>
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-white">SalesCRM</div>
+              </div>
               <p className="text-gray-400">
                 The modern CRM solution for sales teams who want to grow faster.
               </p>
