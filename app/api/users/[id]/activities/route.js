@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireJWTAdmin } from '../../../../../lib/jwtAuth';
 import { UserActivityLog, Sequelize } from '../../../../../models';
+import { getUtcBoundsForLocalDateRange, getUserLocalTodayDateString, parseTimezoneOffsetMinutes } from '../../../../../lib/dateFilterTimezone';
 const UserTimeTracker = require('../../../../../lib/userTimeTracker');
 
 const { Op } = Sequelize;
@@ -26,15 +27,14 @@ export async function GET(request, { params }) {
     const offset = parseInt(searchParams.get('offset')) || 0;
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+    const tzOffsetMinutes = parseTimezoneOffsetMinutes(searchParams.get('tzOffset'));
 
     // Build where clause for activities (optionally filter by date range)
     const activitiesWhere = { userId };
     if (startDate && endDate) {
+      const bounds = getUtcBoundsForLocalDateRange(startDate, endDate, tzOffsetMinutes);
       activitiesWhere.created_at = {
-        [Op.between]: [
-          new Date(startDate + 'T00:00:00.000Z'),
-          new Date(endDate + 'T23:59:59.999Z')
-        ]
+        [Op.between]: [bounds.startDate, bounds.endDate]
       };
     }
 
@@ -99,8 +99,8 @@ export async function GET(request, { params }) {
       timeLogs = updatedLogs.slice(timeLogOffset, timeLogOffset + timeLogLimit);
     } else {
       // Get today's time log (recalculated to include ongoing sessions)
-      const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
+      const todayStr = getUserLocalTodayDateString(tzOffsetMinutes);
+      const today = new Date(`${todayStr}T00:00:00.000Z`);
       
       // Check if sessions exist before recalculating
       const { UserTimeSession } = require('../../../../../models');

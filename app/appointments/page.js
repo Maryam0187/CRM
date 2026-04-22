@@ -197,6 +197,7 @@ export default function AppointmentsPage() {
 
       if (effectiveDateFilter) params.append('dateFilter', effectiveDateFilter);
       params.append('dateField', effectiveDateField);
+      params.append('tzOffset', String(new Date().getTimezoneOffset()));
       
       // JWT authentication handles user identification
       if (user?.role === 'supervisor') {

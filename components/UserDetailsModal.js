@@ -339,6 +339,7 @@ export default function UserDetailsModal({ user, onClose }) {
       const params = new URLSearchParams();
       params.append('startDate', dateRange.startDate);
       params.append('endDate', dateRange.endDate);
+      params.append('tzOffset', String(new Date().getTimezoneOffset()));
       const response = await apiClient.get(`/api/users/${user.id}/call-metrics?${params}`);
       const data = await response.json();
       if (data.success && data.metrics) {
@@ -372,7 +373,8 @@ export default function UserDetailsModal({ user, onClose }) {
         `/api/users/${user.id}/activities?` +
         `limit=${activitiesPagination.limit}&offset=${activitiesPagination.offset}&` +
         `timeLogLimit=${timeLogsPagination.limit}&timeLogOffset=${timeLogsPagination.offset}&` +
-        `startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`
+        `startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&` +
+        `tzOffset=${new Date().getTimezoneOffset()}`
       );
       
       const data = await response.json();
@@ -450,7 +452,8 @@ export default function UserDetailsModal({ user, onClose }) {
       const response = await apiClient.get(
         `/api/users/${user.id}/sales?` +
         `limit=${salesPagination.limit}&offset=${salesPagination.offset}&` +
-        `startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`
+        `startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&` +
+        `tzOffset=${new Date().getTimezoneOffset()}`
       );
       
       const data = await response.json();
@@ -483,6 +486,7 @@ export default function UserDetailsModal({ user, onClose }) {
       params.append('offset', callLogsPagination.offset);
       params.append('startDate', dateRange.startDate);
       params.append('endDate', dateRange.endDate);
+      params.append('tzOffset', String(new Date().getTimezoneOffset()));
       if (appliedCallLogsFilters.state.trim()) params.append('state', appliedCallLogsFilters.state.trim());
       if (appliedCallLogsFilters.city.trim()) params.append('city', appliedCallLogsFilters.city.trim());
       if (appliedCallLogsFilters.phone.trim()) params.append('phone', appliedCallLogsFilters.phone.trim());

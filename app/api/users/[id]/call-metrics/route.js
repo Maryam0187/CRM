@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireJWTAuth } from '../../../../../lib/jwtAuth';
 import { CallLog, Sequelize } from '../../../../../models';
 import { SupervisorAgentService } from '../../../../../lib/sequelize-db';
+import { getUtcBoundsForLocalDateRange, parseTimezoneOffsetMinutes } from '../../../../../lib/dateFilterTimezone';
 
 const { Op } = Sequelize;
 
@@ -46,14 +47,13 @@ export async function GET(request, { params }) {
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+    const tzOffsetMinutes = parseTimezoneOffsetMinutes(searchParams.get('tzOffset'));
 
     const where = { agentId: userId };
     if (startDate && endDate) {
+      const bounds = getUtcBoundsForLocalDateRange(startDate, endDate, tzOffsetMinutes);
       where.created_at = {
-        [Op.between]: [
-          new Date(`${startDate}T00:00:00.000Z`),
-          new Date(`${endDate}T23:59:59.999Z`)
-        ]
+        [Op.between]: [bounds.startDate, bounds.endDate]
       };
     }
 

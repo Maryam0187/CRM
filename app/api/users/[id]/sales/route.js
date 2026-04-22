@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireJWTAdmin } from '../../../../../lib/jwtAuth';
 import { SalesLog, Sale, Customer, Sequelize } from '../../../../../models';
+import { getUtcBoundsForLocalDateRange, parseTimezoneOffsetMinutes } from '../../../../../lib/dateFilterTimezone';
 
 const { Op } = Sequelize;
 
@@ -25,17 +26,16 @@ export async function GET(request, { params }) {
     const offset = parseInt(searchParams.get('offset')) || 0;
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+    const tzOffsetMinutes = parseTimezoneOffsetMinutes(searchParams.get('tzOffset'));
 
     // Build where clause
     const where = { agentId: userId };
     
     // Add date filter if provided - use timestamp field for sales logs
     if (startDate && endDate) {
+      const bounds = getUtcBoundsForLocalDateRange(startDate, endDate, tzOffsetMinutes);
       where['timestamp'] = {
-        [Op.between]: [
-          new Date(startDate + 'T00:00:00.000Z'),
-          new Date(endDate + 'T23:59:59.999Z')
-        ]
+        [Op.between]: [bounds.startDate, bounds.endDate]
       };
     }
 

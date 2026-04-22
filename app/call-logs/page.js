@@ -199,6 +199,7 @@ export default function CallLogsPage() {
       setError(null);
       const params = new URLSearchParams();
       params.append('agentId', user.id);
+      params.append('tzOffset', String(new Date().getTimezoneOffset()));
       params.append('limit', pagination.limit);
       params.append('offset', (pagination.page - 1) * pagination.limit);
       if (appliedFilterState.trim()) params.append('state', appliedFilterState.trim());

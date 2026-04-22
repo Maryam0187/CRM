@@ -5,6 +5,7 @@ import { SupervisorAgentService } from '../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../lib/jwtAuth.js';
 import { isSupervisor } from '../../../../lib/roleUtils';
 import { Op } from 'sequelize';
+import { getUtcBoundsForLocalDateRange, parseTimezoneOffsetMinutes } from '../../../../lib/dateFilterTimezone';
 
 export async function POST(request) {
   let phoneNumber = null;
@@ -214,6 +215,7 @@ export async function GET(request) {
     const phone = searchParams.get('phone');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+    const tzOffsetMinutes = parseTimezoneOffsetMinutes(searchParams.get('tzOffset'));
     const limit = parseInt(searchParams.get('limit')) || 50;
     const offset = parseInt(searchParams.get('offset')) || 0;
 
@@ -229,11 +231,14 @@ export async function GET(request) {
     if (phone && phone.trim()) where.toNumber = { [Op.like]: `%${phone.trim().replace(/\D/g, '')}%` };
     if (startDate || endDate) {
       if (startDate && endDate) {
-        where.created_at = { [Op.between]: [new Date(startDate + 'T00:00:00.000Z'), new Date(endDate + 'T23:59:59.999Z')] };
+        const bounds = getUtcBoundsForLocalDateRange(startDate, endDate, tzOffsetMinutes);
+        where.created_at = { [Op.between]: [bounds.startDate, bounds.endDate] };
       } else if (startDate) {
-        where.created_at = { [Op.gte]: new Date(startDate + 'T00:00:00.000Z') };
+        const bounds = getUtcBoundsForLocalDateRange(startDate, startDate, tzOffsetMinutes);
+        where.created_at = { [Op.gte]: bounds.startDate };
       } else {
-        where.created_at = { [Op.lte]: new Date(endDate + 'T23:59:59.999Z') };
+        const bounds = getUtcBoundsForLocalDateRange(endDate, endDate, tzOffsetMinutes);
+        where.created_at = { [Op.lte]: bounds.endDate };
       }
     }
 

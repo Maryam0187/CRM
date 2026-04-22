@@ -1,5 +1,6 @@
 import { SaleService, SupervisorAgentService } from '../../../../lib/sequelize-db.js';
 import { requireJWTAuth } from '../../../../lib/jwtAuth';
+import { getUtcBoundsForLocalDateRange, getUserLocalTodayDateString, parseTimezoneOffsetMinutes } from '../../../../lib/dateFilterTimezone';
 
 export async function GET(request) {
   try {
@@ -13,6 +14,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const dateFilter = searchParams.get('dateFilter') || 'today';
     const dateField = searchParams.get('dateField') || 'appointmentDateTime';
+    const tzOffsetMinutes = parseTimezoneOffsetMinutes(searchParams.get('tzOffset'));
     
     let appointments;
     
@@ -20,7 +22,7 @@ export async function GET(request) {
     if (user.role === 'admin') {
       // Admin can see all appointments
       if (dateFilter) {
-        appointments = await SaleService.findByDate(dateFilter, dateField);
+        appointments = await SaleService.findByDate(dateFilter, dateField, tzOffsetMinutes);
       } else {
         appointments = await SaleService.findAll();
       }
@@ -38,10 +40,10 @@ export async function GET(request) {
         }
         
         // Get appointments for specific agent
-        appointments = await SaleService.findAppointmentsForDashboard(parseInt(agentId), dateFilter, dateField);
+        appointments = await SaleService.findAppointmentsForDashboard(parseInt(agentId), dateFilter, dateField, tzOffsetMinutes);
       } else {
         // Show only supervisor's own appointments when no agentId is provided
-        appointments = await SaleService.findAppointmentsForDashboard(user.id, dateFilter, dateField);
+        appointments = await SaleService.findAppointmentsForDashboard(user.id, dateFilter, dateField, tzOffsetMinutes);
       }
     } else if (user.role === 'agent') {
       // SECURITY: Agent can only see their own appointments
@@ -50,11 +52,11 @@ export async function GET(request) {
       const effectiveDateField = dateField || 'appointmentDateTime';
       
       // Use lightweight method for dashboard
-      appointments = await SaleService.findAppointmentsForDashboard(user.id, effectiveDateFilter, effectiveDateField);
+      appointments = await SaleService.findAppointmentsForDashboard(user.id, effectiveDateFilter, effectiveDateField, tzOffsetMinutes);
     } else {
       // Default behavior for other roles
       if (dateFilter) {
-        appointments = await SaleService.findByDate(dateFilter, dateField);
+        appointments = await SaleService.findByDate(dateFilter, dateField, tzOffsetMinutes);
       } else {
         appointments = await SaleService.findAll();
       }
@@ -70,9 +72,10 @@ export async function GET(request) {
     
     // Calculate counts for dashboard
     const now = new Date();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    const todayStr = getUserLocalTodayDateString(tzOffsetMinutes);
+    const todayBounds = getUtcBoundsForLocalDateRange(todayStr, todayStr, tzOffsetMinutes);
+    const today = todayBounds.startDate;
+    const todayEnd = new Date(todayBounds.endDate.getTime() + 1);
     
     // Filter to only future appointments (after now)
     const futureAppointments = sortedAppointments.filter(appointment => 

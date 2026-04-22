@@ -1,5 +1,6 @@
 import { SaleService } from '../../../lib/sequelize-db.js';
 import { requireJWTAuth } from '../../../lib/jwtAuth';
+import { parseTimezoneOffsetMinutes } from '../../../lib/dateFilterTimezone';
 
 export async function GET(request) {
   try {
@@ -13,6 +14,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const dateFilter = searchParams.get('dateFilter') || 'today';
     const dateField = searchParams.get('dateField') || 'appointmentDateTime';
+    const tzOffsetMinutes = parseTimezoneOffsetMinutes(searchParams.get('tzOffset'));
     
     let result;
     
@@ -22,11 +24,11 @@ export async function GET(request) {
       const agentId = searchParams.get('agentId');
       if (agentId) {
         result = dateFilter
-          ? await SaleService.findByAgentDate(parseInt(agentId), dateFilter, dateField)
+          ? await SaleService.findByAgentDate(parseInt(agentId), dateFilter, dateField, tzOffsetMinutes)
           : await SaleService.findByAgent(parseInt(agentId));
       } else {
         result = dateFilter
-          ? await SaleService.findByDate(dateFilter, dateField)
+          ? await SaleService.findByDate(dateFilter, dateField, tzOffsetMinutes)
           : await SaleService.findAll();
       }
     } else if (user.role === 'supervisor') {
@@ -47,7 +49,7 @@ export async function GET(request) {
         
         // Get appointments for specific agent
         if (dateFilter) {
-          result = await SaleService.findByAgentDate(requestedId, dateFilter, dateField);
+          result = await SaleService.findByAgentDate(requestedId, dateFilter, dateField, tzOffsetMinutes);
         } else {
           result = await SaleService.findByAgent(requestedId);
         }
@@ -64,7 +66,7 @@ export async function GET(request) {
           // Fetch appointments for all supervised agents and merge
           const lists = await Promise.all(
             agentIds.map(id => dateFilter
-              ? SaleService.findByAgentDate(id, dateFilter, dateField)
+              ? SaleService.findByAgentDate(id, dateFilter, dateField, tzOffsetMinutes)
               : SaleService.findByAgent(id)
             )
           );
@@ -79,14 +81,14 @@ export async function GET(request) {
       
       // Use agent-specific methods that directly query only this agent's appointments
       if (effectiveDateFilter) {
-        result = await SaleService.findByAgentDate(user.id, effectiveDateFilter, effectiveDateField);
+        result = await SaleService.findByAgentDate(user.id, effectiveDateFilter, effectiveDateField, tzOffsetMinutes);
       } else {
         result = await SaleService.findByAgent(user.id);
       }
     } else {
       // Default behavior for other roles
       if (dateFilter) {
-        result = await SaleService.findByDate(dateFilter, dateField);
+        result = await SaleService.findByDate(dateFilter, dateField, tzOffsetMinutes);
       } else {
         result = await SaleService.findAll();
       }

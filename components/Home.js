@@ -224,6 +224,7 @@ export default function Home() {
       
       // Build URL with filters
       const params = new URLSearchParams();
+      params.append('tzOffset', String(new Date().getTimezoneOffset()));
       // Handle multiple statuses - pass as comma-separated string
       const statusArray = Array.isArray(statusesFilter) ? statusesFilter : (statusesFilter ? [statusesFilter] : []);
       if (statusArray.length > 0) params.append('status', statusArray.join(','));

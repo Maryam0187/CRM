@@ -34,6 +34,7 @@ export default function AppointmentSummary() {
       // Use "greater than today" filter for future appointments
       params.append('dateFilter', `>${todayStr}`);
       params.append('dateField', 'appointmentDateTime');
+      params.append('tzOffset', String(new Date().getTimezoneOffset()));
       
       const apiUrl = `/api/appointments/dashboard?${params.toString()}`;
       console.log('Fetching appointment summary for dashboard:', user.first_name, 'role:', user.role);
