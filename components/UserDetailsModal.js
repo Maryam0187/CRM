@@ -8,6 +8,7 @@ import { isAdmin, isSupervisor } from '../lib/roleUtils';
 import RecordingPlayer from './RecordingPlayer';
 import { getStatusBadgeClasses } from '../lib/salesStatuses';
 import StateSelector from './StateSelector';
+import DateFilter from './DateFilter';
 
 export default function UserDetailsModal({ user, onClose }) {
   const { user: currentUser } = useAuth();
@@ -22,6 +23,7 @@ export default function UserDetailsModal({ user, onClose }) {
   const [sales, setSales] = useState([]);
   const [callLogs, setCallLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [dateFilterValue, setDateFilterValue] = useState('today');
   const [dateRange, setDateRange] = useState({
     startDate: new Date().toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0]
@@ -89,14 +91,155 @@ export default function UserDetailsModal({ user, onClose }) {
   // State for note modal
   const [noteModalContent, setNoteModalContent] = useState(null);
 
+  const getDateInputValue = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const resolveDateRangeFromFilter = (filterValue) => {
+    const today = new Date();
+    const endDate = getDateInputValue(today);
+
+    if (filterValue === 'today') {
+      return { startDate: endDate, endDate };
+    }
+
+    if (filterValue === 'yesterday') {
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const day = getDateInputValue(yesterday);
+      return { startDate: day, endDate: day };
+    }
+
+    if (filterValue === 'week') {
+      const weekStart = new Date(today);
+      weekStart.setDate(weekStart.getDate() - 6);
+      return { startDate: getDateInputValue(weekStart), endDate };
+    }
+
+    if (filterValue && filterValue.includes('|')) {
+      const [start, end] = filterValue.split('|');
+      if (start && end) {
+        return {
+          startDate: getDateInputValue(new Date(start)),
+          endDate: getDateInputValue(new Date(end))
+        };
+      }
+    }
+
+    if (filterValue && filterValue.includes(' ')) {
+      const [monthName, year] = filterValue.split(' ');
+      const monthIndex = new Date(`${monthName} 1, ${year}`).getMonth();
+      if (!Number.isNaN(monthIndex)) {
+        const monthStart = new Date(Number(year), monthIndex, 1);
+        const monthEnd = new Date(Number(year), monthIndex + 1, 0);
+        return {
+          startDate: getDateInputValue(monthStart),
+          endDate: getDateInputValue(monthEnd)
+        };
+      }
+    }
+
+    // Fallback to today if unknown filter format
+    return { startDate: endDate, endDate };
+  };
+
+  const handleDateFilterChange = (filterValue) => {
+    setDateFilterValue(filterValue);
+    setDateRange(resolveDateRangeFromFilter(filterValue));
+    handleDateRangeChange();
+  };
+
   // Helper to truncate notes to 5-6 words
   const NOTE_WORD_LIMIT = 6;
+  const normalizeLogText = (value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'string') return value.trim() || null;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch {
+        return String(value);
+      }
+    }
+    return String(value);
+  };
+
   const trimNote = (text) => {
-    if (!text || !String(text).trim()) return null;
-    const s = String(text).trim();
+    const normalized = normalizeLogText(text);
+    if (!normalized) return null;
+    const s = normalized.trim();
     const words = s.split(/\s+/);
     if (words.length <= NOTE_WORD_LIMIT) return s;
     return words.slice(0, NOTE_WORD_LIMIT).join(' ') + '...';
+  };
+
+  const parseSingleNoteChunk = (chunk) => {
+    if (!chunk || !String(chunk).trim()) return null;
+    const trimmed = String(chunk).trim();
+    try {
+      const obj = JSON.parse(trimmed);
+      if (obj && typeof obj === 'object') {
+        return {
+          timestamp: obj.timestamp ?? null,
+          userName: (obj.userName || obj.user_name || '').trim() || null,
+          note: obj.note != null ? String(obj.note) : '',
+          appointment: obj.appointment != null && obj.appointment !== '' ? String(obj.appointment) : null
+        };
+      }
+    } catch {
+      // Keep plain text notes as-is
+    }
+    return { timestamp: null, userName: null, note: trimmed, appointment: null };
+  };
+
+  const splitLogNotesIntoEntries = (noteRaw) => {
+    if (noteRaw == null) return [];
+    if (typeof noteRaw === 'object' && !Array.isArray(noteRaw)) {
+      return [parseSingleNoteChunk(JSON.stringify(noteRaw))].filter(Boolean);
+    }
+    const str = String(noteRaw).trim();
+    if (!str) return [];
+    if (str.includes('|||')) {
+      return str
+        .split('|||')
+        .map((c) => parseSingleNoteChunk(c.trim()))
+        .filter(Boolean);
+    }
+    const one = parseSingleNoteChunk(str);
+    return one ? [one] : [];
+  };
+
+  const formatNoteDateTime = (ts) => {
+    if (!ts) return null;
+    const raw = String(ts).trim();
+    let d = new Date(raw);
+    if (Number.isNaN(d.getTime())) {
+      const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+      if (m) {
+        d = new Date(
+          Number(m[1]),
+          Number(m[2]) - 1,
+          Number(m[3]),
+          Number(m[4]),
+          Number(m[5]),
+          m[6] != null && m[6] !== '' ? Number(m[6]) : 0
+        );
+      }
+    }
+    return Number.isNaN(d.getTime())
+      ? raw
+      : d.toLocaleString(undefined, {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        });
   };
 
   // Function to fetch fresh user information
@@ -455,7 +598,7 @@ export default function UserDetailsModal({ user, onClose }) {
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[min(90vh,calc(100vh-2rem))] flex flex-col my-auto">
+      <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full h-[90vh] max-h-[calc(100vh-2rem)] flex flex-col my-auto">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
           <div>
@@ -481,26 +624,12 @@ export default function UserDetailsModal({ user, onClose }) {
         </div>
 
         {/* Date Range Filter */}
-        <div className="px-6 py-3 bg-gray-50 border-b border-gray-200 flex items-center space-x-4">
-          <label className="text-sm font-medium text-gray-700">Date Range:</label>
-          <input
-            type="date"
-            value={dateRange.startDate}
-            onChange={(e) => {
-              setDateRange({ ...dateRange, startDate: e.target.value });
-              handleDateRangeChange();
-            }}
-            className="border border-gray-300 rounded px-3 py-1 text-sm"
-          />
-          <span className="text-gray-500">to</span>
-          <input
-            type="date"
-            value={dateRange.endDate}
-            onChange={(e) => {
-              setDateRange({ ...dateRange, endDate: e.target.value });
-              handleDateRangeChange();
-            }}
-            className="border border-gray-300 rounded px-3 py-1 text-sm"
+        <div className="px-6 py-3 bg-gray-50 border-b border-gray-200 flex justify-center">
+          <DateFilter
+            value={dateFilterValue}
+            onFilterChange={handleDateFilterChange}
+            hideDateFieldToggle
+            className="!mx-auto !px-3 !py-2"
           />
         </div>
 
@@ -802,32 +931,45 @@ export default function UserDetailsModal({ user, onClose }) {
                                   {log.sale.basicPackage && ` • Package: ${log.sale.basicPackage}`}
                                 </div>
                               )}
-                              {log.note && (
-                                <div className="mt-2">
-                                  <p className="text-xs font-medium text-gray-500">Note:</p>
-                                  {trimNote(log.note) !== log.note ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => setNoteModalContent(log.note)}
-                                      className="text-sm text-blue-600 hover:text-blue-800 hover:underline mt-1 bg-gray-50 p-2 rounded text-left w-full cursor-pointer"
-                                      title="Click to see full note"
-                                    >
-                                      {trimNote(log.note)}
-                                    </button>
-                                  ) : (
-                                    <p className="text-sm text-gray-700 mt-1 bg-gray-50 p-2 rounded">
-                                      {log.note}
-                                    </p>
-                                  )}
-                                </div>
-                              )}
-                              {log.breakdown && (
+                              {log.note &&
+                                (() => {
+                                  const entries = splitLogNotesIntoEntries(log.note);
+                                  if (!entries.length) return null;
+                                  return (
+                                    <div className="mt-2">
+                                      <p className="text-xs font-medium text-gray-500 mb-1">Note:</p>
+                                      <div className="space-y-2">
+                                        {entries.map((entry, index) => (
+                                          <div key={index} className="text-sm text-gray-700 bg-gray-50 p-2 rounded border border-gray-200">
+                                            {entry.timestamp && (
+                                              <div className="text-xs text-gray-500 mb-1">
+                                                {formatNoteDateTime(entry.timestamp)}
+                                              </div>
+                                            )}
+                                            {entry.userName && (
+                                              <div className="text-xs text-gray-600 mb-1">
+                                                By: {entry.userName}
+                                              </div>
+                                            )}
+                                            <div className="whitespace-pre-wrap">{entry.note || '-'}</div>
+                                            {entry.appointment && (
+                                              <div className="text-xs text-gray-600 mt-1">
+                                                Appointment: {formatNoteDateTime(entry.appointment)}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              {normalizeLogText(log.breakdown) && (
                                 <div className="mt-2">
                                   <p className="text-xs font-medium text-gray-500">Breakdown:</p>
-                                  {trimNote(log.breakdown) !== log.breakdown ? (
+                                  {trimNote(log.breakdown) !== normalizeLogText(log.breakdown) ? (
                                     <button
                                       type="button"
-                                      onClick={() => setNoteModalContent(log.breakdown)}
+                                      onClick={() => setNoteModalContent(normalizeLogText(log.breakdown))}
                                       className="text-sm text-blue-600 hover:text-blue-800 hover:underline mt-1 bg-gray-50 p-2 rounded text-left w-full cursor-pointer"
                                       title="Click to see full breakdown"
                                     >
@@ -835,7 +977,7 @@ export default function UserDetailsModal({ user, onClose }) {
                                     </button>
                                   ) : (
                                     <p className="text-sm text-gray-700 mt-1 bg-gray-50 p-2 rounded">
-                                      {log.breakdown}
+                                      {normalizeLogText(log.breakdown)}
                                     </p>
                                   )}
                                 </div>
