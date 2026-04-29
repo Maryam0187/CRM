@@ -295,6 +295,16 @@ module.exports = (sequelize) => {
       foreignKey: 'userId',
       as: 'sessions'
     });
+
+    User.hasMany(models.AiCallReview, {
+      foreignKey: 'reviewedBy',
+      as: 'aiCallReviews'
+    });
+
+    User.hasMany(models.AiPromptVersion, {
+      foreignKey: 'createdBy',
+      as: 'aiPromptVersions'
+    });
   };
 
   return User;

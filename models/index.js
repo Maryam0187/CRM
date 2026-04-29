@@ -75,6 +75,9 @@ const ChequeMail = require('./ChequeMail')(sequelize);
 const PaymentEmail = require('./PaymentEmail')(sequelize);
 const PaymentLog = require('./PaymentLog')(sequelize);
 const Helpline = require('./Helpline')(sequelize);
+const AiPromptVersion = require('./AiPromptVersion')(sequelize);
+const AiCallExtraction = require('./AiCallExtraction')(sequelize);
+const AiCallReview = require('./AiCallReview')(sequelize);
 
 // Define associations
 Object.keys(sequelize.models).forEach(modelName => {
@@ -144,6 +147,9 @@ module.exports = {
   ChequeMail,
   PaymentEmail,
   PaymentLog,
+  AiPromptVersion,
+  AiCallExtraction,
+  AiCallReview,
   Helpline,
   testConnection,
   syncDatabase

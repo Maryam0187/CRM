@@ -193,6 +193,16 @@ module.exports = (sequelize) => {
       foreignKey: 'agentId',
       as: 'agent'
     });
+
+    CallLog.hasOne(models.AiCallReview, {
+      foreignKey: 'callLogId',
+      as: 'aiReview'
+    });
+
+    CallLog.hasMany(models.AiCallExtraction, {
+      foreignKey: 'callLogId',
+      as: 'aiExtractions'
+    });
   };
 
   return CallLog;
