@@ -1,0 +1,126 @@
+import { NextResponse } from 'next/server';
+import { getClient, getWebhookUrl, validatePhoneNumber } from '../../../../../lib/twilio';
+import sequelizeDb from '../../../../../lib/sequelize-db';
+import { requireJWTAuth } from '../../../../../lib/jwtAuth';
+import { ensureAiCallingEnabled, getAiAgentVersion } from '../../../../../lib/aiCalling';
+
+export async function POST(request) {
+  try {
+    const aiGateResponse = ensureAiCallingEnabled();
+    if (aiGateResponse) return aiGateResponse;
+
+    const authResult = await requireJWTAuth(request);
+    if (authResult.error) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: authResult.status }
+      );
+    }
+
+    const user = authResult.user;
+    const body = await request.json();
+
+    const {
+      customerId = null,
+      saleId = null,
+      phoneNumber,
+      callPurpose = 'sales',
+      campaignLabel = null
+    } = body;
+
+    if (!phoneNumber) {
+      return NextResponse.json(
+        { success: false, message: 'phoneNumber is required' },
+        { status: 400 }
+      );
+    }
+
+    const formattedNumber = validatePhoneNumber(phoneNumber);
+    if (!formattedNumber) {
+      return NextResponse.json(
+        { success: false, message: `Invalid phone number format: ${phoneNumber}` },
+        { status: 400 }
+      );
+    }
+
+    const fromNumber = validatePhoneNumber(process.env.TWILIO_PHONE_NUMBER);
+    if (!fromNumber) {
+      return NextResponse.json(
+        { success: false, message: 'TWILIO_PHONE_NUMBER is not set or invalid' },
+        { status: 500 }
+      );
+    }
+
+    const client = getClient();
+    const aiAgentVersion = getAiAgentVersion();
+
+    const voiceUrl = new URL(getWebhookUrl('/api/twilio/ai/voice'));
+    voiceUrl.searchParams.set('agentId', String(user.id));
+    voiceUrl.searchParams.set('callPurpose', String(callPurpose));
+    voiceUrl.searchParams.set('aiAgentVersion', aiAgentVersion);
+    if (customerId) voiceUrl.searchParams.set('customerId', String(customerId));
+    if (saleId) voiceUrl.searchParams.set('saleId', String(saleId));
+    if (campaignLabel) voiceUrl.searchParams.set('campaignLabel', String(campaignLabel));
+
+    const statusCallbackUrl = new URL(getWebhookUrl('/api/twilio/ai/call-status-callback'));
+    statusCallbackUrl.searchParams.set('agentId', String(user.id));
+    statusCallbackUrl.searchParams.set('callPurpose', String(callPurpose));
+    statusCallbackUrl.searchParams.set('aiAgentVersion', aiAgentVersion);
+    if (customerId) statusCallbackUrl.searchParams.set('customerId', String(customerId));
+    if (saleId) statusCallbackUrl.searchParams.set('saleId', String(saleId));
+    if (campaignLabel) statusCallbackUrl.searchParams.set('campaignLabel', String(campaignLabel));
+
+    const timeout = parseInt(process.env.TWILIO_OUTBOUND_RING_TIMEOUT || '30', 10);
+    const call = await client.calls.create({
+      to: formattedNumber,
+      from: fromNumber,
+      url: voiceUrl.toString(),
+      method: 'POST',
+      timeout,
+      statusCallback: statusCallbackUrl.toString(),
+      statusCallbackMethod: 'POST',
+      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
+    });
+
+    await sequelizeDb.CallLog.create({
+      callSid: call.sid,
+      customerCallSid: call.sid,
+      agentId: user.id,
+      customerId: customerId ? parseInt(customerId, 10) : null,
+      saleId: saleId ? parseInt(saleId, 10) : null,
+      direction: 'outbound',
+      fromNumber,
+      toNumber: formattedNumber,
+      status: 'queued',
+      callPurpose,
+      callSource: 'other',
+      twilioData: {
+        aiCall: true,
+        aiAgentVersion,
+        campaignLabel,
+        initiatedAt: new Date().toISOString()
+      }
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        callSid: call.sid,
+        to: formattedNumber,
+        mode: 'ai',
+        aiAgentVersion
+      },
+      message: 'AI call initiated successfully'
+    });
+  } catch (error) {
+    console.error('Error initiating AI call:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        message: error.message || 'Failed to initiate AI call'
+      },
+      { status: 500 }
+    );
+  }
+}
+

@@ -62,6 +62,8 @@ export default function CallLogsPage() {
   const [postCallOutcome, setPostCallOutcome] = useState('');
   const [savingPostCall, setSavingPostCall] = useState(false);
   const [savingOutcomeCallId, setSavingOutcomeCallId] = useState(null);
+  const [isAiDialing, setIsAiDialing] = useState(false);
+  const [aiDialMessage, setAiDialMessage] = useState('');
 
   const lastActiveCallSidRef = useRef(null);
   const pendingPostCallMetaRef = useRef(null);
@@ -347,6 +349,39 @@ export default function CallLogsPage() {
     });
     setQuickDialValidation({ isValid: true, message: '' });
     setCheckResult(null);
+  };
+
+  const handleLeadAiCall = async () => {
+    const v = validatePhone(quickDialNumber);
+    setQuickDialValidation(v);
+    if (!v.isValid || !user?.id || !isTwilioEnabled || hasActiveCall || isAiDialing) return;
+
+    try {
+      setIsAiDialing(true);
+      setAiDialMessage('');
+      setError(null);
+
+      const res = await apiClient.post('/api/calls/ai/initiate', {
+        customerId: null,
+        saleId: null,
+        phoneNumber: quickDialNumber.trim(),
+        callPurpose: freshCallPurpose,
+        campaignLabel: 'lead_dialing_tab'
+      });
+      const data = await res.json();
+
+      if (data?.success) {
+        setAiDialMessage(`AI call started${data?.data?.callSid ? ` (SID: ${data.data.callSid})` : ''}.`);
+        setCheckResult(null);
+      } else {
+        setError(data?.message || 'Failed to start AI call.');
+      }
+    } catch (err) {
+      console.error('AI lead dial error:', err);
+      setError('Network error while starting AI call.');
+    } finally {
+      setIsAiDialing(false);
+    }
   };
 
   const handleQuickDialCallNoCheck = async () => {
@@ -655,6 +690,7 @@ export default function CallLogsPage() {
 
               {/* 3. Number & Call button - only when state is selected */}
               {freshState && (
+              <>
               <div className="flex flex-col sm:flex-row gap-3 items-start">
                 <div className="flex-1 max-w-md">
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number *</label>
@@ -691,7 +727,21 @@ export default function CallLogsPage() {
                   </svg>
                   {hasActiveCall ? 'Call in progress' : isCalling ? 'Connecting...' : 'Call'}
                 </button>
+                <button
+                  onClick={handleLeadAiCall}
+                  disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled || isAiDialing}
+                  className="w-full sm:w-auto sm:mt-6 px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 3.104l7.5 4.5a1.5 1.5 0 010 2.572l-7.5 4.5A1.5 1.5 0 017.5 13.39V4.61a1.5 1.5 0 012.25-1.506zM4.5 19.5h15" />
+                  </svg>
+                  {isAiDialing ? 'Starting AI...' : 'AI Call'}
+                </button>
               </div>
+              {aiDialMessage && (
+                <p className="text-sm text-indigo-700">{aiDialMessage}</p>
+              )}
+              </>
               )}
 
               {/* 4. Customer name & Note - only when state is selected */}
