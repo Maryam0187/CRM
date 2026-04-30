@@ -70,7 +70,7 @@ export async function GET(request) {
       return NextResponse.json({ success: false, message: 'callSid is required' }, { status: 400 });
     }
 
-    state = getAiControlState(callSid);
+    const state = getAiControlState(callSid);
     return NextResponse.json({
       success: true,
       data: {
