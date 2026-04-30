@@ -25,7 +25,8 @@ export async function POST(request) {
       saleId = null,
       phoneNumber,
       callPurpose = 'sales',
-      campaignLabel = null
+      campaignLabel = null,
+      supervisedAi = true
     } = body;
 
     if (!phoneNumber) {
@@ -58,6 +59,7 @@ export async function POST(request) {
     voiceUrl.searchParams.set('agentId', String(user.id));
     voiceUrl.searchParams.set('callPurpose', String(callPurpose));
     voiceUrl.searchParams.set('aiAgentVersion', aiAgentVersion);
+    voiceUrl.searchParams.set('supervisedAi', supervisedAi ? 'true' : 'false');
     if (customerId) voiceUrl.searchParams.set('customerId', String(customerId));
     if (saleId) voiceUrl.searchParams.set('saleId', String(saleId));
     if (campaignLabel) voiceUrl.searchParams.set('campaignLabel', String(campaignLabel));
@@ -66,6 +68,7 @@ export async function POST(request) {
     statusCallbackUrl.searchParams.set('agentId', String(user.id));
     statusCallbackUrl.searchParams.set('callPurpose', String(callPurpose));
     statusCallbackUrl.searchParams.set('aiAgentVersion', aiAgentVersion);
+    statusCallbackUrl.searchParams.set('supervisedAi', supervisedAi ? 'true' : 'false');
     if (customerId) statusCallbackUrl.searchParams.set('customerId', String(customerId));
     if (saleId) statusCallbackUrl.searchParams.set('saleId', String(saleId));
     if (campaignLabel) statusCallbackUrl.searchParams.set('campaignLabel', String(campaignLabel));
@@ -96,6 +99,7 @@ export async function POST(request) {
       callSource: 'other',
       twilioData: {
         aiCall: true,
+        supervisedAi: Boolean(supervisedAi),
         aiAgentVersion,
         campaignLabel,
         initiatedAt: new Date().toISOString()
@@ -108,6 +112,7 @@ export async function POST(request) {
         callSid: call.sid,
         to: formattedNumber,
         mode: 'ai',
+        supervisedAi: Boolean(supervisedAi),
         aiAgentVersion
       },
       message: 'AI call initiated successfully'

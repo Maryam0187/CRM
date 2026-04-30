@@ -33,6 +33,7 @@ export async function POST(request) {
     const campaignLabel = url.searchParams.get('campaignLabel');
     const callPurpose = url.searchParams.get('callPurpose') || 'sales';
     const aiAgentVersion = url.searchParams.get('aiAgentVersion') || getAiAgentVersion();
+    const supervisedAi = url.searchParams.get('supervisedAi') === 'true';
 
     if (!callSid) {
       return NextResponse.json({ success: false, message: 'Missing CallSid' }, { status: 400 });
@@ -62,6 +63,7 @@ export async function POST(request) {
         callSource: 'other',
         twilioData: {
           aiCall: true,
+          supervisedAi: Boolean(supervisedAi),
           aiAgentVersion,
           campaignLabel,
           callbackCreatedLog: true
@@ -74,12 +76,34 @@ export async function POST(request) {
         twilioData: {
           ...(callLog.twilioData || {}),
           aiCall: true,
+          supervisedAi: Boolean(supervisedAi),
           aiAgentVersion,
           campaignLabel,
           latestCallbackStatus: status,
           endedAt: callEnded ? new Date().toISOString() : (callLog.twilioData?.endedAt || null)
         }
       });
+    }
+
+    if (callEnded && callLog) {
+      const existingReview = await sequelizeDb.AiCallReview.findOne({
+        where: { callLogId: callLog.id }
+      });
+      if (!existingReview) {
+        await sequelizeDb.AiCallReview.create({
+          callLogId: callLog.id,
+          reviewStatus: 'pending',
+          originalAiOutcome: callLog.callOutcome || null,
+          finalOutcome: null,
+          provider: 'unknown',
+          qualityScore: null,
+          complianceIssue: false,
+          complianceNotes: null,
+          reviewNotes: 'Auto-created on AI call end. Agent labeling pending.',
+          reviewedBy: null,
+          reviewedAt: null
+        });
+      }
     }
 
     return NextResponse.json({

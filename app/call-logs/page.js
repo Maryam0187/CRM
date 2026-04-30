@@ -64,6 +64,10 @@ export default function CallLogsPage() {
   const [savingOutcomeCallId, setSavingOutcomeCallId] = useState(null);
   const [isAiDialing, setIsAiDialing] = useState(false);
   const [aiDialMessage, setAiDialMessage] = useState('');
+  const [aiActiveCallSid, setAiActiveCallSid] = useState('');
+  const [aiCanControl, setAiCanControl] = useState(true);
+  const [aiControlMessage, setAiControlMessage] = useState('');
+  const [aiControlLoadingAction, setAiControlLoadingAction] = useState('');
 
   const lastActiveCallSidRef = useRef(null);
   const pendingPostCallMetaRef = useRef(null);
@@ -366,11 +370,13 @@ export default function CallLogsPage() {
         saleId: null,
         phoneNumber: quickDialNumber.trim(),
         callPurpose: freshCallPurpose,
-        campaignLabel: 'lead_dialing_tab'
+        campaignLabel: 'ai_supervised_tab',
+        supervisedAi: true
       });
       const data = await res.json();
 
       if (data?.success) {
+        setAiActiveCallSid(data?.data?.callSid || '');
         setAiDialMessage(`AI call started${data?.data?.callSid ? ` (SID: ${data.data.callSid})` : ''}.`);
         setCheckResult(null);
       } else {
@@ -383,6 +389,63 @@ export default function CallLogsPage() {
       setIsAiDialing(false);
     }
   };
+
+  const handleAiControl = async (action) => {
+    if (!aiActiveCallSid || !action || aiControlLoadingAction || !aiCanControl) return;
+    try {
+      setAiControlLoadingAction(action);
+      setAiControlMessage('');
+      const res = await apiClient.post('/api/calls/ai/control', {
+        callSid: aiActiveCallSid,
+        action
+      });
+      const data = await res.json();
+      if (data?.success) {
+        if (action === 'end_ai') {
+          setAiControlMessage('AI agent ended. Human agent can continue conversation.');
+        } else {
+          setAiControlMessage(`AI control applied: ${action}`);
+        }
+      } else {
+        setAiControlMessage(data?.message || `Failed to apply action: ${action}`);
+      }
+    } catch (err) {
+      console.error('AI control error:', err);
+      setAiControlMessage('Network error while applying AI control.');
+    } finally {
+      setAiControlLoadingAction('');
+    }
+  };
+
+  useEffect(() => {
+    if (!aiActiveCallSid) {
+      setAiCanControl(true);
+      return;
+    }
+
+    let isCancelled = false;
+    const fetchAiControlState = async () => {
+      try {
+        const res = await apiClient.get(`/api/calls/ai/control?callSid=${encodeURIComponent(aiActiveCallSid)}`);
+        const data = await res.json();
+        if (isCancelled) return;
+        if (data?.success) {
+          setAiCanControl(Boolean(data?.data?.canControl));
+        } else {
+          setAiCanControl(false);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setAiCanControl(false);
+        }
+      }
+    };
+
+    fetchAiControlState();
+    return () => {
+      isCancelled = true;
+    };
+  }, [aiActiveCallSid]);
 
   const handleQuickDialCallNoCheck = async () => {
     const v = validatePhone(quickDialNumber);
@@ -595,7 +658,7 @@ export default function CallLogsPage() {
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Tabs: Lead Dialing | Quick Dial | Check Number */}
+          {/* Tabs: Lead Dialing | Quick Dial | Check Number | AI Supervised */}
           <div className="flex border-b border-gray-200 mb-6">
             <button
               onClick={() => setActiveTab('fresh')}
@@ -626,6 +689,16 @@ export default function CallLogsPage() {
               }`}
             >
               Check Number
+            </button>
+            <button
+              onClick={() => setActiveTab('ai_supervised')}
+              className={`px-4 py-3 text-base font-medium border-b-2 transition-colors ${
+                activeTab === 'ai_supervised'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              AI Supervised
             </button>
           </div>
 
@@ -727,20 +800,7 @@ export default function CallLogsPage() {
                   </svg>
                   {hasActiveCall ? 'Call in progress' : isCalling ? 'Connecting...' : 'Call'}
                 </button>
-                <button
-                  onClick={handleLeadAiCall}
-                  disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled || isAiDialing}
-                  className="w-full sm:w-auto sm:mt-6 px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 3.104l7.5 4.5a1.5 1.5 0 010 2.572l-7.5 4.5A1.5 1.5 0 017.5 13.39V4.61a1.5 1.5 0 012.25-1.506zM4.5 19.5h15" />
-                  </svg>
-                  {isAiDialing ? 'Starting AI...' : 'AI Call'}
-                </button>
               </div>
-              {aiDialMessage && (
-                <p className="text-sm text-indigo-700">{aiDialMessage}</p>
-              )}
               </>
               )}
 
@@ -768,6 +828,124 @@ export default function CallLogsPage() {
                   />
                 </div>
               </div>
+              )}
+            </div>
+          </div>
+          )}
+
+          {/* AI Supervised tab */}
+          {activeTab === 'ai_supervised' && (
+          <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">AI Supervised Dialing</h3>
+            <p className="text-sm text-gray-500 mb-3">
+              Start a supervised AI call. Agent can pause/resume/take over/end AI live. Transcript + labels can be saved later.
+            </p>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">State</label>
+                  <StateSelector
+                    value={freshState}
+                    onChange={(e) => setFreshState(e.target.value)}
+                    label=""
+                    showTimezone={false}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">City</label>
+                  <input
+                    type="text"
+                    value={freshCity}
+                    onChange={(e) => setFreshCity(e.target.value)}
+                    placeholder="City"
+                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Purpose</label>
+                  <select
+                    value={freshCallPurpose}
+                    onChange={(e) => setFreshCallPurpose(e.target.value)}
+                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="cold_call">Cold Call</option>
+                    <option value="follow_up">Follow Up</option>
+                    <option value="sales">Sales</option>
+                    <option value="support">Support</option>
+                    <option value="appointment">Appointment</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 items-start">
+                <div className="flex-1 max-w-md">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number *</label>
+                  <input
+                    type="tel"
+                    value={quickDialNumber}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^\d*#+\-() ]/g, '');
+                      setQuickDialNumber(formatLandline(v));
+                      setQuickDialValidation(validatePhone(formatLandline(v)));
+                    }}
+                    placeholder="Paste or enter phone number"
+                    className={`w-full px-5 py-3.5 text-xl font-mono border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm ${quickDialValidation.isValid ? 'border-blue-400 bg-blue-50/30' : 'border-red-500 bg-red-50/30'}`}
+                  />
+                </div>
+                <button
+                  onClick={handleLeadAiCall}
+                  disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || !isTwilioEnabled || isAiDialing}
+                  className="w-full sm:w-auto sm:mt-6 px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
+                >
+                  {isAiDialing ? 'Starting AI...' : 'Start Supervised AI Call'}
+                </button>
+              </div>
+
+              {aiDialMessage && <p className="text-sm text-indigo-700">{aiDialMessage}</p>}
+
+              {aiActiveCallSid && (
+                <div className="p-3 rounded-lg border border-indigo-200 bg-indigo-50">
+                  <p className="text-xs text-indigo-700 mb-2">Active AI Call SID: {aiActiveCallSid}</p>
+                  {aiCanControl ? (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => handleAiControl('pause')}
+                        disabled={!!aiControlLoadingAction}
+                        className="px-3 py-2 text-sm rounded bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-60"
+                      >
+                        {aiControlLoadingAction === 'pause' ? 'Pausing...' : 'Pause AI'}
+                      </button>
+                      <button
+                        onClick={() => handleAiControl('resume')}
+                        disabled={!!aiControlLoadingAction}
+                        className="px-3 py-2 text-sm rounded bg-green-600 hover:bg-green-700 text-white disabled:opacity-60"
+                      >
+                        {aiControlLoadingAction === 'resume' ? 'Resuming...' : 'Resume AI'}
+                      </button>
+                      <button
+                        onClick={() => handleAiControl('takeover')}
+                        disabled={!!aiControlLoadingAction}
+                        className="px-3 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-60"
+                      >
+                        {aiControlLoadingAction === 'takeover' ? 'Taking Over...' : 'Take Over'}
+                      </button>
+                      <button
+                        onClick={() => handleAiControl('end_ai')}
+                        disabled={!!aiControlLoadingAction}
+                        className="px-3 py-2 text-sm rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-60"
+                      >
+                        {aiControlLoadingAction === 'end_ai' ? 'Ending...' : 'End AI'}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-700">
+                      Control actions are available only to the user who started this AI call.
+                    </p>
+                  )}
+                  {aiControlMessage && <p className="mt-2 text-sm text-slate-700">{aiControlMessage}</p>}
+                </div>
               )}
             </div>
           </div>

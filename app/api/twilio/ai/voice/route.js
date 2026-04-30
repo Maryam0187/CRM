@@ -30,6 +30,7 @@ function buildAiVoiceTwiML(requestUrl, formCallSid = null) {
   const customerId = params.get('customerId');
   const saleId = params.get('saleId');
   const aiAgentVersion = params.get('aiAgentVersion') || 'v1';
+  const supervisedAi = params.get('supervisedAi') === 'true';
 
   const streamUrl = new URL(getMediaStreamBaseUrl());
   if (callSid) streamUrl.searchParams.set('callSid', String(callSid));
@@ -37,6 +38,7 @@ function buildAiVoiceTwiML(requestUrl, formCallSid = null) {
   if (customerId) streamUrl.searchParams.set('customerId', String(customerId));
   if (saleId) streamUrl.searchParams.set('saleId', String(saleId));
   streamUrl.searchParams.set('aiAgentVersion', String(aiAgentVersion));
+  streamUrl.searchParams.set('supervisedAi', supervisedAi ? 'true' : 'false');
 
   const safeStreamUrl = xmlEscapeAttribute(streamUrl.toString());
 
