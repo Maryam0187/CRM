@@ -50,8 +50,6 @@ function buildAiVoiceTwiML(requestUrl, formContext = {}) {
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="alice">Hi, this is Rebecca from TV technical support.</Say>
-  <Say voice="alice">Is this a good time to do a quick receiver check?</Say>
   <Connect>
     <Stream url="${safeStreamUrl}" track="inbound_track">
       <Parameter name="callSid" value="${safeCallSid}"></Parameter>
@@ -65,10 +63,9 @@ function buildAiVoiceTwiML(requestUrl, formContext = {}) {
 </Response>`;
 }
 
-function buildFallbackTwiML(message = 'We are unable to connect your call right now. Please try again later.') {
+function buildFallbackTwiML() {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="alice">${message}</Say>
   <Hangup></Hangup>
 </Response>`;
 }
@@ -77,7 +74,8 @@ async function handleVoice(request) {
   try {
     const aiGateResponse = ensureAiCallingEnabled();
     if (aiGateResponse) {
-      const fallback = buildFallbackTwiML('AI calling is currently unavailable.');
+      console.warn('AI voice: AI calling disabled, returning hangup TwiML (no TTS).');
+      const fallback = buildFallbackTwiML();
       return new NextResponse(fallback, {
         headers: { 'Content-Type': 'text/xml' }
       });

@@ -838,7 +838,7 @@ export default function CallLogsPage() {
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-3">AI Supervised Dialing</h3>
             <p className="text-sm text-gray-500 mb-3">
-              Start a supervised AI call. Agent can pause/resume/take over/end AI live. Transcript + labels can be saved later.
+              Start a supervised AI call. Pause/resume/end AI from here. Take Over only stops the AI on the line—it does not route audio from this browser to the customer (that needs a separate Twilio voice bridge).
             </p>
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -938,6 +938,9 @@ export default function CallLogsPage() {
                       >
                         {aiControlLoadingAction === 'end_ai' ? 'Ending...' : 'End AI'}
                       </button>
+                      <p className="w-full text-xs text-slate-600 mt-1">
+                        Take Over mutes the AI only; use Resume to turn the AI back on. To speak to the customer yourself you still need a bridged agent leg (not implemented yet).
+                      </p>
                     </div>
                   ) : (
                     <p className="text-sm text-slate-700">
