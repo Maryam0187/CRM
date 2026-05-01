@@ -17,7 +17,7 @@ import DateFilter from '../../components/DateFilter';
 export default function CallLogsPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const { initiateCall, isCalling, currentCallSid, isWebCallConnected } = useCall();
+  const { initiateCall, startCall, isCalling, currentCallSid, isWebCallConnected } = useCall();
   const [calls, setCalls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -401,7 +401,16 @@ export default function CallLogsPage() {
       });
       const data = await res.json();
       if (data?.success) {
-        if (action === 'end_ai') {
+        if (action === 'takeover' && data?.data?.conferenceName) {
+          startCall({
+            callSid: aiActiveCallSid,
+            conferenceName: data.data.conferenceName,
+            customerId: null,
+            saleId: null,
+            phoneNumber: quickDialNumber?.trim() || undefined
+          });
+          setAiControlMessage('Takeover started. Joining voice bridge so you can speak to the customer.');
+        } else if (action === 'end_ai') {
           setAiControlMessage('AI agent ended. Human agent can continue conversation.');
         } else {
           setAiControlMessage(`AI control applied: ${action}`);
@@ -939,7 +948,7 @@ export default function CallLogsPage() {
                         {aiControlLoadingAction === 'end_ai' ? 'Ending...' : 'End AI'}
                       </button>
                       <p className="w-full text-xs text-slate-600 mt-1">
-                        Take Over mutes the AI only; use Resume to turn the AI back on. To speak to the customer yourself you still need a bridged agent leg (not implemented yet).
+                        Take Over now switches the customer to a live conference bridge and opens your web calling interface so you can speak directly.
                       </p>
                     </div>
                   ) : (
