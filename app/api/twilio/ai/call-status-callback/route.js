@@ -34,6 +34,7 @@ export async function POST(request) {
     const callPurpose = url.searchParams.get('callPurpose') || 'sales';
     const aiAgentVersion = url.searchParams.get('aiAgentVersion') || getAiAgentVersion();
     const supervisedAi = url.searchParams.get('supervisedAi') === 'true';
+    const source = url.searchParams.get('source') || (supervisedAi ? 'ai_supervised' : 'ai_unsupervised');
 
     if (!callSid) {
       return NextResponse.json({ success: false, message: 'Missing CallSid' }, { status: 400 });
@@ -64,6 +65,7 @@ export async function POST(request) {
         twilioData: {
           aiCall: true,
           supervisedAi: Boolean(supervisedAi),
+          source,
           aiAgentVersion,
           campaignLabel,
           callbackCreatedLog: true
@@ -77,6 +79,7 @@ export async function POST(request) {
           ...(callLog.twilioData || {}),
           aiCall: true,
           supervisedAi: Boolean(supervisedAi),
+          source,
           aiAgentVersion,
           campaignLabel,
           latestCallbackStatus: status,

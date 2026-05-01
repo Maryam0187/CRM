@@ -54,12 +54,14 @@ export async function POST(request) {
 
     const client = getClient();
     const aiAgentVersion = getAiAgentVersion();
+    const source = supervisedAi ? 'ai_supervised' : 'ai_unsupervised';
 
     const voiceUrl = new URL(getWebhookUrl('/api/twilio/ai/voice'));
     voiceUrl.searchParams.set('agentId', String(user.id));
     voiceUrl.searchParams.set('callPurpose', String(callPurpose));
     voiceUrl.searchParams.set('aiAgentVersion', aiAgentVersion);
     voiceUrl.searchParams.set('supervisedAi', supervisedAi ? 'true' : 'false');
+    voiceUrl.searchParams.set('source', source);
     if (customerId) voiceUrl.searchParams.set('customerId', String(customerId));
     if (saleId) voiceUrl.searchParams.set('saleId', String(saleId));
     if (campaignLabel) voiceUrl.searchParams.set('campaignLabel', String(campaignLabel));
@@ -69,6 +71,7 @@ export async function POST(request) {
     statusCallbackUrl.searchParams.set('callPurpose', String(callPurpose));
     statusCallbackUrl.searchParams.set('aiAgentVersion', aiAgentVersion);
     statusCallbackUrl.searchParams.set('supervisedAi', supervisedAi ? 'true' : 'false');
+    statusCallbackUrl.searchParams.set('source', source);
     if (customerId) statusCallbackUrl.searchParams.set('customerId', String(customerId));
     if (saleId) statusCallbackUrl.searchParams.set('saleId', String(saleId));
     if (campaignLabel) statusCallbackUrl.searchParams.set('campaignLabel', String(campaignLabel));
@@ -100,6 +103,7 @@ export async function POST(request) {
       twilioData: {
         aiCall: true,
         supervisedAi: Boolean(supervisedAi),
+        source,
         aiAgentVersion,
         campaignLabel,
         initiatedAt: new Date().toISOString()
@@ -113,6 +117,7 @@ export async function POST(request) {
         to: formattedNumber,
         mode: 'ai',
         supervisedAi: Boolean(supervisedAi),
+        source,
         aiAgentVersion
       },
       message: 'AI call initiated successfully'

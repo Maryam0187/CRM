@@ -31,6 +31,7 @@ function buildAiVoiceTwiML(requestUrl, formContext = {}) {
   const saleId = formContext.saleId || params.get('saleId');
   const aiAgentVersion = formContext.aiAgentVersion || params.get('aiAgentVersion') || 'v1';
   const supervisedAi = (formContext.supervisedAi || params.get('supervisedAi') || '') === 'true';
+  const source = formContext.source || params.get('source') || (supervisedAi ? 'ai_supervised' : 'ai_unsupervised');
 
   const streamUrl = new URL(getMediaStreamBaseUrl());
   if (callSid) streamUrl.searchParams.set('callSid', String(callSid));
@@ -39,6 +40,7 @@ function buildAiVoiceTwiML(requestUrl, formContext = {}) {
   if (saleId) streamUrl.searchParams.set('saleId', String(saleId));
   streamUrl.searchParams.set('aiAgentVersion', String(aiAgentVersion));
   streamUrl.searchParams.set('supervisedAi', supervisedAi ? 'true' : 'false');
+  streamUrl.searchParams.set('source', String(source));
 
   const safeStreamUrl = xmlEscapeAttribute(streamUrl.toString());
   const safeCallSid = callSid ? xmlEscapeAttribute(callSid) : '';
@@ -47,6 +49,7 @@ function buildAiVoiceTwiML(requestUrl, formContext = {}) {
   const safeSaleId = saleId ? xmlEscapeAttribute(saleId) : '';
   const safeAiAgentVersion = xmlEscapeAttribute(String(aiAgentVersion));
   const safeSupervisedAi = supervisedAi ? 'true' : 'false';
+  const safeSource = xmlEscapeAttribute(String(source));
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -58,6 +61,7 @@ function buildAiVoiceTwiML(requestUrl, formContext = {}) {
       <Parameter name="saleId" value="${safeSaleId}"></Parameter>
       <Parameter name="aiAgentVersion" value="${safeAiAgentVersion}"></Parameter>
       <Parameter name="supervisedAi" value="${safeSupervisedAi}"></Parameter>
+      <Parameter name="source" value="${safeSource}"></Parameter>
     </Stream>
   </Connect>
 </Response>`;
@@ -87,7 +91,8 @@ async function handleVoice(request) {
       customerId: null,
       saleId: null,
       aiAgentVersion: null,
-      supervisedAi: null
+      supervisedAi: null,
+      source: null
     };
     if (request.method === 'POST') {
       try {
@@ -98,6 +103,7 @@ async function handleVoice(request) {
         formContext.saleId = formData.get('saleId');
         formContext.aiAgentVersion = formData.get('aiAgentVersion');
         formContext.supervisedAi = formData.get('supervisedAi');
+        formContext.source = formData.get('source');
       } catch (error) {
         console.warn('Unable to parse Twilio form data for AI voice route:', error);
       }
