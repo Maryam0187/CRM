@@ -23,7 +23,7 @@ function xmlEscapeAttribute(value) {
 }
 
 /** Optional: force legacy Connect-only AI leg (no conference); blocks supervisor listening on PSTN. */
-function useLegacyAiConnectOnly() {
+function legacyAiConnectOnlyEnabled() {
   return process.env.AI_SUPERVISED_LEGACY_CONNECT_ONLY === 'true';
 }
 
@@ -185,7 +185,7 @@ function buildAiVoiceTwiML(requestUrl, formContext = {}) {
   const params = url.searchParams;
   const supervisedAi = (formContext.supervisedAi || params.get('supervisedAi') || '') === 'true';
 
-  if (supervisedAi && !useLegacyAiConnectOnly()) {
+  if (supervisedAi && !legacyAiConnectOnlyEnabled()) {
     return buildSupervisedConferenceTwiML(requestUrl, formContext);
   }
   return buildConnectStreamTwiML(requestUrl, formContext);

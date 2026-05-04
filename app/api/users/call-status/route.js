@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireJWTAuth } from '../../../../lib/routeAuth';
+import { requireJWTAuth } from '../../../../lib/jwtAuth';
 import sequelizeDb from '../../../../lib/sequelize-db';
 import socketManager from '../../../../lib/socket';
 
