@@ -88,6 +88,9 @@ export async function POST(request) {
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
     });
 
+    /** Same naming TwiML uses from CallSid: ai-supervised-{customerLegSid} */
+    const aiConferenceName = supervisedAi ? `ai-supervised-${call.sid}` : null;
+
     await sequelizeDb.CallLog.create({
       callSid: call.sid,
       customerCallSid: call.sid,
@@ -100,13 +103,16 @@ export async function POST(request) {
       status: 'queued',
       callPurpose,
       callSource: 'other',
+      conferenceName: aiConferenceName || undefined,
       twilioData: {
         aiCall: true,
         supervisedAi: Boolean(supervisedAi),
+        supervisedConferenceMode: Boolean(supervisedAi),
         source,
         aiAgentVersion,
         campaignLabel,
-        initiatedAt: new Date().toISOString()
+        initiatedAt: new Date().toISOString(),
+        ...(aiConferenceName ? { aiConferenceName } : {})
       }
     });
 
@@ -118,7 +124,8 @@ export async function POST(request) {
         mode: 'ai',
         supervisedAi: Boolean(supervisedAi),
         source,
-        aiAgentVersion
+        aiAgentVersion,
+        conferenceName: aiConferenceName
       },
       message: 'AI call initiated successfully'
     });

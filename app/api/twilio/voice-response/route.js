@@ -131,7 +131,8 @@ async function handleVoiceResponse(request) {
           const confName = calledNumber && (
             String(calledNumber).startsWith('call-') || 
             String(calledNumber).startsWith('inbound-') ||
-            String(calledNumber).startsWith('ivr-call-')
+            String(calledNumber).startsWith('ivr-call-') ||
+            String(calledNumber).startsWith('ai-supervised-')
           )
             ? String(calledNumber).trim()
             : (conferenceNameFromUrl || (agentId && !isIvrCall ? `call-${agentId}` : null));
@@ -293,7 +294,7 @@ async function handleVoiceResponse(request) {
         
         const conferenceName =
           (conferenceNameFromUrl && String(conferenceNameFromUrl).trim()) ||
-          (toParam && (toParam.startsWith('inbound-') || toParam.startsWith('call-') || toParam.startsWith('ivr-call-')) ? toParam : null) ||
+          (toParam && (toParam.startsWith('inbound-') || toParam.startsWith('call-') || toParam.startsWith('ivr-call-') || toParam.startsWith('ai-supervised-')) ? toParam : null) ||
           (isIvrCallForCustomer ? null : `call-${parsedAgentId}`);
         
         // For IVR calls, conference name must be provided

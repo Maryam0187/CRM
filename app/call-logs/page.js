@@ -376,9 +376,20 @@ export default function CallLogsPage() {
       const data = await res.json();
 
       if (data?.success) {
-        setAiActiveCallSid(data?.data?.callSid || '');
-        setAiDialMessage(`AI call started${data?.data?.callSid ? ` (SID: ${data.data.callSid})` : ''}.`);
+        const sid = data?.data?.callSid || '';
+        const aiConference = data?.data?.conferenceName || null;
+        setAiActiveCallSid(sid);
+        setAiDialMessage(`AI call started${sid ? ` (SID: ${sid})` : ''}.`);
         setCheckResult(null);
+        if (aiConference && sid) {
+          startCall({
+            callSid: sid,
+            conferenceName: aiConference,
+            phoneNumber: quickDialNumber.trim(),
+            customerId: null,
+            saleId: null
+          });
+        }
       } else {
         setError(data?.message || 'Failed to start AI call.');
       }

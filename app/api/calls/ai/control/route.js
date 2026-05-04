@@ -60,16 +60,25 @@ export async function POST(request) {
         callLog.conferenceName ||
         `ai-supervised-${String(callSid)}`;
 
-      const twimlUrl = new URL(getWebhookUrl('/api/twilio/voice-response'));
-      twimlUrl.searchParams.set('agentId', String(authResult.user.id));
-      twimlUrl.searchParams.set('conferenceName', takeoverConferenceName);
-      twimlUrl.searchParams.set('source', 'ai_takeover');
+      const alreadyInSupervisedConference =
+        callLog.twilioData?.supervisedConferenceMode === true &&
+        callLog.conferenceName &&
+        String(callLog.conferenceName) === String(takeoverConferenceName);
 
-      const twilioClient = getClient();
-      await twilioClient.calls(String(callSid)).update({
-        url: twimlUrl.toString(),
-        method: 'POST'
-      });
+      // Legacy AI calls used Connect<Stream> only; takeover redirected PSTN into a conference.
+      // Supervised conference mode already places customer + agent in the same room — avoid reconnect.
+      if (!alreadyInSupervisedConference) {
+        const twimlUrl = new URL(getWebhookUrl('/api/twilio/voice-response'));
+        twimlUrl.searchParams.set('agentId', String(authResult.user.id));
+        twimlUrl.searchParams.set('conferenceName', takeoverConferenceName);
+        twimlUrl.searchParams.set('source', 'ai_takeover');
+
+        const twilioClient = getClient();
+        await twilioClient.calls(String(callSid)).update({
+          url: twimlUrl.toString(),
+          method: 'POST'
+        });
+      }
 
       await callLog.update({
         conferenceName: takeoverConferenceName,
