@@ -57,6 +57,7 @@ export async function POST(request) {
     const source = supervisedAi ? 'ai_supervised' : 'ai_unsupervised';
 
     const voiceUrl = new URL(getWebhookUrl('/api/twilio/ai/voice'));
+    voiceUrl.searchParams.set('direction', 'outbound-api');
     voiceUrl.searchParams.set('agentId', String(user.id));
     voiceUrl.searchParams.set('callPurpose', String(callPurpose));
     voiceUrl.searchParams.set('aiAgentVersion', aiAgentVersion);
@@ -67,7 +68,9 @@ export async function POST(request) {
     if (campaignLabel) voiceUrl.searchParams.set('campaignLabel', String(campaignLabel));
 
     const statusCallbackUrl = new URL(getWebhookUrl('/api/twilio/ai/call-status-callback'));
+    statusCallbackUrl.searchParams.set('direction', 'outbound-api');
     statusCallbackUrl.searchParams.set('agentId', String(user.id));
+    statusCallbackUrl.searchParams.set('customerPhone', formattedNumber);
     statusCallbackUrl.searchParams.set('callPurpose', String(callPurpose));
     statusCallbackUrl.searchParams.set('aiAgentVersion', aiAgentVersion);
     statusCallbackUrl.searchParams.set('supervisedAi', supervisedAi ? 'true' : 'false');
@@ -88,8 +91,9 @@ export async function POST(request) {
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
     });
 
-    /** Same naming TwiML uses from CallSid: ai-supervised-{customerLegSid} */
-    const aiConferenceName = supervisedAi ? `ai-supervised-${call.sid}` : null;
+    const useConferenceBridge = process.env.AI_SUPERVISED_CONFERENCE_MODE === 'true';
+    const aiConferenceName =
+      supervisedAi && useConferenceBridge ? `ai-supervised-${call.sid}` : null;
 
     await sequelizeDb.CallLog.create({
       callSid: call.sid,
@@ -107,7 +111,7 @@ export async function POST(request) {
       twilioData: {
         aiCall: true,
         supervisedAi: Boolean(supervisedAi),
-        supervisedConferenceMode: Boolean(supervisedAi),
+        supervisedConferenceMode: Boolean(supervisedAi && useConferenceBridge),
         source,
         aiAgentVersion,
         campaignLabel,
@@ -125,9 +129,10 @@ export async function POST(request) {
         supervisedAi: Boolean(supervisedAi),
         source,
         aiAgentVersion,
-        conferenceName: aiConferenceName
+        conferenceName: aiConferenceName,
+        supervisedConferenceMode: Boolean(supervisedAi && useConferenceBridge)
       },
-      message: 'AI call initiated successfully'
+      message: 'Outbound AI call initiated — dialing customer now'
     });
   } catch (error) {
     console.error('Error initiating AI call:', error);

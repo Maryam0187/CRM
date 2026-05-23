@@ -379,9 +379,11 @@ export default function CallLogsPage() {
         const sid = data?.data?.callSid || '';
         const aiConference = data?.data?.conferenceName || null;
         setAiActiveCallSid(sid);
-        setAiDialMessage(`AI call started${sid ? ` (SID: ${sid})` : ''}.`);
+        setAiDialMessage(
+          `Outbound AI call dialing customer${sid ? ` (SID: ${sid})` : ''}. Rebecca will speak when they answer.`
+        );
         setCheckResult(null);
-        if (aiConference && sid) {
+        if (data?.data?.supervisedConferenceMode && aiConference && sid) {
           startCall({
             callSid: sid,
             conferenceName: aiConference,
@@ -919,7 +921,7 @@ export default function CallLogsPage() {
                   disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || !isTwilioEnabled || isAiDialing}
                   className="w-full sm:w-auto sm:mt-6 px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
                 >
-                  {isAiDialing ? 'Starting AI...' : 'Start Supervised AI Call'}
+                  {isAiDialing ? 'Dialing...' : 'Start Outbound AI Call'}
                 </button>
               </div>
 
@@ -959,7 +961,7 @@ export default function CallLogsPage() {
                         {aiControlLoadingAction === 'end_ai' ? 'Ending...' : 'End AI'}
                       </button>
                       <p className="w-full text-xs text-slate-600 mt-1">
-                        Take Over now switches the customer to a live conference bridge and opens your web calling interface so you can speak directly.
+                        Outbound: we dial the customer and the AI (Rebecca) talks on that call. Use Take Over when you want to join and speak live (opens your web phone).
                       </p>
                     </div>
                   ) : (

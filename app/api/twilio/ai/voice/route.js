@@ -22,9 +22,9 @@ function xmlEscapeAttribute(value) {
     .replace(/'/g, '&apos;');
 }
 
-/** Optional: force legacy Connect-only AI leg (no conference); blocks supervisor listening on PSTN. */
-function legacyAiConnectOnlyEnabled() {
-  return process.env.AI_SUPERVISED_LEGACY_CONNECT_ONLY === 'true';
+/** Opt-in only — Start+Conference breaks bidirectional AI playback (Twilio sample uses Connect only). */
+function supervisedConferenceModeEnabled() {
+  return process.env.AI_SUPERVISED_CONFERENCE_MODE === 'true';
 }
 
 function buildStreamParametersXml({
@@ -34,11 +34,9 @@ function buildStreamParametersXml({
   safeSaleId,
   safeAiAgentVersion,
   safeSupervisedAi,
-  safeSource,
-  safeConferenceName,
-  supervisedConferenceMode
+  safeSource
 }) {
-  let xml = `
+  return `
       <Parameter name="callSid" value="${safeCallSid}"></Parameter>
       <Parameter name="agentId" value="${safeAgentId}"></Parameter>
       <Parameter name="customerId" value="${safeCustomerId}"></Parameter>
@@ -46,20 +44,54 @@ function buildStreamParametersXml({
       <Parameter name="aiAgentVersion" value="${safeAiAgentVersion}"></Parameter>
       <Parameter name="supervisedAi" value="${safeSupervisedAi}"></Parameter>
       <Parameter name="source" value="${safeSource}"></Parameter>`;
-  if (safeConferenceName) {
-    xml += `\n      <Parameter name="conferenceName" value="${safeConferenceName}"></Parameter>`;
-  }
-  if (supervisedConferenceMode) {
-    xml += `\n      <Parameter name="supervisedConference" value="true"></Parameter>`;
-  }
-  return xml;
 }
 
 /**
- * Supervised AI: customer joins a Twilio Conference (same room name returned from /api/calls/ai/initiate)
- * so the browser agent can join with Voice SDK. A non-blocking Start Stream feeds the realtime AI bridge.
- * AI TTS back uses the same WebSocket path as unsupervised; Twilio mixes stream playback with conference audio on the PSTN leg.
+ * Outbound customer leg (REST calls.create → customer phone).
+ * Uses <Connect><Stream> like Twilio's realtime sample — bidirectional audio so Rebecca can speak.
+ * track="inbound_track" = audio from the callee (customer), which is correct for outbound.
  */
+function buildOutboundConnectStreamTwiML(requestUrl, formContext = {}) {
+  const url = new URL(requestUrl);
+  const params = url.searchParams;
+  const callSid = formContext.callSid || params.get('CallSid');
+  const agentId = formContext.agentId || params.get('agentId');
+  const customerId = formContext.customerId || params.get('customerId');
+  const saleId = formContext.saleId || params.get('saleId');
+  const aiAgentVersion = formContext.aiAgentVersion || params.get('aiAgentVersion') || 'v1';
+  const supervisedAi = (formContext.supervisedAi || params.get('supervisedAi') || '') === 'true';
+  const source = formContext.source || params.get('source') || (supervisedAi ? 'ai_supervised' : 'ai_unsupervised');
+
+  const streamUrl = new URL(getMediaStreamBaseUrl());
+  if (callSid) streamUrl.searchParams.set('callSid', String(callSid));
+  if (agentId) streamUrl.searchParams.set('agentId', String(agentId));
+  if (customerId) streamUrl.searchParams.set('customerId', String(customerId));
+  if (saleId) streamUrl.searchParams.set('saleId', String(saleId));
+  streamUrl.searchParams.set('aiAgentVersion', String(aiAgentVersion));
+  streamUrl.searchParams.set('supervisedAi', supervisedAi ? 'true' : 'false');
+  streamUrl.searchParams.set('source', String(source));
+  streamUrl.searchParams.set('direction', 'outbound-api');
+
+  const safeStreamUrl = xmlEscapeAttribute(streamUrl.toString());
+  const innerStreamParams = buildStreamParametersXml({
+    safeCallSid: callSid ? xmlEscapeAttribute(callSid) : '',
+    safeAgentId: agentId ? xmlEscapeAttribute(agentId) : '',
+    safeCustomerId: customerId ? xmlEscapeAttribute(customerId) : '',
+    safeSaleId: saleId ? xmlEscapeAttribute(saleId) : '',
+    safeAiAgentVersion: xmlEscapeAttribute(String(aiAgentVersion)),
+    safeSupervisedAi: supervisedAi ? 'true' : 'false',
+    safeSource: xmlEscapeAttribute(String(source))
+  });
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="${safeStreamUrl}">${innerStreamParams}
+    </Stream>
+  </Connect>
+</Response>`;
+}
+
 function buildSupervisedConferenceTwiML(requestUrl, formContext = {}) {
   const url = new URL(requestUrl);
   const params = url.searchParams;
@@ -69,7 +101,6 @@ function buildSupervisedConferenceTwiML(requestUrl, formContext = {}) {
   const saleId = formContext.saleId || params.get('saleId');
   const aiAgentVersion = formContext.aiAgentVersion || params.get('aiAgentVersion') || 'v1';
   const source = formContext.source || params.get('source') || 'ai_supervised';
-
   const conferenceNameRaw =
     params.get('conferenceName') || (callSid ? `ai-supervised-${callSid}` : '');
   const safeConferenceName = conferenceNameRaw ? xmlEscapeAttribute(conferenceNameRaw) : '';
@@ -83,30 +114,20 @@ function buildSupervisedConferenceTwiML(requestUrl, formContext = {}) {
   streamUrl.searchParams.set('supervisedAi', 'true');
   streamUrl.searchParams.set('source', String(source));
   streamUrl.searchParams.set('supervisedConference', 'true');
-  if (conferenceNameRaw) streamUrl.searchParams.set('conferenceName', conferenceNameRaw);
 
   const safeStreamUrl = xmlEscapeAttribute(streamUrl.toString());
-  const safeCallSid = callSid ? xmlEscapeAttribute(callSid) : '';
-  const safeAgentId = agentId ? xmlEscapeAttribute(agentId) : '';
-  const safeCustomerId = customerId ? xmlEscapeAttribute(customerId) : '';
-  const safeSaleId = saleId ? xmlEscapeAttribute(saleId) : '';
-  const safeAiAgentVersion = xmlEscapeAttribute(String(aiAgentVersion));
-  const safeSource = xmlEscapeAttribute(String(source));
+  const innerStreamParams = buildStreamParametersXml({
+    safeCallSid: callSid ? xmlEscapeAttribute(callSid) : '',
+    safeAgentId: agentId ? xmlEscapeAttribute(agentId) : '',
+    safeCustomerId: customerId ? xmlEscapeAttribute(customerId) : '',
+    safeSaleId: saleId ? xmlEscapeAttribute(saleId) : '',
+    safeAiAgentVersion: xmlEscapeAttribute(String(aiAgentVersion)),
+    safeSupervisedAi: 'true',
+    safeSource: xmlEscapeAttribute(String(source))
+  });
 
   const conferenceHoldMusicUrl = xmlEscapeAttribute(getWebhookUrl('/api/twilio/conference-hold-music'));
   const conferenceCallbackUrl = xmlEscapeAttribute(getWebhookUrl('/api/twilio/call-status-callback'));
-
-  const innerStreamParams = buildStreamParametersXml({
-    safeCallSid,
-    safeAgentId,
-    safeCustomerId,
-    safeSaleId,
-    safeAiAgentVersion,
-    safeSupervisedAi: 'true',
-    safeSource,
-    safeConferenceName,
-    supervisedConferenceMode: true
-  });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -130,65 +151,23 @@ function buildSupervisedConferenceTwiML(requestUrl, formContext = {}) {
 </Response>`;
 }
 
-function buildConnectStreamTwiML(requestUrl, formContext = {}) {
-  const url = new URL(requestUrl);
-  const params = url.searchParams;
-  const callSid = formContext.callSid || params.get('CallSid');
-  const agentId = formContext.agentId || params.get('agentId');
-  const customerId = formContext.customerId || params.get('customerId');
-  const saleId = formContext.saleId || params.get('saleId');
-  const aiAgentVersion = formContext.aiAgentVersion || params.get('aiAgentVersion') || 'v1';
-  const supervisedAi = (formContext.supervisedAi || params.get('supervisedAi') || '') === 'true';
-  const source = formContext.source || params.get('source') || (supervisedAi ? 'ai_supervised' : 'ai_unsupervised');
-
-  const streamUrl = new URL(getMediaStreamBaseUrl());
-  if (callSid) streamUrl.searchParams.set('callSid', String(callSid));
-  if (agentId) streamUrl.searchParams.set('agentId', String(agentId));
-  if (customerId) streamUrl.searchParams.set('customerId', String(customerId));
-  if (saleId) streamUrl.searchParams.set('saleId', String(saleId));
-  streamUrl.searchParams.set('aiAgentVersion', String(aiAgentVersion));
-  streamUrl.searchParams.set('supervisedAi', supervisedAi ? 'true' : 'false');
-  streamUrl.searchParams.set('source', String(source));
-
-  const safeStreamUrl = xmlEscapeAttribute(streamUrl.toString());
-  const safeCallSid = callSid ? xmlEscapeAttribute(callSid) : '';
-  const safeAgentId = agentId ? xmlEscapeAttribute(agentId) : '';
-  const safeCustomerId = customerId ? xmlEscapeAttribute(customerId) : '';
-  const safeSaleId = saleId ? xmlEscapeAttribute(saleId) : '';
-  const safeAiAgentVersion = xmlEscapeAttribute(String(aiAgentVersion));
-  const safeSupervisedAi = supervisedAi ? 'true' : 'false';
-  const safeSource = xmlEscapeAttribute(String(source));
-
-  const innerStreamParams = buildStreamParametersXml({
-    safeCallSid,
-    safeAgentId,
-    safeCustomerId,
-    safeSaleId,
-    safeAiAgentVersion,
-    safeSupervisedAi,
-    safeSource,
-    safeConferenceName: '',
-    supervisedConferenceMode: false
-  });
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Connect>
-    <Stream url="${safeStreamUrl}" track="inbound_track">${innerStreamParams}
-    </Stream>
-  </Connect>
-</Response>`;
-}
-
 function buildAiVoiceTwiML(requestUrl, formContext = {}) {
   const url = new URL(requestUrl);
   const params = url.searchParams;
   const supervisedAi = (formContext.supervisedAi || params.get('supervisedAi') || '') === 'true';
+  const direction = String(formContext.direction || params.get('direction') || 'outbound-api');
 
-  if (supervisedAi && !legacyAiConnectOnlyEnabled()) {
+  const isOutbound = direction === 'outbound' || direction === 'outbound-api';
+  if (!isOutbound) {
+    console.warn('[AI VOICE] Non-outbound direction on AI voice route, using outbound Connect stream anyway', {
+      direction
+    });
+  }
+
+  if (supervisedAi && supervisedConferenceModeEnabled()) {
     return buildSupervisedConferenceTwiML(requestUrl, formContext);
   }
-  return buildConnectStreamTwiML(requestUrl, formContext);
+  return buildOutboundConnectStreamTwiML(requestUrl, formContext);
 }
 
 function buildFallbackTwiML() {
@@ -203,14 +182,14 @@ async function handleVoice(request) {
     const aiGateResponse = ensureAiCallingEnabled();
     if (aiGateResponse) {
       console.warn('AI voice: AI calling disabled, returning hangup TwiML (no TTS).');
-      const fallback = buildFallbackTwiML();
-      return new NextResponse(fallback, {
+      return new NextResponse(buildFallbackTwiML(), {
         headers: { 'Content-Type': 'text/xml' }
       });
     }
 
     const formContext = {
       callSid: null,
+      direction: 'outbound-api',
       agentId: null,
       customerId: null,
       saleId: null,
@@ -222,6 +201,7 @@ async function handleVoice(request) {
       try {
         const formData = await request.formData();
         formContext.callSid = formData.get('CallSid');
+        formContext.direction = formData.get('Direction') || formContext.direction;
         formContext.agentId = formData.get('agentId');
         formContext.customerId = formData.get('customerId');
         formContext.saleId = formData.get('saleId');
@@ -239,8 +219,7 @@ async function handleVoice(request) {
     });
   } catch (error) {
     console.error('AI voice route failure:', error);
-    const fallback = buildFallbackTwiML();
-    return new NextResponse(fallback, {
+    return new NextResponse(buildFallbackTwiML(), {
       headers: { 'Content-Type': 'text/xml' }
     });
   }
@@ -253,4 +232,3 @@ export async function GET(request) {
 export async function POST(request) {
   return handleVoice(request);
 }
-
