@@ -75,6 +75,7 @@ export default function CallLogsPage() {
   quickDialNoteRef.current = quickDialNote;
   const quickDialNameRef = useRef(quickDialName);
   quickDialNameRef.current = quickDialName;
+
   const freshCityRef = useRef(freshCity);
   freshCityRef.current = freshCity;
   const freshZipcodeRef = useRef(freshZipcode);
@@ -380,8 +381,9 @@ export default function CallLogsPage() {
         const aiConference = data?.data?.conferenceName || null;
         setAiActiveCallSid(sid);
         setAiDialMessage(
-          `Outbound AI call dialing customer${sid ? ` (SID: ${sid})` : ''}. Rebecca will speak when they answer.`
+          `Outbound AI call dialing customer${sid ? ` (SID: ${sid})` : ''}. Rebecca (AI) will speak when they answer.`
         );
+        setAiCanControl(true);
         setCheckResult(null);
         if (data?.data?.supervisedConferenceMode && aiConference && sid) {
           startCall({
@@ -464,8 +466,10 @@ export default function CallLogsPage() {
     };
 
     fetchAiControlState();
+    const interval = setInterval(fetchAiControlState, 5000);
     return () => {
       isCancelled = true;
+      clearInterval(interval);
     };
   }, [aiActiveCallSid]);
 
@@ -858,10 +862,12 @@ export default function CallLogsPage() {
           {/* AI Supervised tab */}
           {activeTab === 'ai_supervised' && (
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-3">AI Supervised Dialing</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">AI Supervised Call</h3>
             <p className="text-sm text-gray-500 mb-3">
-              Start a supervised AI call. Pause/resume/end AI from here. Take Over only stops the AI on the line—it does not route audio from this browser to the customer (that needs a separate Twilio voice bridge).
+              One outbound call: customer and Rebecca (AI bot). You can start a call as agent, supervisor, or admin;
+              only you (who started it) can monitor and control that call.
             </p>
+
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div>
@@ -961,12 +967,12 @@ export default function CallLogsPage() {
                         {aiControlLoadingAction === 'end_ai' ? 'Ending...' : 'End AI'}
                       </button>
                       <p className="w-full text-xs text-slate-600 mt-1">
-                        Outbound: we dial the customer and the AI (Rebecca) talks on that call. Use Take Over when you want to join and speak live (opens your web phone).
+                        Customer and Rebecca are on the call. Take Over opens your web phone to speak to the customer.
                       </p>
                     </div>
                   ) : (
                     <p className="text-sm text-slate-700">
-                      Control actions are available only to the user who started this AI call.
+                      Only the user who started this call can monitor or control it.
                     </p>
                   )}
                   {aiControlMessage && <p className="mt-2 text-sm text-slate-700">{aiControlMessage}</p>}

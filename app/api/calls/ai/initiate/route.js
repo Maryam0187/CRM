@@ -132,7 +132,7 @@ export async function POST(request) {
         conferenceName: aiConferenceName,
         supervisedConferenceMode: Boolean(supervisedAi && useConferenceBridge)
       },
-      message: 'Outbound AI call initiated — dialing customer now'
+      message: 'Outbound AI call initiated — customer and AI bot on the line'
     });
   } catch (error) {
     console.error('Error initiating AI call:', error);
@@ -145,4 +145,3 @@ export async function POST(request) {
     );
   }
 }
-

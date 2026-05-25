@@ -3,6 +3,7 @@ import { requireJWTAuth } from '../../../../../lib/jwtAuth';
 import { setAiControlAction, getAiControlState } from '../../../../../lib/aiMediaBridge';
 import sequelizeDb from '../../../../../lib/sequelize-db';
 import { getClient, getWebhookUrl } from '../../../../../lib/twilio';
+import { canAccessAiCall } from '../../../../../lib/aiCallAccess';
 
 export async function POST(request) {
   try {
@@ -20,41 +21,26 @@ export async function POST(request) {
       );
     }
 
-    let state = getAiControlState(String(callSid));
-    if (!state.ownerAgentId) {
-      const callLog = await sequelizeDb.CallLog.findOne({
-        where: { callSid: String(callSid) },
-        attributes: ['agentId']
-      });
-      if (callLog && parseInt(callLog.agentId, 10) !== parseInt(authResult.user.id, 10)) {
-        return NextResponse.json(
-          { success: false, message: 'Only call initiator can control AI for this call' },
-          { status: 403 }
-        );
-      }
+    const callLog = await sequelizeDb.CallLog.findOne({
+      where: { callSid: String(callSid) }
+    });
+    if (!callLog?.twilioData?.aiCall) {
+      return NextResponse.json({ success: false, message: 'AI call not found' }, { status: 404 });
     }
+
+    if (!canAccessAiCall(authResult.user, callLog)) {
+      return NextResponse.json(
+        { success: false, message: 'Only the user who started this AI call can monitor or control it' },
+        { status: 403 }
+      );
+    }
+
+    let state = getAiControlState(String(callSid));
 
     const normalizedAction = String(action).toLowerCase();
     let takeoverConferenceName = null;
 
     if (normalizedAction === 'takeover') {
-      const callLog = await sequelizeDb.CallLog.findOne({
-        where: { callSid: String(callSid) },
-        attributes: ['id', 'agentId', 'conferenceName', 'twilioData', 'status']
-      });
-      if (!callLog) {
-        return NextResponse.json(
-          { success: false, message: 'AI call log not found for takeover' },
-          { status: 404 }
-        );
-      }
-      if (parseInt(callLog.agentId, 10) !== parseInt(authResult.user.id, 10)) {
-        return NextResponse.json(
-          { success: false, message: 'Only call initiator can control AI for this call' },
-          { status: 403 }
-        );
-      }
-
       takeoverConferenceName =
         callLog.twilioData?.aiTakeoverConferenceName ||
         callLog.conferenceName ||
@@ -65,8 +51,6 @@ export async function POST(request) {
         callLog.conferenceName &&
         String(callLog.conferenceName) === String(takeoverConferenceName);
 
-      // Legacy AI calls used Connect<Stream> only; takeover redirected PSTN into a conference.
-      // Supervised conference mode already places customer + agent in the same room — avoid reconnect.
       if (!alreadyInSupervisedConference) {
         const twimlUrl = new URL(getWebhookUrl('/api/twilio/voice-response'));
         twimlUrl.searchParams.set('agentId', String(authResult.user.id));
@@ -131,13 +115,24 @@ export async function GET(request) {
       return NextResponse.json({ success: false, message: 'callSid is required' }, { status: 400 });
     }
 
+    const callLog = await sequelizeDb.CallLog.findOne({
+      where: { callSid: String(callSid) }
+    });
+    if (!callLog?.twilioData?.aiCall) {
+      return NextResponse.json({ success: false, message: 'AI call not found' }, { status: 404 });
+    }
+
     const state = getAiControlState(callSid);
+    const canAccess = canAccessAiCall(authResult.user, callLog);
+
     return NextResponse.json({
       success: true,
       data: {
         callSid,
         state,
-        canControl: !state.ownerAgentId || parseInt(state.ownerAgentId, 10) === parseInt(authResult.user.id, 10)
+        canControl: canAccess,
+        canMonitor: canAccess,
+        isInitiator: canAccess
       }
     });
   } catch (error) {
@@ -148,4 +143,3 @@ export async function GET(request) {
     );
   }
 }
-
