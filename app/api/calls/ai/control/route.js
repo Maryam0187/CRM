@@ -3,7 +3,7 @@ import { requireJWTAuth } from '../../../../../lib/jwtAuth';
 import { setAiControlAction, getAiControlState } from '../../../../../lib/aiMediaBridge';
 import sequelizeDb from '../../../../../lib/sequelize-db';
 import { getClient, getWebhookUrl } from '../../../../../lib/twilio';
-import { canAccessAiCall } from '../../../../../lib/aiCallAccess';
+import { canControlAiCall } from '../../../../../lib/aiCallAccess';
 
 export async function POST(request) {
   try {
@@ -28,9 +28,9 @@ export async function POST(request) {
       return NextResponse.json({ success: false, message: 'AI call not found' }, { status: 404 });
     }
 
-    if (!canAccessAiCall(authResult.user, callLog)) {
+    if (!canControlAiCall(authResult.user, callLog)) {
       return NextResponse.json(
-        { success: false, message: 'Only the user who started this AI call can monitor or control it' },
+        { success: false, message: 'Only the user who started this call can monitor or control it' },
         { status: 403 }
       );
     }
@@ -123,7 +123,7 @@ export async function GET(request) {
     }
 
     const state = getAiControlState(callSid);
-    const canAccess = canAccessAiCall(authResult.user, callLog);
+    const canAccess = canControlAiCall(authResult.user, callLog);
 
     return NextResponse.json({
       success: true,

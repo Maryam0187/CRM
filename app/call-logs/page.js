@@ -13,6 +13,7 @@ import { isAdmin, isSupervisor } from '../../lib/roleUtils';
 import { getCallPurposeDisplay } from '../../lib/twilio';
 import StateSelector from '../../components/StateSelector';
 import DateFilter from '../../components/DateFilter';
+import AiMonitorListenPanel from '../../components/AiMonitorListenPanel';
 
 export default function CallLogsPage() {
   const { user } = useAuth();
@@ -66,6 +67,7 @@ export default function CallLogsPage() {
   const [aiDialMessage, setAiDialMessage] = useState('');
   const [aiActiveCallSid, setAiActiveCallSid] = useState('');
   const [aiCanControl, setAiCanControl] = useState(true);
+  const [aiCanMonitor, setAiCanMonitor] = useState(false);
   const [aiControlMessage, setAiControlMessage] = useState('');
   const [aiControlLoadingAction, setAiControlLoadingAction] = useState('');
 
@@ -384,6 +386,7 @@ export default function CallLogsPage() {
           `Outbound AI call dialing customer${sid ? ` (SID: ${sid})` : ''}. Rebecca (AI) will speak when they answer.`
         );
         setAiCanControl(true);
+        setAiCanMonitor(true);
         setCheckResult(null);
         if (data?.data?.supervisedConferenceMode && aiConference && sid) {
           startCall({
@@ -444,6 +447,7 @@ export default function CallLogsPage() {
   useEffect(() => {
     if (!aiActiveCallSid) {
       setAiCanControl(true);
+      setAiCanMonitor(false);
       return;
     }
 
@@ -455,12 +459,15 @@ export default function CallLogsPage() {
         if (isCancelled) return;
         if (data?.success) {
           setAiCanControl(Boolean(data?.data?.canControl));
+          setAiCanMonitor(Boolean(data?.data?.canMonitor));
         } else {
           setAiCanControl(false);
+          setAiCanMonitor(false);
         }
       } catch (err) {
         if (!isCancelled) {
           setAiCanControl(false);
+          setAiCanMonitor(false);
         }
       }
     };
@@ -864,8 +871,8 @@ export default function CallLogsPage() {
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-3">AI Supervised Call</h3>
             <p className="text-sm text-gray-500 mb-3">
-              One outbound call: customer and Rebecca (AI bot). You can start a call as agent, supervisor, or admin;
-              only you (who started it) can monitor and control that call.
+              Customer and Rebecca (AI) on the call. Only you (who started it) can monitor and control. Click Enable
+              audio after the call is live.
             </p>
 
             <div className="space-y-4">
@@ -936,6 +943,9 @@ export default function CallLogsPage() {
               {aiActiveCallSid && (
                 <div className="p-3 rounded-lg border border-indigo-200 bg-indigo-50">
                   <p className="text-xs text-indigo-700 mb-2">Active AI Call SID: {aiActiveCallSid}</p>
+                  {aiCanControl && (
+                    <AiMonitorListenPanel callSid={aiActiveCallSid} enabled />
+                  )}
                   {aiCanControl ? (
                     <div className="flex flex-wrap gap-2">
                       <button
@@ -971,9 +981,7 @@ export default function CallLogsPage() {
                       </p>
                     </div>
                   ) : (
-                    <p className="text-sm text-slate-700">
-                      Only the user who started this call can monitor or control it.
-                    </p>
+                    <p className="text-sm text-slate-700">Only the user who started this call can monitor or control it.</p>
                   )}
                   {aiControlMessage && <p className="mt-2 text-sm text-slate-700">{aiControlMessage}</p>}
                 </div>

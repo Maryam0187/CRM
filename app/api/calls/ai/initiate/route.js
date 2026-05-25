@@ -3,6 +3,7 @@ import { getClient, getWebhookUrl, validatePhoneNumber } from '../../../../../li
 import sequelizeDb from '../../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../../lib/jwtAuth';
 import { ensureAiCallingEnabled, getAiAgentVersion } from '../../../../../lib/aiCalling';
+import { registerMonitorsForCall } from '../../../../../lib/aiSupervisorBroadcast';
 
 export async function POST(request) {
   try {
@@ -94,6 +95,10 @@ export async function POST(request) {
     const useConferenceBridge = process.env.AI_SUPERVISED_CONFERENCE_MODE === 'true';
     const aiConferenceName =
       supervisedAi && useConferenceBridge ? `ai-supervised-${call.sid}` : null;
+
+    if (supervisedAi) {
+      await registerMonitorsForCall(call.sid, user.id);
+    }
 
     await sequelizeDb.CallLog.create({
       callSid: call.sid,
