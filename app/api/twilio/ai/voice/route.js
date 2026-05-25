@@ -1,16 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getWebhookUrl } from '../../../../../lib/twilio';
 import { ensureAiCallingEnabled } from '../../../../../lib/aiCalling';
-
-function toWsUrl(httpUrl) {
-  if (httpUrl.startsWith('https://')) return httpUrl.replace('https://', 'wss://');
-  if (httpUrl.startsWith('http://')) return httpUrl.replace('http://', 'ws://');
-  return httpUrl;
-}
+import { getAiMediaStreamWsUrl } from '../../../../../lib/aiRealtimeConfig';
 
 function getMediaStreamBaseUrl() {
-  if (process.env.AI_MEDIA_STREAM_WS_URL) return process.env.AI_MEDIA_STREAM_WS_URL;
-  return toWsUrl(getWebhookUrl('/ws/ai-media-stream'));
+  return getAiMediaStreamWsUrl(getWebhookUrl);
 }
 
 function xmlEscapeAttribute(value) {
