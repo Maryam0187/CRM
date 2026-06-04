@@ -88,20 +88,27 @@ export async function POST(request) {
 
     if (normalizedAction === 'start_stream' || normalizedAction === 'start_ai') {
       markAiCallAnsweredNow(String(callSid));
+      requestManualStartWhenStreamReady(String(callSid));
       let startResult = forceStartAiStreamForCall(String(callSid));
       let reconnected = false;
 
-      if (!startResult.ok && startResult.code === 'no_media_stream') {
-        requestManualStartWhenStreamReady(String(callSid));
-        const reconnect = await reconnectCallToAiVoice(callLog);
-        if (!reconnect.ok) {
-          return NextResponse.json(
-            { success: false, message: reconnect.message || 'Could not reconnect AI stream' },
-            { status: 409 }
-          );
+      if (!startResult.ok) {
+        const streamStatus = getAiStreamStatus(String(callSid));
+
+        if (startResult.code === 'no_media_stream' && !streamStatus.streamConnected) {
+          const reconnect = await reconnectCallToAiVoice(callLog);
+          if (!reconnect.ok) {
+            return NextResponse.json(
+              { success: false, message: reconnect.message || 'Could not reconnect AI stream' },
+              { status: 409 }
+            );
+          }
+          reconnected = true;
         }
-        reconnected = true;
-        startResult = await waitForAiStreamAndStart(String(callSid), 14000);
+
+        if (!startResult.ok) {
+          startResult = await waitForAiStreamAndStart(String(callSid), 14000);
+        }
       }
 
       if (!startResult.ok) {
