@@ -547,6 +547,12 @@ export default function CallLogsPage() {
           setAiControlMessage('Takeover started. Joining voice bridge so you can speak to the customer.');
         } else if (action === 'end_ai') {
           setAiControlMessage('AI agent ended. Human agent can continue conversation.');
+        } else if (action === 'start_stream' || action === 'start_ai') {
+          setAiCallStatus('in-progress');
+          setAiControlMessage(
+            data?.message ||
+              'AI stream started. Rebecca should begin speaking when the customer is on the line.'
+          );
         } else {
           setAiControlMessage(`AI control applied: ${action}`);
         }
@@ -1142,6 +1148,16 @@ export default function CallLogsPage() {
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
+                        onClick={() => handleAiControl('start_stream')}
+                        disabled={!!aiControlLoadingAction || aiEndingCall}
+                        className="w-full sm:w-auto px-4 py-2.5 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-60 shadow-sm"
+                      >
+                        {aiControlLoadingAction === 'start_stream'
+                          ? 'Starting AI…'
+                          : 'Start AI Stream'}
+                      </button>
+                      <button
+                        type="button"
                         onClick={handleEndAiCallCompletely}
                         disabled={aiEndingCall || !!aiControlLoadingAction}
                         className="w-full sm:w-auto px-4 py-2.5 text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-60 shadow-sm"
@@ -1185,8 +1201,9 @@ export default function CallLogsPage() {
                         {aiControlLoadingAction === 'end_ai' ? 'Stopping AI...' : 'Stop AI Only'}
                       </button>
                       <p className="w-full text-xs text-slate-600 mt-1">
-                        End Call Completely hangs up the customer and closes this panel (use if they already hung up
-                        but the panel is still open). Stop AI Only silences Rebecca but keeps the customer on the line.
+                        Click Start AI Stream after the customer answers if Rebecca does not start automatically.
+                        End Call Completely hangs up the customer and closes this panel. Stop AI Only silences Rebecca
+                        but keeps the customer on the line.
                       </p>
                     </div>
                   ) : (

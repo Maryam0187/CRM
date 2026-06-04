@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { requireJWTAuth } from '../../../../../lib/jwtAuth';
-import { setAiControlAction, getAiControlState } from '../../../../../lib/aiMediaBridge';
+import {
+  setAiControlAction,
+  getAiControlState,
+  forceStartAiStreamForCall
+} from '../../../../../lib/aiMediaBridge';
+import { markAiCallAnsweredNow } from '../../../../../lib/aiCallAnswerGate';
 import sequelizeDb from '../../../../../lib/sequelize-db';
 import { getClient, getWebhookUrl } from '../../../../../lib/twilio';
 import { canControlAiCall } from '../../../../../lib/aiCallAccess';
@@ -74,6 +79,28 @@ export async function POST(request) {
           aiTakeoverAt: new Date().toISOString(),
           aiTakeoverBy: parseInt(authResult.user.id, 10)
         }
+      });
+    }
+
+    if (normalizedAction === 'start_stream' || normalizedAction === 'start_ai') {
+      markAiCallAnsweredNow(String(callSid));
+      const startResult = forceStartAiStreamForCall(String(callSid));
+      if (!startResult.ok) {
+        return NextResponse.json(
+          { success: false, message: startResult.message || 'Could not start AI stream' },
+          { status: 409 }
+        );
+      }
+      setAiControlAction(String(callSid), 'resume', authResult.user.id);
+      return NextResponse.json({
+        success: true,
+        data: {
+          callSid: String(callSid),
+          state: getAiControlState(String(callSid)),
+          streamConnected: startResult.streamConnected,
+          aiConversationEnabled: startResult.aiConversationEnabled
+        },
+        message: startResult.message || 'AI stream started'
       });
     }
 
