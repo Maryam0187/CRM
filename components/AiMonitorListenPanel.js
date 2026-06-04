@@ -102,7 +102,9 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       if (d.track === 'customer' || d.track === 'ai') playChunk(d.track, d.payload);
     };
     const onState = (d) => {
-      if (d?.callSid === callSid && d.state === 'ended') setLive(false);
+      if (d?.callSid !== callSid) return;
+      if (d.state === 'ended') setLive(false);
+      if (d.state === 'connected' || d.state === 'active') setLive(true);
     };
     socket.on('ai_monitor_audio', onAudio);
     socket.on('ai_monitor_state', onState);

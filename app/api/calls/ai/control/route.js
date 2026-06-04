@@ -3,11 +3,15 @@ import { requireJWTAuth } from '../../../../../lib/jwtAuth';
 import {
   setAiControlAction,
   getAiControlState,
-  forceStartAiStreamForCall
+  forceStartAiStreamForCall,
+  hasActiveAiMediaStream,
+  getAiStreamStatus,
+  requestManualStartWhenStreamReady,
+  waitForAiStreamAndStart
 } from '../../../../../lib/aiMediaBridge';
 import { markAiCallAnsweredNow } from '../../../../../lib/aiCallAnswerGate';
+import { reconnectCallToAiVoice } from '../../../../../lib/aiReconnectVoice';
 import sequelizeDb from '../../../../../lib/sequelize-db';
-import { getClient, getWebhookUrl } from '../../../../../lib/twilio';
 import { canControlAiCall } from '../../../../../lib/aiCallAccess';
 
 export async function POST(request) {
@@ -84,22 +88,48 @@ export async function POST(request) {
 
     if (normalizedAction === 'start_stream' || normalizedAction === 'start_ai') {
       markAiCallAnsweredNow(String(callSid));
-      const startResult = forceStartAiStreamForCall(String(callSid));
+      let startResult = forceStartAiStreamForCall(String(callSid));
+      let reconnected = false;
+
+      if (!startResult.ok && startResult.code === 'no_media_stream') {
+        requestManualStartWhenStreamReady(String(callSid));
+        const reconnect = await reconnectCallToAiVoice(callLog);
+        if (!reconnect.ok) {
+          return NextResponse.json(
+            { success: false, message: reconnect.message || 'Could not reconnect AI stream' },
+            { status: 409 }
+          );
+        }
+        reconnected = true;
+        startResult = await waitForAiStreamAndStart(String(callSid), 14000);
+      }
+
       if (!startResult.ok) {
+        const hint = process.env.AI_MEDIA_STREAM_WS_URL
+          ? ''
+          : ' Configure AI_MEDIA_STREAM_WS_URL=wss://YOUR-HOST/ws/ai-media-stream (must support WebSockets).';
         return NextResponse.json(
-          { success: false, message: startResult.message || 'Could not start AI stream' },
+          {
+            success: false,
+            message: (startResult.message || 'Could not start AI stream') + hint,
+            reconnected
+          },
           { status: 409 }
         );
       }
+
       return NextResponse.json({
         success: true,
         data: {
           callSid: String(callSid),
           state: getAiControlState(String(callSid)),
-          streamConnected: startResult.streamConnected,
-          aiConversationEnabled: startResult.aiConversationEnabled
+          streamConnected: startResult.streamConnected ?? hasActiveAiMediaStream(String(callSid)),
+          aiConversationEnabled: startResult.aiConversationEnabled,
+          reconnected
         },
-        message: startResult.message || 'AI stream started'
+        message: reconnected
+          ? 'AI media stream reconnected and Rebecca started.'
+          : startResult.message || 'AI stream started'
       });
     }
 
@@ -150,6 +180,7 @@ export async function GET(request) {
 
     const state = getAiControlState(callSid);
     const canAccess = canControlAiCall(authResult.user, callLog);
+    const streamStatus = getAiStreamStatus(String(callSid));
 
     return NextResponse.json({
       success: true,
@@ -158,7 +189,11 @@ export async function GET(request) {
         state,
         canControl: canAccess,
         canMonitor: canAccess,
-        isInitiator: canAccess
+        isInitiator: canAccess,
+        streamConnected: streamStatus.streamConnected,
+        aiPipeReady: streamStatus.aiPipeReady,
+        aiSpeaking: streamStatus.aiSpeaking,
+        mode: streamStatus.mode
       }
     });
   } catch (error) {

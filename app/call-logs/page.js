@@ -90,6 +90,9 @@ export default function CallLogsPage() {
   const [aiCallStatus, setAiCallStatus] = useState('');
   const [aiEndingCall, setAiEndingCall] = useState(false);
   const [endingActiveCall, setEndingActiveCall] = useState(false);
+  const [aiStreamConnected, setAiStreamConnected] = useState(false);
+  const [aiPipeReady, setAiPipeReady] = useState(false);
+  const [aiSpeaking, setAiSpeaking] = useState(false);
 
   const hangupActiveWebCall = useCallback(() => {
     try {
@@ -106,6 +109,9 @@ export default function CallLogsPage() {
     setAiCanControl(false);
     setAiCanMonitor(false);
     setAiCallStatus('');
+    setAiStreamConnected(false);
+    setAiPipeReady(false);
+    setAiSpeaking(false);
     setAiControlMessage('');
     if (message) setAiDialMessage(message);
     endCall();
@@ -551,7 +557,9 @@ export default function CallLogsPage() {
           setAiCallStatus('in-progress');
           setAiControlMessage(
             data?.message ||
-              'AI stream started. Rebecca should begin speaking when the customer is on the line.'
+              (data?.data?.reconnected
+                ? 'AI stream reconnected. Rebecca should speak on the customer line.'
+                : 'AI stream started. Rebecca should speak on the customer line.')
           );
         } else {
           setAiControlMessage(`AI control applied: ${action}`);
@@ -583,9 +591,15 @@ export default function CallLogsPage() {
         if (data?.success) {
           setAiCanControl(Boolean(data?.data?.canControl));
           setAiCanMonitor(Boolean(data?.data?.canMonitor));
+          setAiStreamConnected(Boolean(data?.data?.streamConnected));
+          setAiPipeReady(Boolean(data?.data?.aiPipeReady));
+          setAiSpeaking(Boolean(data?.data?.aiSpeaking));
         } else {
           setAiCanControl(false);
           setAiCanMonitor(false);
+          setAiStreamConnected(false);
+          setAiPipeReady(false);
+          setAiSpeaking(false);
         }
       } catch (err) {
         if (!isCancelled) {
@@ -1062,8 +1076,8 @@ export default function CallLogsPage() {
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-3">AI Supervised Call</h3>
             <p className="text-sm text-gray-500 mb-3">
-              Customer hears Rebecca only after you click Start AI Stream. Until then the line stays connected with no
-              AI speech. Use live monitor (headphones recommended) to hear the customer, then start AI when ready.
+              When the customer answers, the AI connects silently (listening only). Rebecca speaks on their phone only
+              after you click Start AI Stream. Use live monitor with headphones to hear the customer first.
             </p>
 
             <div className="space-y-4">
@@ -1135,11 +1149,39 @@ export default function CallLogsPage() {
                 <div className="p-3 rounded-lg border border-indigo-200 bg-indigo-50">
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <p className="text-xs text-indigo-700">Active AI Call SID: {aiActiveCallSid}</p>
-                    {aiCallStatus && (
-                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
-                        {getCallStatusDisplayName(aiCallStatus) || aiCallStatus}
+                    <div className="flex flex-wrap gap-1">
+                      {aiCallStatus && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                          {getCallStatusDisplayName(aiCallStatus) || aiCallStatus}
+                        </span>
+                      )}
+                      <span
+                        className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                          aiStreamConnected
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {aiStreamConnected ? 'Stream connected' : 'Stream not connected'}
                       </span>
-                    )}
+                      {aiStreamConnected && (
+                        <span
+                          className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                            aiSpeaking
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : aiPipeReady
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {aiSpeaking
+                            ? 'Rebecca speaking'
+                            : aiPipeReady
+                              ? 'AI connected (silent)'
+                              : 'AI warming up…'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {aiCanControl && (
                     <AiMonitorListenPanel callSid={aiActiveCallSid} enabled />
@@ -1153,7 +1195,7 @@ export default function CallLogsPage() {
                         className="w-full sm:w-auto px-4 py-2.5 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-60 shadow-sm"
                       >
                         {aiControlLoadingAction === 'start_stream'
-                          ? 'Starting AI…'
+                          ? 'Connecting stream…'
                           : 'Start AI Stream'}
                       </button>
                       <button
@@ -1201,8 +1243,8 @@ export default function CallLogsPage() {
                         {aiControlLoadingAction === 'end_ai' ? 'Stopping AI...' : 'Stop AI Only'}
                       </button>
                       <p className="w-full text-xs text-slate-600 mt-1">
-                        Rebecca does not speak on the customer phone until you click Start AI Stream.
-                        End Call Completely hangs up the customer. Stop AI Only silences Rebecca after she was started.
+                        AI connects silently when the customer is on the line. Click Start AI Stream when you want
+                        Rebecca to talk on the customer phone. End Call Completely hangs up. Stop AI Only mutes Rebecca.
                       </p>
                     </div>
                   ) : (
