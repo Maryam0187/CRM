@@ -91,7 +91,6 @@ export async function POST(request) {
           { status: 409 }
         );
       }
-      setAiControlAction(String(callSid), 'resume', authResult.user.id);
       return NextResponse.json({
         success: true,
         data: {

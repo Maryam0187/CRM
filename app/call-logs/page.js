@@ -1062,8 +1062,8 @@ export default function CallLogsPage() {
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-3">AI Supervised Call</h3>
             <p className="text-sm text-gray-500 mb-3">
-              Customer and Rebecca (AI) on the call. Only you (who started it) can monitor and control. Click Enable
-              audio after the call is live.
+              Customer hears Rebecca only after you click Start AI Stream. Until then the line stays connected with no
+              AI speech. Use live monitor (headphones recommended) to hear the customer, then start AI when ready.
             </p>
 
             <div className="space-y-4">
@@ -1201,9 +1201,8 @@ export default function CallLogsPage() {
                         {aiControlLoadingAction === 'end_ai' ? 'Stopping AI...' : 'Stop AI Only'}
                       </button>
                       <p className="w-full text-xs text-slate-600 mt-1">
-                        Click Start AI Stream after the customer answers if Rebecca does not start automatically.
-                        End Call Completely hangs up the customer and closes this panel. Stop AI Only silences Rebecca
-                        but keeps the customer on the line.
+                        Rebecca does not speak on the customer phone until you click Start AI Stream.
+                        End Call Completely hangs up the customer. Stop AI Only silences Rebecca after she was started.
                       </p>
                     </div>
                   ) : (

@@ -67,7 +67,8 @@ export async function POST(request) {
     const duration = durationRaw ? parseInt(durationRaw, 10) : null;
     const callEnded = CALL_END_STATUSES.includes(status);
 
-    if (status === 'in-progress') {
+    const aiAutoStartOnAnswer = process.env.AI_AUTO_START_ON_ANSWER === 'true';
+    if (status === 'in-progress' && aiAutoStartOnAnswer) {
       markAiCallAnswered(callSid);
       console.log('[AI CALLBACK] Customer answered', {
         callSid: String(callSid).substring(0, 14),
