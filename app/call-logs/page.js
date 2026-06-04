@@ -16,6 +16,12 @@ import DateFilter from '../../components/DateFilter';
 import AiMonitorListenPanel from '../../components/AiMonitorListenPanel';
 
 const AI_CALL_END_STATUSES = ['completed', 'failed', 'canceled', 'busy', 'no-answer'];
+const CALL_COMPLETED_STATUSES = [...AI_CALL_END_STATUSES, 'voicemail'];
+
+function isCallStatusCompleted(status) {
+  if (!status) return false;
+  return CALL_COMPLETED_STATUSES.includes(String(status).toLowerCase());
+}
 
 export default function CallLogsPage() {
   const { user } = useAuth();
@@ -83,6 +89,7 @@ export default function CallLogsPage() {
   const [aiControlLoadingAction, setAiControlLoadingAction] = useState('');
   const [aiCallStatus, setAiCallStatus] = useState('');
   const [aiEndingCall, setAiEndingCall] = useState(false);
+  const [endingActiveCall, setEndingActiveCall] = useState(false);
 
   const hangupActiveWebCall = useCallback(() => {
     try {
@@ -117,6 +124,10 @@ export default function CallLogsPage() {
   freshZipcodeRef.current = freshZipcode;
 
   const hasActiveCall = currentCallSid || isCalling || isWebCallConnected;
+  const hasActiveRegularCall = hasActiveCall && !isCallStatusCompleted(callStatus);
+  const hasActiveAiCall =
+    Boolean(aiActiveCallSid) && !isCallStatusCompleted(aiCallStatus);
+  const showEndCallBar = hasActiveRegularCall || hasActiveAiCall;
   const isTwilioEnabled = user?.twilio_enabled !== undefined ? user.twilio_enabled : true;
   const postCallOutcomeOptions = [
     { value: 'voicemail', label: 'Voicemail' },
@@ -484,6 +495,36 @@ export default function CallLogsPage() {
     }
   };
 
+  const handleEndActiveCall = async () => {
+    if (endingActiveCall || aiEndingCall) return;
+    if (hasActiveAiCall) {
+      await handleEndAiCallCompletely();
+      return;
+    }
+    if (!hasActiveRegularCall) return;
+    try {
+      setEndingActiveCall(true);
+      hangupActiveWebCall();
+      const sid =
+        currentCallSid && !String(currentCallSid).startsWith('pending-')
+          ? currentCallSid
+          : null;
+      if (sid) {
+        const res = await apiClient.post('/api/calls/hangup', { callSid: sid });
+        const data = await res.json();
+        if (!data?.success) {
+          console.warn('Hangup API:', data?.message);
+        }
+      }
+      endCall();
+    } catch (err) {
+      console.error('End active call error:', err);
+      endCall();
+    } finally {
+      setEndingActiveCall(false);
+    }
+  };
+
   const handleAiControl = async (action) => {
     if (!aiActiveCallSid || !action || aiControlLoadingAction || !aiCanControl) return;
     try {
@@ -838,6 +879,34 @@ export default function CallLogsPage() {
             </button>
           </div>
 
+          {showEndCallBar && (
+            <div className="mb-6 p-4 rounded-lg border border-amber-300 bg-amber-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <p className="font-medium text-amber-900">Call in progress</p>
+                <p className="text-sm text-amber-800">
+                  Status:{' '}
+                  {getCallStatusDisplayName(callStatus || aiCallStatus) ||
+                    callStatus ||
+                    aiCallStatus ||
+                    'active'}
+                  {hasActiveAiCall && aiActiveCallSid
+                    ? ` · AI ${aiActiveCallSid.substring(0, 14)}…`
+                    : currentCallSid && !String(currentCallSid).startsWith('pending-')
+                      ? ` · ${String(currentCallSid).substring(0, 14)}…`
+                      : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleEndActiveCall}
+                disabled={endingActiveCall || aiEndingCall}
+                className="px-5 py-2.5 text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-60 shadow-sm whitespace-nowrap"
+              >
+                {endingActiveCall || aiEndingCall ? 'Ending call…' : 'End Call'}
+              </button>
+            </div>
+          )}
+
           {/* Lead Dialing - State first, then City & Zipcode, then Number & Name, Check/Call */}
           {activeTab === 'fresh' && (
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
@@ -926,16 +995,29 @@ export default function CallLogsPage() {
                     {quickDialValidation.message || 'placeholder'}
                   </p>
                 </div>
-                <button
-                  onClick={handleQuickDialCall}
-                  disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled}
-                  className="w-full sm:w-auto sm:mt-6 px-8 py-3.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                  </svg>
-                  {hasActiveCall ? 'Call in progress' : isCalling ? 'Connecting...' : 'Call'}
-                </button>
+                <div className="flex flex-col sm:flex-row gap-2 sm:mt-6 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={handleQuickDialCall}
+                    disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled}
+                    className="w-full sm:w-auto px-8 py-3.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                    </svg>
+                    {hasActiveCall ? 'Call in progress' : isCalling ? 'Connecting...' : 'Call'}
+                  </button>
+                  {showEndCallBar && (
+                    <button
+                      type="button"
+                      onClick={handleEndActiveCall}
+                      disabled={endingActiveCall || aiEndingCall}
+                      className="w-full sm:w-auto px-6 py-3.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-medium text-lg rounded-lg shadow-sm"
+                    >
+                      {endingActiveCall || aiEndingCall ? 'Ending…' : 'End Call'}
+                    </button>
+                  )}
+                </div>
               </div>
               </>
               )}
@@ -1150,16 +1232,29 @@ export default function CallLogsPage() {
                     {quickDialValidation.message || 'placeholder'}
                   </p>
                 </div>
-                <button
-                  onClick={handleQuickDialCallNoCheck}
-                  disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled}
-                  className="w-full sm:w-auto sm:mt-6 px-8 py-3.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                  </svg>
-                  {hasActiveCall ? 'Call in progress' : isCalling ? 'Connecting...' : 'Call'}
-                </button>
+                <div className="flex flex-col sm:flex-row gap-2 sm:mt-6 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={handleQuickDialCallNoCheck}
+                    disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || hasActiveCall || !isTwilioEnabled}
+                    className="w-full sm:w-auto px-8 py-3.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.517l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                    </svg>
+                    {hasActiveCall ? 'Call in progress' : isCalling ? 'Connecting...' : 'Call'}
+                  </button>
+                  {showEndCallBar && (
+                    <button
+                      type="button"
+                      onClick={handleEndActiveCall}
+                      disabled={endingActiveCall || aiEndingCall}
+                      className="w-full sm:w-auto px-6 py-3.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-medium text-lg rounded-lg shadow-sm"
+                    >
+                      {endingActiveCall || aiEndingCall ? 'Ending…' : 'End Call'}
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Name, Purpose & Note */}

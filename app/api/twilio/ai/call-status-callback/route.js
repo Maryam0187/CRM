@@ -5,40 +5,10 @@ import {
   markAiCallAnswered,
   clearAiCallAnswered
 } from '../../../../../lib/aiCallAnswerGate';
-
-const CALL_END_STATUSES = ['completed', 'failed', 'busy', 'no-answer', 'canceled'];
-
-function normalizeEndStatus(status) {
-  if (!status) return 'queued';
-  const s = String(status).toLowerCase();
-  if (CALL_END_STATUSES.includes(s)) return s;
-  if (s === 'initiated') return 'queued';
-  return null;
-}
-
-/**
- * Twilio can send CallStatus=in-progress before the callee picks up (early media).
- * Use AnswerTime + StatusCallbackEvent like the main call-status-callback.
- */
-function deriveAiCallStatus({ callStatusRaw, answerTime, statusCallbackEvent }) {
-  const s = String(callStatusRaw || '').toLowerCase();
-  const event = String(statusCallbackEvent || '').toLowerCase();
-
-  const endStatus = normalizeEndStatus(s);
-  if (endStatus) return endStatus;
-
-  if (event === 'ringing' || s === 'ringing') return 'ringing';
-  if (event === 'initiated' || s === 'initiated' || s === 'queued') return 'queued';
-
-  const customerHasAnswered = s === 'answered' || (s === 'in-progress' && answerTime);
-  if (customerHasAnswered) return 'in-progress';
-
-  if (s === 'in-progress' && !answerTime) {
-    return 'ringing';
-  }
-
-  return 'queued';
-}
+import {
+  deriveAiCallStatus,
+  CALL_END_STATUSES
+} from '../../../../../lib/deriveAiCallStatus';
 
 function broadcastAiCallStatus(agentId, callSid, statusData) {
   if (!agentId || !callSid) return;
@@ -83,19 +53,33 @@ export async function POST(request) {
       return NextResponse.json({ success: false, message: 'Missing CallSid' }, { status: 400 });
     }
 
-    const status = deriveAiCallStatus({ callStatusRaw, answerTime, statusCallbackEvent });
+    let callLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
+    const previousStatus = callLog?.status || callLog?.twilioData?.latestCallbackStatus || null;
+
+    const status = deriveAiCallStatus({
+      callStatusRaw,
+      answerTime,
+      statusCallbackEvent,
+      previousStatus,
+      callDuration: durationRaw
+    });
     const uiStatus = status;
     const duration = durationRaw ? parseInt(durationRaw, 10) : null;
     const callEnded = CALL_END_STATUSES.includes(status);
 
     if (status === 'in-progress') {
       markAiCallAnswered(callSid);
+      console.log('[AI CALLBACK] Customer answered', {
+        callSid: String(callSid).substring(0, 14),
+        callStatusRaw,
+        statusCallbackEvent,
+        answerTime: answerTime || null,
+        previousStatus
+      });
     }
     if (callEnded) {
       clearAiCallAnswered(callSid);
     }
-
-    let callLog = await sequelizeDb.CallLog.findOne({ where: { callSid } });
     if (!callLog) {
       if (!agentId || !from || !to) {
         return NextResponse.json({ success: true, message: 'Callback ignored (no matching log)' });
