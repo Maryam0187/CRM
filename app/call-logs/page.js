@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -15,10 +15,21 @@ import StateSelector from '../../components/StateSelector';
 import DateFilter from '../../components/DateFilter';
 import AiMonitorListenPanel from '../../components/AiMonitorListenPanel';
 
+const AI_CALL_END_STATUSES = ['completed', 'failed', 'canceled', 'busy', 'no-answer'];
+
 export default function CallLogsPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const { initiateCall, startCall, isCalling, currentCallSid, isWebCallConnected } = useCall();
+  const {
+    initiateCall,
+    startCall,
+    endCall,
+    getWebCallInterfaceRef,
+    isCalling,
+    currentCallSid,
+    isWebCallConnected,
+    callStatus
+  } = useCall();
   const [calls, setCalls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -70,6 +81,28 @@ export default function CallLogsPage() {
   const [aiCanMonitor, setAiCanMonitor] = useState(false);
   const [aiControlMessage, setAiControlMessage] = useState('');
   const [aiControlLoadingAction, setAiControlLoadingAction] = useState('');
+  const [aiCallStatus, setAiCallStatus] = useState('');
+  const [aiEndingCall, setAiEndingCall] = useState(false);
+
+  const hangupActiveWebCall = useCallback(() => {
+    try {
+      const webRef = getWebCallInterfaceRef?.();
+      if (webRef?.hangUp) webRef.hangUp();
+    } catch (err) {
+      console.warn('AI call: web hangup error (non-critical):', err);
+    }
+  }, [getWebCallInterfaceRef]);
+
+  const clearAiCallUI = useCallback((message) => {
+    hangupActiveWebCall();
+    setAiActiveCallSid('');
+    setAiCanControl(false);
+    setAiCanMonitor(false);
+    setAiCallStatus('');
+    setAiControlMessage('');
+    if (message) setAiDialMessage(message);
+    endCall();
+  }, [endCall, hangupActiveWebCall]);
 
   const lastActiveCallSidRef = useRef(null);
   const pendingPostCallMetaRef = useRef(null);
@@ -408,6 +441,49 @@ export default function CallLogsPage() {
     }
   };
 
+  const handleEndAiCallCompletely = async () => {
+    if (!aiActiveCallSid || aiEndingCall || !aiCanControl) return;
+    try {
+      setAiEndingCall(true);
+      setAiControlMessage('');
+      hangupActiveWebCall();
+
+      const res = await apiClient.post('/api/calls/ai/hangup', {
+        callSid: aiActiveCallSid
+      });
+      const data = await res.json();
+
+      if (data?.success) {
+        clearAiCallUI('Call ended completely.');
+        fetchCalls();
+        return;
+      }
+
+      const relatedSid =
+        currentCallSid && currentCallSid !== aiActiveCallSid ? currentCallSid : null;
+      if (relatedSid && (isWebCallConnected || isCalling || callStatus === 'in-progress')) {
+        try {
+          const fallback = await apiClient.post('/api/calls/hangup', { callSid: relatedSid });
+          const fallbackData = await fallback.json();
+          if (fallbackData?.success) {
+            clearAiCallUI('Call ended completely.');
+            fetchCalls();
+            return;
+          }
+        } catch (fallbackErr) {
+          console.warn('AI hangup fallback error:', fallbackErr);
+        }
+      }
+
+      setAiControlMessage(data?.message || 'Failed to end call.');
+    } catch (err) {
+      console.error('AI hangup error:', err);
+      setAiControlMessage('Network error while ending call.');
+    } finally {
+      setAiEndingCall(false);
+    }
+  };
+
   const handleAiControl = async (action) => {
     if (!aiActiveCallSid || !action || aiControlLoadingAction || !aiCanControl) return;
     try {
@@ -479,6 +555,33 @@ export default function CallLogsPage() {
       clearInterval(interval);
     };
   }, [aiActiveCallSid]);
+
+  // When customer hangs up, Twilio sends status → socket → clear AI call UI
+  useEffect(() => {
+    if (!aiActiveCallSid) return undefined;
+
+    const handleAiCallStatusUpdate = (event) => {
+      const data = event.detail?.callStatusData;
+      if (!data || data.callSid !== aiActiveCallSid) return;
+
+      const isAiCall =
+        data.webhookSource === 'ai_call_status' ||
+        data.callbackType === 'ai_outbound' ||
+        data.twilioData?.aiCall;
+      if (!isAiCall) return;
+
+      const status = String(data.uiStatus || data.status || '').toLowerCase();
+      if (status) setAiCallStatus(status);
+
+      if (AI_CALL_END_STATUSES.includes(status)) {
+        clearAiCallUI(`Customer ended call (${getCallStatusDisplayName(status) || status}).`);
+        fetchCalls();
+      }
+    };
+
+    window.addEventListener('callStatusUpdate', handleAiCallStatusUpdate);
+    return () => window.removeEventListener('callStatusUpdate', handleAiCallStatusUpdate);
+  }, [aiActiveCallSid, clearAiCallUI]);
 
   const handleQuickDialCallNoCheck = async () => {
     const v = validatePhone(quickDialNumber);
@@ -942,42 +1045,66 @@ export default function CallLogsPage() {
 
               {aiActiveCallSid && (
                 <div className="p-3 rounded-lg border border-indigo-200 bg-indigo-50">
-                  <p className="text-xs text-indigo-700 mb-2">Active AI Call SID: {aiActiveCallSid}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <p className="text-xs text-indigo-700">Active AI Call SID: {aiActiveCallSid}</p>
+                    {aiCallStatus && (
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                        {getCallStatusDisplayName(aiCallStatus) || aiCallStatus}
+                      </span>
+                    )}
+                  </div>
                   {aiCanControl && (
                     <AiMonitorListenPanel callSid={aiActiveCallSid} enabled />
                   )}
                   {aiCanControl ? (
                     <div className="flex flex-wrap gap-2">
                       <button
+                        type="button"
+                        onClick={handleEndAiCallCompletely}
+                        disabled={aiEndingCall || !!aiControlLoadingAction}
+                        className="w-full sm:w-auto px-4 py-2.5 text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-60 shadow-sm"
+                      >
+                        {aiEndingCall
+                          ? 'Ending call...'
+                          : aiCallStatus === 'in-progress' || isWebCallConnected || isCalling
+                            ? 'End In-Progress Call'
+                            : 'End Call Completely'}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleAiControl('pause')}
-                        disabled={!!aiControlLoadingAction}
+                        disabled={!!aiControlLoadingAction || aiEndingCall}
                         className="px-3 py-2 text-sm rounded bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-60"
                       >
                         {aiControlLoadingAction === 'pause' ? 'Pausing...' : 'Pause AI'}
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleAiControl('resume')}
-                        disabled={!!aiControlLoadingAction}
+                        disabled={!!aiControlLoadingAction || aiEndingCall}
                         className="px-3 py-2 text-sm rounded bg-green-600 hover:bg-green-700 text-white disabled:opacity-60"
                       >
                         {aiControlLoadingAction === 'resume' ? 'Resuming...' : 'Resume AI'}
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleAiControl('takeover')}
-                        disabled={!!aiControlLoadingAction}
+                        disabled={!!aiControlLoadingAction || aiEndingCall}
                         className="px-3 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-60"
                       >
                         {aiControlLoadingAction === 'takeover' ? 'Taking Over...' : 'Take Over'}
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleAiControl('end_ai')}
-                        disabled={!!aiControlLoadingAction}
-                        className="px-3 py-2 text-sm rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-60"
+                        disabled={!!aiControlLoadingAction || aiEndingCall}
+                        className="px-3 py-2 text-sm rounded bg-red-500 hover:bg-red-600 text-white disabled:opacity-60"
                       >
-                        {aiControlLoadingAction === 'end_ai' ? 'Ending...' : 'End AI'}
+                        {aiControlLoadingAction === 'end_ai' ? 'Stopping AI...' : 'Stop AI Only'}
                       </button>
                       <p className="w-full text-xs text-slate-600 mt-1">
-                        Customer and Rebecca are on the call. Take Over opens your web phone to speak to the customer.
+                        End Call Completely hangs up the customer and closes this panel (use if they already hung up
+                        but the panel is still open). Stop AI Only silences Rebecca but keeps the customer on the line.
                       </p>
                     </div>
                   ) : (
