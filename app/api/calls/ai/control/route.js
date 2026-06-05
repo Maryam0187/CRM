@@ -11,8 +11,39 @@ import {
 } from '../../../../../lib/aiMediaBridge';
 import { markAiCallAnsweredNow } from '../../../../../lib/aiCallAnswerGate';
 import { reconnectCallToAiVoice } from '../../../../../lib/aiReconnectVoice';
+import { getAiMediaStreamWsUrl } from '../../../../../lib/aiRealtimeConfig';
+import { getClient, getWebhookUrl } from '../../../../../lib/twilio';
 import sequelizeDb from '../../../../../lib/sequelize-db';
 import { canControlAiCall } from '../../../../../lib/aiCallAccess';
+
+function buildStartStreamFailureHint(callSid) {
+  const hints = [];
+  const hasLocalStream = hasActiveAiMediaStream(String(callSid));
+
+  if (!hasLocalStream) {
+    hints.push(
+      'The Twilio media stream is not active on this server process. On Railway, use exactly 1 replica — active streams are stored in memory and a Start request can land on a different instance than the WebSocket.'
+    );
+  } else {
+    hints.push(
+      'The stream is connected on this server but Rebecca could not start yet. Wait for the AI connected (silent) badge, then try again.'
+    );
+  }
+
+  const hasDerivedWsUrl =
+    Boolean(process.env.AI_MEDIA_STREAM_WS_URL) ||
+    Boolean(process.env.RAILWAY_PUBLIC_DOMAIN) ||
+    Boolean(process.env.RAILWAY_STATIC_URL) ||
+    Boolean(process.env.TWILIO_WEBHOOK_BASE_URL);
+
+  if (!hasDerivedWsUrl) {
+    hints.push(
+      `Set AI_MEDIA_STREAM_WS_URL=${getAiMediaStreamWsUrl(getWebhookUrl)} (must support WebSockets).`
+    );
+  }
+
+  return hints.length ? ` ${hints.join(' ')}` : '';
+}
 
 export async function POST(request) {
   try {
@@ -94,36 +125,38 @@ export async function POST(request) {
 
       if (!startResult.ok) {
         // Stream may still be connecting — wait before redirecting Twilio (redirect kills an active stream).
-        startResult = await waitForAiStreamAndStart(String(callSid), 5000);
+        startResult = await waitForAiStreamAndStart(String(callSid), 8000);
       }
 
-      if (!startResult.ok) {
-        const streamStatus = getAiStreamStatus(String(callSid));
-
-        if (startResult.code === 'no_media_stream' && !streamStatus.streamConnected) {
-          const reconnect = await reconnectCallToAiVoice(callLog);
-          if (!reconnect.ok) {
-            return NextResponse.json(
-              { success: false, message: reconnect.message || 'Could not reconnect AI stream' },
-              { status: 409 }
-            );
-          }
-          reconnected = true;
-          startResult = await waitForAiStreamAndStart(String(callSid), 14000);
-        } else if (!startResult.ok) {
-          startResult = await waitForAiStreamAndStart(String(callSid), 9000);
+      if (!startResult.ok && !hasActiveAiMediaStream(String(callSid))) {
+        const reconnect = await reconnectCallToAiVoice(callLog);
+        if (!reconnect.ok) {
+          return NextResponse.json(
+            { success: false, message: reconnect.message || 'Could not reconnect AI stream' },
+            { status: 409 }
+          );
         }
+        reconnected = true;
+        startResult = await waitForAiStreamAndStart(String(callSid), 16000);
+      } else if (!startResult.ok) {
+        startResult = await waitForAiStreamAndStart(String(callSid), 8000);
       }
 
       if (!startResult.ok) {
-        const hint = process.env.AI_MEDIA_STREAM_WS_URL
-          ? ''
-          : ' Configure AI_MEDIA_STREAM_WS_URL=wss://YOUR-HOST/ws/ai-media-stream (must support WebSockets).';
+        console.warn('[AI CONTROL] start_stream failed', {
+          callSid: String(callSid),
+          hasLocalStream: hasActiveAiMediaStream(String(callSid)),
+          streamStatus: getAiStreamStatus(String(callSid)),
+          reconnected,
+          code: startResult.code,
+          message: startResult.message
+        });
         return NextResponse.json(
           {
             success: false,
-            message: (startResult.message || 'Could not start AI stream') + hint,
-            reconnected
+            message: (startResult.message || 'Could not start AI stream') + buildStartStreamFailureHint(callSid),
+            reconnected,
+            hasLocalStream: hasActiveAiMediaStream(String(callSid))
           },
           { status: 409 }
         );
