@@ -3,7 +3,6 @@ import { requireJWTAuth } from '../../../../../lib/jwtAuth';
 import {
   setAiControlAction,
   getAiControlState,
-  forceStartAiStreamForCall,
   hasActiveAiMediaStream,
   getAiStreamStatus,
   requestManualStartWhenStreamReady,
@@ -120,12 +119,12 @@ export async function POST(request) {
     if (normalizedAction === 'start_stream' || normalizedAction === 'start_ai') {
       markAiCallAnsweredNow(String(callSid));
       requestManualStartWhenStreamReady(String(callSid));
-      let startResult = forceStartAiStreamForCall(String(callSid));
+
+      let startResult = setAiControlAction(String(callSid), normalizedAction, authResult.user.id);
       let reconnected = false;
 
       if (!startResult.ok) {
-        // Stream may still be connecting — wait before redirecting Twilio (redirect kills an active stream).
-        startResult = await waitForAiStreamAndStart(String(callSid), 8000);
+        startResult = await waitForAiStreamAndStart(String(callSid), 12000);
       }
 
       if (!startResult.ok && !hasActiveAiMediaStream(String(callSid))) {
@@ -137,9 +136,8 @@ export async function POST(request) {
           );
         }
         reconnected = true;
+        requestManualStartWhenStreamReady(String(callSid));
         startResult = await waitForAiStreamAndStart(String(callSid), 16000);
-      } else if (!startResult.ok) {
-        startResult = await waitForAiStreamAndStart(String(callSid), 8000);
       }
 
       if (!startResult.ok) {
@@ -168,6 +166,7 @@ export async function POST(request) {
           callSid: String(callSid),
           state: getAiControlState(String(callSid)),
           streamConnected: startResult.streamConnected ?? hasActiveAiMediaStream(String(callSid)),
+          aiPipeReady: startResult.aiPipeReady ?? getAiStreamStatus(String(callSid)).aiPipeReady,
           aiConversationEnabled: startResult.aiConversationEnabled,
           reconnected
         },

@@ -27,7 +27,11 @@ const nextConfig = {
   },
   
   // External packages for server
-  serverExternalPackages: ['mysql2', 'sequelize'],
+  serverExternalPackages: ['mysql2', 'sequelize', 'ws'],
+  experimental: {
+    // Keep lib/*.js as real Node modules so API routes share state with server.js
+    serverComponentsExternalPackages: ['ws']
+  },
   
   // Headers for security
   async headers() {
