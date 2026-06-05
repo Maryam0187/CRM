@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCall } from '../../contexts/CallContext';
+import { useSocket } from '../../contexts/SocketContext';
 import ProtectedRoute from '../../components/ProtectedRoute';
 import apiClient from '../../lib/apiClient';
 import { getCallStatusDisplayName, getCallStatusBadgeClasses, getStatusBadgeClasses } from '../../lib/salesStatuses';
@@ -25,6 +26,7 @@ function isCallStatusCompleted(status) {
 
 export default function CallLogsPage() {
   const { user } = useAuth();
+  const { socket, isConnected, joinCallRoom, leaveCallRoom } = useSocket();
   const router = useRouter();
   const {
     initiateCall,
@@ -610,12 +612,53 @@ export default function CallLogsPage() {
     };
 
     fetchAiControlState();
-    const interval = setInterval(fetchAiControlState, 5000);
+    const interval = setInterval(fetchAiControlState, 2000);
     return () => {
       isCancelled = true;
       clearInterval(interval);
     };
   }, [aiActiveCallSid]);
+
+  useEffect(() => {
+    if (!aiActiveCallSid || !isConnected) return undefined;
+    joinCallRoom?.(aiActiveCallSid);
+    return () => leaveCallRoom?.(aiActiveCallSid);
+  }, [aiActiveCallSid, isConnected, joinCallRoom, leaveCallRoom]);
+
+  useEffect(() => {
+    if (!socket || !isConnected || !aiActiveCallSid) return undefined;
+
+    const onMonitorState = (payload) => {
+      if (!payload || payload.callSid !== aiActiveCallSid) return;
+      const state = String(payload.state || '').toLowerCase();
+      if (state === 'ended') {
+        setAiStreamConnected(false);
+        setAiPipeReady(false);
+        setAiSpeaking(false);
+        return;
+      }
+      if (state === 'connecting' || state === 'standby') {
+        setAiStreamConnected(true);
+        setAiPipeReady(false);
+        setAiSpeaking(false);
+        return;
+      }
+      if (state === 'connected') {
+        setAiStreamConnected(true);
+        setAiPipeReady(true);
+        setAiSpeaking(false);
+        return;
+      }
+      if (state === 'active') {
+        setAiStreamConnected(true);
+        setAiPipeReady(true);
+        setAiSpeaking(true);
+      }
+    };
+
+    socket.on('ai_monitor_state', onMonitorState);
+    return () => socket.off('ai_monitor_state', onMonitorState);
+  }, [socket, isConnected, aiActiveCallSid]);
 
   // When customer hangs up, Twilio sends status → socket → clear AI call UI
   useEffect(() => {

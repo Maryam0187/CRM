@@ -93,6 +93,11 @@ export async function POST(request) {
       let reconnected = false;
 
       if (!startResult.ok) {
+        // Stream may still be connecting — wait before redirecting Twilio (redirect kills an active stream).
+        startResult = await waitForAiStreamAndStart(String(callSid), 5000);
+      }
+
+      if (!startResult.ok) {
         const streamStatus = getAiStreamStatus(String(callSid));
 
         if (startResult.code === 'no_media_stream' && !streamStatus.streamConnected) {
@@ -104,10 +109,9 @@ export async function POST(request) {
             );
           }
           reconnected = true;
-        }
-
-        if (!startResult.ok) {
           startResult = await waitForAiStreamAndStart(String(callSid), 14000);
+        } else if (!startResult.ok) {
+          startResult = await waitForAiStreamAndStart(String(callSid), 9000);
         }
       }
 
