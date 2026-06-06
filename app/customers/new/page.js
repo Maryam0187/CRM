@@ -2,10 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '../../contexts/AuthContext';
-import apiClient from '../../lib/apiClient';
-import ProtectedRoute from '../../components/ProtectedRoute';
-import CustomerForm from '../../components/CustomerForm';
+import { useAuth } from '../../../contexts/AuthContext';
+import apiClient from '../../../lib/apiClient';
+import ProtectedRoute from '../../../components/ProtectedRoute';
+import CustomerForm from '../../../components/CustomerForm';
 
 export default function NewCustomerPage() {
   const router = useRouter();
