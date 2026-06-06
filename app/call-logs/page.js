@@ -142,12 +142,14 @@ export default function CallLogsPage() {
     { value: 'lead_call', label: 'Lead Call' },
     { value: 'hangup', label: 'Hangup' },
     { value: 'no_response', label: 'No Response' },
+    { value: 'robo_check', label: 'Robo Check' },
   ];
   const outcomeToSalesStatus = {
     voicemail: 'voicemail',
     lead_call: 'lead-call',
     hangup: 'hang-up',
     no_response: 'no_response',
+    robo_check: 'robo-check',
   };
   const getOutcomeBadgeClasses = (outcome) => {
     const mappedStatus = outcomeToSalesStatus[outcome];

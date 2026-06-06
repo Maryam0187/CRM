@@ -61,7 +61,7 @@ const body = await request.json();
     }
 
     if (callOutcome !== undefined) {
-      const allowedOutcomes = ['voicemail', 'lead_call', 'hangup', 'no_response'];
+      const allowedOutcomes = ['voicemail', 'lead_call', 'hangup', 'no_response', 'robo_check'];
       if (callOutcome !== null && callOutcome !== '' && !allowedOutcomes.includes(callOutcome)) {
         return NextResponse.json(
           { success: false, message: 'Invalid call outcome value' },
