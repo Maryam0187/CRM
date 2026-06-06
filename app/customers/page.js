@@ -110,20 +110,29 @@ export default function CustomersPage() {
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
-          <div className="mb-6">
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div>
+              <button
+                onClick={handleBack}
+                className="flex items-center text-gray-600 hover:text-gray-800 mb-4"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+                Back
+              </button>
+              <h1 className="text-3xl font-bold text-gray-900">My Customers</h1>
+              <p className="text-gray-600 mt-2">
+                View all your customers, their sales, and call history
+              </p>
+            </div>
             <button
-              onClick={handleBack}
-              className="flex items-center text-gray-600 hover:text-gray-800 mb-4"
+              type="button"
+              onClick={() => router.push('/customers/new')}
+              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-sm whitespace-nowrap"
             >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Back
+              + Add Customer
             </button>
-            <h1 className="text-3xl font-bold text-gray-900">My Customers</h1>
-            <p className="text-gray-600 mt-2">
-              View all your customers and their related sales
-            </p>
           </div>
 
           {error ? (
@@ -142,19 +151,27 @@ export default function CustomersPage() {
                       </svg>
                     </div>
                     <h3 className="text-lg font-medium text-gray-900 mb-2">No Customers Found</h3>
-                    <p className="text-gray-600">
-                      You haven't created any customers yet. Start by adding a new sale.
+                    <p className="text-gray-600 mb-4">
+                      You haven't created any customers yet.
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => router.push('/customers/new')}
+                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg"
+                    >
+                      Add Your First Customer
+                    </button>
                   </div>
                 ) : (
                   customers.map((customer) => (
                     <div
                       key={customer.id}
-                      className="bg-white rounded-lg shadow-sm border border-gray-200 p-6"
+                      className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:border-blue-300 transition-colors cursor-pointer"
+                      onClick={() => router.push(`/customers/${customer.id}`)}
                     >
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                          <h3 className="text-lg font-semibold text-gray-900 mb-2 hover:text-blue-600">
                             {customer.firstName} {customer.lastName}
                           </h3>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-600">
@@ -208,8 +225,11 @@ export default function CustomersPage() {
                             {customer.sales.map((sale) => (
                               <div
                                 key={sale.id}
-                                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
-                                onClick={() => router.push(`/add-sale?id=${sale.id}`)}
+                                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/add-sale?id=${sale.id}`);
+                                }}
                               >
                                 <div className="flex items-center gap-3 flex-1">
                                   <span className="text-sm font-medium text-gray-900">

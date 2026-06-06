@@ -27,7 +27,12 @@ export async function POST(request) {
       phoneNumber,
       callPurpose = 'sales',
       campaignLabel = null,
-      supervisedAi = true
+      supervisedAi = true,
+      state = null,
+      city = null,
+      zipcode = null,
+      callNotes = null,
+      customerName = null
     } = body;
 
     if (!phoneNumber) {
@@ -111,7 +116,12 @@ export async function POST(request) {
       toNumber: formattedNumber,
       status: 'queued',
       callPurpose,
-      callSource: 'other',
+      callSource: 'lead_dialing',
+      customerName: customerName != null && customerName !== '' ? String(customerName).trim() : null,
+      state: state != null && state !== '' ? String(state).trim() : null,
+      city: city != null && city !== '' ? String(city).trim() : null,
+      zipcode: zipcode != null && zipcode !== '' ? String(zipcode).trim() : null,
+      callNotes: callNotes != null && callNotes !== '' ? String(callNotes).trim() : null,
       conferenceName: aiConferenceName || undefined,
       twilioData: {
         aiCall: true,

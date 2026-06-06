@@ -426,7 +426,12 @@ export default function CallLogsPage() {
         phoneNumber: quickDialNumber.trim(),
         callPurpose: freshCallPurpose,
         campaignLabel: 'ai_supervised_tab',
-        supervisedAi: true
+        supervisedAi: true,
+        state: freshState || undefined,
+        city: freshCity || undefined,
+        zipcode: freshZipcode || undefined,
+        callNotes: quickDialNote.trim() || undefined,
+        customerName: quickDialName.trim() || undefined
       });
       const data = await res.json();
 
@@ -1119,49 +1124,69 @@ export default function CallLogsPage() {
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-3">AI Supervised Call</h3>
             <p className="text-sm text-gray-500 mb-3">
-              When the customer answers, the AI connects silently (listening only). Rebecca speaks on their phone only
-              after you click Start AI Stream. Use live monitor with headphones to hear the customer first.
+              Select state, then city and zipcode (optional), then number and customer name (optional). When the customer
+              answers, the AI connects silently (listening only). Rebecca speaks on their phone only after you click
+              Start AI Stream. Use live monitor with headphones to hear the customer first.
             </p>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">State</label>
-                  <StateSelector
-                    value={freshState}
-                    onChange={(e) => setFreshState(e.target.value)}
-                    label=""
-                    showTimezone={false}
-                    className="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">City</label>
-                  <input
-                    type="text"
-                    value={freshCity}
-                    onChange={(e) => setFreshCity(e.target.value)}
-                    placeholder="City"
-                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Purpose</label>
-                  <select
-                    value={freshCallPurpose}
-                    onChange={(e) => setFreshCallPurpose(e.target.value)}
-                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="cold_call">Cold Call</option>
-                    <option value="follow_up">Follow Up</option>
-                    <option value="sales">Sales</option>
-                    <option value="support">Support</option>
-                    <option value="appointment">Appointment</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">State</label>
+                <StateSelector
+                  value={freshState}
+                  onChange={(e) => {
+                    setFreshState(e.target.value);
+                    setFreshCity('');
+                    setFreshZipcode('');
+                  }}
+                  label=""
+                  showTimezone={false}
+                  className="w-full max-w-xs"
+                />
               </div>
 
+              {freshState && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">City</label>
+                    <input
+                      type="text"
+                      value={freshCity}
+                      onChange={(e) => setFreshCity(e.target.value)}
+                      placeholder="City"
+                      className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Zipcode (optional)</label>
+                    <input
+                      type="text"
+                      value={freshZipcode}
+                      onChange={(e) => setFreshZipcode(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      placeholder="Zipcode"
+                      className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Purpose</label>
+                    <select
+                      value={freshCallPurpose}
+                      onChange={(e) => setFreshCallPurpose(e.target.value)}
+                      className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="cold_call">Cold Call</option>
+                      <option value="follow_up">Follow Up</option>
+                      <option value="sales">Sales</option>
+                      <option value="support">Support</option>
+                      <option value="appointment">Appointment</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {freshState && (
+              <>
               <div className="flex flex-col sm:flex-row gap-3 items-start">
                 <div className="flex-1 max-w-md">
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Phone Number *</label>
@@ -1185,6 +1210,31 @@ export default function CallLogsPage() {
                   {isAiDialing ? 'Dialing...' : 'Start Outbound AI Call'}
                 </button>
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Customer name (optional)</label>
+                  <input
+                    type="text"
+                    value={quickDialName}
+                    onChange={(e) => setQuickDialName(e.target.value)}
+                    placeholder="Customer name"
+                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Note (optional)</label>
+                  <textarea
+                    value={quickDialNote}
+                    onChange={(e) => setQuickDialNote(e.target.value)}
+                    placeholder="Call note"
+                    rows={1}
+                    className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y min-h-[2.5rem]"
+                  />
+                </div>
+              </div>
+              </>
+              )}
 
               {aiDialMessage && <p className="text-sm text-indigo-700">{aiDialMessage}</p>}
 
