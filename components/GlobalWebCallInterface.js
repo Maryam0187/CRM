@@ -2494,6 +2494,11 @@ export default function GlobalWebCallInterface() {
                     if (callMetadata.customerName && callMetadata.customerName !== 'Quick Dial' && callMetadata.customerName !== 'Call Log') {
                       params.set('firstName', callMetadata.customerName);
                     }
+                    const sid =
+                      currentCallSid && !String(currentCallSid).startsWith('pending-')
+                        ? currentCallSid
+                        : '';
+                    if (sid) params.set('callSid', sid);
                     router.push(`/customers/new?${params.toString()}`);
                   }}
                   className="w-full px-4 py-2 font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white"

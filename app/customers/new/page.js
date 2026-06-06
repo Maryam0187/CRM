@@ -22,6 +22,7 @@ function NewCustomerPageContent() {
   const stateParam = searchParams.get('state')?.trim() || '';
   const cityParam = searchParams.get('city')?.trim() || '';
   const zipcodeParam = searchParams.get('zipcode')?.trim() || '';
+  const callSidParam = searchParams.get('callSid')?.trim() || '';
 
   useEffect(() => {
     if (!fromCall || !landlineParam) return;
@@ -49,6 +50,16 @@ function NewCustomerPageContent() {
       const result = await res.json();
 
       if (result.success && result.data?.id) {
+        if (fromCall && (formData.landline || landlineParam || callSidParam)) {
+          try {
+            await apiClient.post(`/api/customers/${result.data.id}/link-call-logs`, {
+              phoneNumber: formData.landline || landlineParam,
+              callSid: callSidParam || undefined
+            });
+          } catch (linkErr) {
+            console.warn('Customer created but call log link failed:', linkErr);
+          }
+        }
         router.push(`/customers/${result.data.id}`);
         return;
       }

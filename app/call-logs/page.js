@@ -788,6 +788,7 @@ export default function CallLogsPage() {
     if (extras.state) params.set('state', extras.state);
     if (extras.city) params.set('city', extras.city);
     if (extras.zipcode) params.set('zipcode', extras.zipcode);
+    if (extras.callSid) params.set('callSid', extras.callSid);
     router.push(`/customers/new?${params.toString()}`);
   };
 
@@ -1887,7 +1888,8 @@ export default function CallLogsPage() {
                                 openCreateCustomer(call.toNumber, getDisplayName(call), {
                                   state: call.state,
                                   city: call.city,
-                                  zipcode: call.zipcode
+                                  zipcode: call.zipcode,
+                                  callSid: call.callSid
                                 })
                               }
                               disabled={!call.toNumber}
