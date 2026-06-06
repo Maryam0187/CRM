@@ -4,9 +4,11 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSocket } from '../contexts/SocketContext';
 import { decodeMulawBase64ToFloat32 } from '../lib/mulawDecode';
 
-const SAMPLE_RATE = 8000;
-const DEDUPE_MS = 80;
+const TWILIO_SAMPLE_RATE = 8000;
+const AI_DEDUPE_MS = 60;
 const AI_DUCK_MS = 400;
+/** Boost quiet PSTN customer audio in the browser monitor */
+const CUSTOMER_GAIN = 1.85;
 
 export default function AiMonitorListenPanel({ callSid, enabled = true }) {
   const { socket, isConnected, joinCallRoom, leaveCallRoom } = useSocket();
@@ -16,9 +18,10 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
   const [monitorMode, setMonitorMode] = useState('customer');
   const ctxRef = useRef(null);
   const nextPlayRef = useRef({ customer: 0, ai: 0 });
-  const lastChunkRef = useRef(new Map());
+  const lastAiChunkRef = useRef(new Map());
   const lastAiPlayAtRef = useRef(0);
   const customerGainRef = useRef(null);
+  const aiGainRef = useRef(null);
   const masterGainRef = useRef(null);
 
   useEffect(() => {
@@ -32,13 +35,16 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
     if (!ctxRef.current) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return null;
-      ctxRef.current = new Ctx({ sampleRate: SAMPLE_RATE });
+      ctxRef.current = new Ctx();
       masterGainRef.current = ctxRef.current.createGain();
       masterGainRef.current.gain.value = 1;
       masterGainRef.current.connect(ctxRef.current.destination);
       customerGainRef.current = ctxRef.current.createGain();
-      customerGainRef.current.gain.value = 1;
+      customerGainRef.current.gain.value = CUSTOMER_GAIN;
       customerGainRef.current.connect(masterGainRef.current);
+      aiGainRef.current = ctxRef.current.createGain();
+      aiGainRef.current.gain.value = 1;
+      aiGainRef.current.connect(masterGainRef.current);
     }
     if (ctxRef.current.state === 'suspended') await ctxRef.current.resume();
     return ctxRef.current;
@@ -52,30 +58,32 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       const lane = track === 'ai' ? 'ai' : 'customer';
       if (monitorMode === 'customer' && lane === 'ai') return;
 
-      const dedupeKey = `${lane}:${b64.length}:${b64.slice(0, 24)}`;
-      const now = Date.now();
-      const lastAt = lastChunkRef.current.get(dedupeKey);
-      if (lastAt != null && now - lastAt < DEDUPE_MS) return;
-      lastChunkRef.current.set(dedupeKey, now);
-      if (lastChunkRef.current.size > 200) {
-        lastChunkRef.current.clear();
+      if (lane === 'ai') {
+        const dedupeKey = `${b64.length}:${b64.slice(0, 24)}`;
+        const now = Date.now();
+        const lastAt = lastAiChunkRef.current.get(dedupeKey);
+        if (lastAt != null && now - lastAt < AI_DEDUPE_MS) return;
+        lastAiChunkRef.current.set(dedupeKey, now);
+        if (lastAiChunkRef.current.size > 200) {
+          lastAiChunkRef.current.clear();
+        }
       }
 
       const samples = decodeMulawBase64ToFloat32(b64);
       if (!samples.length) return;
-      const buf = ctx.createBuffer(1, samples.length, SAMPLE_RATE);
+      const buf = ctx.createBuffer(1, samples.length, TWILIO_SAMPLE_RATE);
       buf.copyToChannel(samples, 0);
       const src = ctx.createBufferSource();
       src.buffer = buf;
 
       if (lane === 'ai') {
-        lastAiPlayAtRef.current = now;
-        src.connect(masterGainRef.current);
+        lastAiPlayAtRef.current = Date.now();
+        src.connect(aiGainRef.current);
       } else {
         src.connect(customerGainRef.current);
-        if (monitorMode === 'both' && now - lastAiPlayAtRef.current < AI_DUCK_MS) {
-          customerGainRef.current.gain.setValueAtTime(0.15, ctx.currentTime);
-          customerGainRef.current.gain.setValueAtTime(1, ctx.currentTime + 0.35);
+        if (monitorMode === 'both' && Date.now() - lastAiPlayAtRef.current < AI_DUCK_MS) {
+          customerGainRef.current.gain.setValueAtTime(CUSTOMER_GAIN * 0.2, ctx.currentTime);
+          customerGainRef.current.gain.setValueAtTime(CUSTOMER_GAIN, ctx.currentTime + 0.35);
         }
       }
 
@@ -130,7 +138,7 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
         </span>
       </div>
       <p className="text-xs text-amber-800 mb-2">
-        Listen on your speakers (use headphones to avoid feedback). Customer-only mode reduces echo.
+        Use headphones. Customer-only mode is clearest — Rebecca speaks on the customer&apos;s phone, not your speakers.
       </p>
       <button
         type="button"
