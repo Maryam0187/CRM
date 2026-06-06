@@ -89,6 +89,7 @@ export default function GlobalWebCallInterface() {
   const pathname = usePathname();
   const router = useRouter();
   const isOnSalePage = pathname === '/add-sale';
+  const isOnCustomerNewPage = pathname === '/customers/new';
   const callEndedStatuses = ['completed', 'failed', 'canceled', 'busy', 'no-answer', 'voicemail'];
   const callStatusUiRef = useRef(callStatus);
   useEffect(() => {
@@ -2465,25 +2466,44 @@ export default function GlobalWebCallInterface() {
               </div>
             )}
 
-            {/* Create Sale - when on call, open Add Sale with landline pre-filled (hidden when already on add-sale page) */}
-            {!isOnSalePage && (isWebCallConnected || isConnected) && displayCallStatus === 'in-progress' && callMetadata?.phoneNumber && (
-              <button
-                onClick={() => {
-                  const params = new URLSearchParams();
-                  params.set('fromCall', '1');
-                  params.set('landline', callMetadata.phoneNumber);
-                  if (callMetadata.customerName && callMetadata.customerName !== 'Quick Dial' && callMetadata.customerName !== 'Call Log') {
-                    params.set('firstName', callMetadata.customerName);
-                  }
-                  router.push(`/add-sale?${params.toString()}`);
-                }}
-                className="w-full px-4 py-2 font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 mb-3 bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
-                Create Sale
-              </button>
+            {/* Create Sale / Customer - when on call, open with landline pre-filled */}
+            {!isOnSalePage && !isOnCustomerNewPage && (isWebCallConnected || isConnected) && displayCallStatus === 'in-progress' && callMetadata?.phoneNumber && (
+              <div className="flex flex-col gap-2 mb-3">
+                <button
+                  onClick={() => {
+                    const params = new URLSearchParams();
+                    params.set('fromCall', '1');
+                    params.set('landline', callMetadata.phoneNumber);
+                    if (callMetadata.customerName && callMetadata.customerName !== 'Quick Dial' && callMetadata.customerName !== 'Call Log') {
+                      params.set('firstName', callMetadata.customerName);
+                    }
+                    router.push(`/add-sale?${params.toString()}`);
+                  }}
+                  className="w-full px-4 py-2 font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                  </svg>
+                  Create Sale
+                </button>
+                <button
+                  onClick={() => {
+                    const params = new URLSearchParams();
+                    params.set('fromCall', '1');
+                    params.set('landline', callMetadata.phoneNumber);
+                    if (callMetadata.customerName && callMetadata.customerName !== 'Quick Dial' && callMetadata.customerName !== 'Call Log') {
+                      params.set('firstName', callMetadata.customerName);
+                    }
+                    router.push(`/customers/new?${params.toString()}`);
+                  }}
+                  className="w-full px-4 py-2 font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                  </svg>
+                  Create Customer
+                </button>
+              </div>
             )}
 
             {/* Participants Status */}

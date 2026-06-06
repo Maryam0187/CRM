@@ -1,17 +1,40 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../../../contexts/AuthContext';
 import apiClient from '../../../lib/apiClient';
 import ProtectedRoute from '../../../components/ProtectedRoute';
 import CustomerForm from '../../../components/CustomerForm';
+import { formatLandline } from '../../../lib/validation';
 
-export default function NewCustomerPage() {
+function NewCustomerPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [initialCustomer, setInitialCustomer] = useState(null);
+
+  const fromCall = searchParams.get('fromCall') === '1';
+  const landlineParam = searchParams.get('landline')?.trim() || '';
+  const firstNameParam = searchParams.get('firstName')?.trim() || '';
+  const stateParam = searchParams.get('state')?.trim() || '';
+  const cityParam = searchParams.get('city')?.trim() || '';
+  const zipcodeParam = searchParams.get('zipcode')?.trim() || '';
+
+  useEffect(() => {
+    if (!fromCall || !landlineParam) return;
+
+    const formattedLandline = formatLandline(landlineParam) || landlineParam;
+    setInitialCustomer({
+      firstName: firstNameParam,
+      landline: formattedLandline,
+      state: stateParam,
+      city: cityParam,
+      zipcode: zipcodeParam
+    });
+  }, [fromCall, landlineParam, firstNameParam, stateParam, cityParam, zipcodeParam]);
 
   const handleSubmit = async (formData) => {
     try {
@@ -39,25 +62,31 @@ export default function NewCustomerPage() {
     }
   };
 
+  const handleCancel = () => {
+    router.push(fromCall ? '/call-logs' : '/customers');
+  };
+
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-3xl mx-auto">
           <button
             type="button"
-            onClick={() => router.push('/customers')}
+            onClick={handleCancel}
             className="flex items-center text-gray-600 hover:text-gray-800 mb-4"
           >
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            Back to Customers
+            {fromCall ? 'Back to Call Logs' : 'Back to Customers'}
           </button>
 
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <h1 className="text-2xl font-bold text-gray-900 mb-1">Add Customer</h1>
             <p className="text-sm text-gray-500 mb-6">
-              Create a new customer. You can view their sales and call history on the detail page.
+              {fromCall
+                ? 'Create a customer from this call. Phone number is pre-filled from the call log.'
+                : 'Create a new customer. You can view their sales and call history on the detail page.'}
             </p>
 
             {error && (
@@ -67,14 +96,29 @@ export default function NewCustomerPage() {
             )}
 
             <CustomerForm
+              key={initialCustomer ? `call-${landlineParam}` : 'blank'}
+              initialCustomer={initialCustomer}
               onSubmit={handleSubmit}
-              onCancel={() => router.push('/customers')}
+              onCancel={handleCancel}
               submitLabel="Create Customer"
               saving={saving}
+              lockLandline={fromCall && !!landlineParam}
             />
           </div>
         </div>
       </div>
     </ProtectedRoute>
+  );
+}
+
+export default function NewCustomerPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 p-4 flex items-center justify-center">
+        <p className="text-gray-500">Loading...</p>
+      </div>
+    }>
+      <NewCustomerPageContent />
+    </Suspense>
   );
 }

@@ -72,7 +72,8 @@ export default function CustomerForm({
   onSubmit,
   onCancel,
   submitLabel = 'Save Customer',
-  saving = false
+  saving = false,
+  lockLandline = false
 }) {
   const [form, setForm] = useState(() => customerToForm(initialCustomer));
   const [validation, setValidation] = useState({
@@ -169,7 +170,9 @@ export default function CustomerForm({
             value={form.landline}
             onChange={(e) => handleChange('landline', e.target.value)}
             placeholder="Landline number"
-            className={`${inputClass} ${!validation.landline.isValid ? errorClass : ''}`}
+            readOnly={lockLandline}
+            disabled={lockLandline}
+            className={`${inputClass} ${!validation.landline.isValid ? errorClass : ''} ${lockLandline ? 'bg-gray-100 cursor-not-allowed' : ''}`}
           />
           {!validation.landline.isValid && (
             <p className="mt-1 text-xs text-red-600">{validation.landline.message}</p>

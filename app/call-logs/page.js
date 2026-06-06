@@ -780,6 +780,17 @@ export default function CallLogsPage() {
     router.push(`/add-sale?${params.toString()}`);
   };
 
+  const openCreateCustomer = (phoneNumber, customerName, extras = {}) => {
+    const params = new URLSearchParams();
+    params.set('fromCall', '1');
+    params.set('landline', (phoneNumber || '').trim());
+    if (customerName && customerName !== '—') params.set('firstName', customerName);
+    if (extras.state) params.set('state', extras.state);
+    if (extras.city) params.set('city', extras.city);
+    if (extras.zipcode) params.set('zipcode', extras.zipcode);
+    router.push(`/customers/new?${params.toString()}`);
+  };
+
   const handleOpenNoteModal = (callId) => {
     const call = calls.find((c) => c.id === callId);
     setNoteModalCallId(callId);
@@ -1613,6 +1624,22 @@ export default function CallLogsPage() {
                     <div className="bg-green-50 p-3 rounded border border-green-200">
                       <p className="text-sm text-green-800 font-medium">No customer or sale found for this number.</p>
                       <p className="text-sm text-green-700 mt-1">This appears to be a fresh lead!</p>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        <button
+                          type="button"
+                          onClick={() => openCreateCustomer(checkNumberInput, '')}
+                          className="px-3 py-1.5 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg"
+                        >
+                          Create Customer
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openCreateSale(checkNumberInput, '')}
+                          className="px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
+                        >
+                          Create Sale
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1853,6 +1880,23 @@ export default function CallLogsPage() {
                             >
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() =>
+                                openCreateCustomer(call.toNumber, getDisplayName(call), {
+                                  state: call.state,
+                                  city: call.city,
+                                  zipcode: call.zipcode
+                                })
+                              }
+                              disabled={!call.toNumber}
+                              className="inline-flex items-center justify-center w-7 h-7 text-indigo-700 bg-indigo-100 hover:bg-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed rounded"
+                              title="Create customer"
+                              aria-label="Create customer"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                               </svg>
                             </button>
                           </div>
