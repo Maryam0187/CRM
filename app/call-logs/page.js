@@ -47,7 +47,7 @@ export default function CallLogsPage() {
   const [quickDialValidation, setQuickDialValidation] = useState({ isValid: true, message: '' });
   const [checkResult, setCheckResult] = useState(null);
   const [isCheckingNumber, setIsCheckingNumber] = useState(false);
-  const [activeTab, setActiveTab] = useState('fresh'); // 'fresh' | 'quick' | 'check'
+  const [activeTab, setActiveTab] = useState('fresh'); // 'fresh' | 'quick' | 'check' | 'ai_supervised'
   const [checkNumberInput, setCheckNumberInput] = useState('');
   const [checkNumberValidation, setCheckNumberValidation] = useState({ isValid: true, message: '' });
   const [checkNumberResult, setCheckNumberResult] = useState(null);
@@ -137,6 +137,7 @@ export default function CallLogsPage() {
     Boolean(aiActiveCallSid) && !isCallStatusCompleted(aiCallStatus);
   const showEndCallBar = hasActiveRegularCall || hasActiveAiCall;
   const isTwilioEnabled = user?.twilio_enabled !== undefined ? user.twilio_enabled : true;
+  const userIsAdmin = isAdmin(user);
   const postCallOutcomeOptions = [
     { value: 'voicemail', label: 'Voicemail' },
     { value: 'lead_call', label: 'Lead Call' },
@@ -165,6 +166,12 @@ export default function CallLogsPage() {
   useEffect(() => {
     if (currentCallSid) lastActiveCallSidRef.current = currentCallSid;
   }, [currentCallSid]);
+
+  useEffect(() => {
+    if (!userIsAdmin && activeTab === 'ai_supervised') {
+      setActiveTab('fresh');
+    }
+  }, [userIsAdmin, activeTab]);
 
   const resetDialFields = () => {
     setQuickDialNumber('');
@@ -413,6 +420,7 @@ export default function CallLogsPage() {
   };
 
   const handleLeadAiCall = async () => {
+    if (!userIsAdmin) return;
     const v = validatePhone(quickDialNumber);
     setQuickDialValidation(v);
     if (!v.isValid || !user?.id || !isTwilioEnabled || hasActiveCall || isAiDialing) return;
@@ -949,16 +957,18 @@ export default function CallLogsPage() {
             >
               Check Number
             </button>
-            <button
-              onClick={() => setActiveTab('ai_supervised')}
-              className={`px-4 py-3 text-base font-medium border-b-2 transition-colors ${
-                activeTab === 'ai_supervised'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              AI Supervised
-            </button>
+            {userIsAdmin && (
+              <button
+                onClick={() => setActiveTab('ai_supervised')}
+                className={`px-4 py-3 text-base font-medium border-b-2 transition-colors ${
+                  activeTab === 'ai_supervised'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                AI Supervised
+              </button>
+            )}
           </div>
 
           {showEndCallBar && (
@@ -1133,8 +1143,8 @@ export default function CallLogsPage() {
           </div>
           )}
 
-          {/* AI Supervised tab */}
-          {activeTab === 'ai_supervised' && (
+          {/* AI Supervised tab (admin only) */}
+          {userIsAdmin && activeTab === 'ai_supervised' && (
           <div className="bg-white rounded-lg shadow p-4 mb-6 border border-gray-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-3">AI Supervised Call</h3>
             <p className="text-sm text-gray-500 mb-3">

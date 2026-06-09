@@ -4,6 +4,7 @@ import sequelizeDb from '../../../../../lib/sequelize-db';
 import { requireJWTAuth } from '../../../../../lib/jwtAuth';
 import { ensureAiCallingEnabled, getAiAgentVersion } from '../../../../../lib/aiCalling';
 import { registerMonitorsForCall } from '../../../../../lib/aiSupervisorBroadcast';
+import { isAdmin } from '../../../../../lib/roleUtils';
 
 export async function POST(request) {
   try {
@@ -20,6 +21,13 @@ export async function POST(request) {
 
     const user = authResult.user;
     const body = await request.json();
+
+    if (body.supervisedAi !== false && !isAdmin(user)) {
+      return NextResponse.json(
+        { success: false, message: 'Only administrators can start AI supervised calls' },
+        { status: 403 }
+      );
+    }
 
     const {
       customerId = null,
