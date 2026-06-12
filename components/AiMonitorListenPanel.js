@@ -61,8 +61,7 @@ function createTelephonyLane(ctx, masterGain, { gain, jitterMs, maxLatencyMs }) 
       readIdx = 0;
     }
     if (!current || readIdx >= current.length) {
-      holdSample = 0;
-      return 0;
+      return holdSample;
     }
     queueSamples -= 1;
     holdSample = current[readIdx];
@@ -120,14 +119,15 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
   const { socket, isConnected, joinCallRoom, leaveCallRoom } = useSocket();
   const [live, setLive] = useState(false);
   const [levels, setLevels] = useState({ customer: 0, ai: 0 });
-  /** customer = one mixed leg (no echo); both = separate lanes (may echo if Rebecca bleeds into customer audio) */
-  const [monitorMode, setMonitorMode] = useState('customer');
+  const [audioBlocked, setAudioBlocked] = useState(false);
   const ctxRef = useRef(null);
   const masterGainRef = useRef(null);
   const customerLaneRef = useRef(null);
   const aiLaneRef = useRef(null);
   const lastAiChunkRef = useRef(new Map());
   const lastAiPlayAtRef = useRef(0);
+  const audioReadyRef = useRef(false);
+  const lastPacketAtRef = useRef(0);
 
   useEffect(() => {
     if (!callSid || !enabled) return undefined;
@@ -159,16 +159,33 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
         maxLatencyMs: MAX_LATENCY_MS
       });
     }
-    if (ctxRef.current.state === 'suspended') await ctxRef.current.resume();
+    if (ctxRef.current.state === 'suspended') {
+      await ctxRef.current.resume();
+    }
+    audioReadyRef.current = true;
+    setAudioBlocked(ctxRef.current.state === 'suspended');
     return ctxRef.current;
   }, []);
 
   const playChunk = useCallback(
-    async (track, b64) => {
-      await ensureCtx();
+    (track, b64) => {
+      if (!b64) return;
+      if (!audioReadyRef.current) {
+        void ensureCtx().then(() => playChunk(track, b64));
+        return;
+      }
+      const ctx = ctxRef.current;
+      if (ctx?.state === 'suspended') {
+        setAudioBlocked(true);
+        void ctx.resume().then(() => {
+          setAudioBlocked(false);
+          playChunk(track, b64);
+        });
+        return;
+      }
+
       const lane = track === 'ai' ? aiLaneRef.current : customerLaneRef.current;
-      if (!lane || !b64) return;
-      if (monitorMode === 'customer' && track === 'ai') return;
+      if (!lane) return;
 
       if (track === 'ai') {
         const dedupeKey = `${b64.length}:${b64.slice(0, 24)}`;
@@ -180,11 +197,7 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
           lastAiChunkRef.current.clear();
         }
         lastAiPlayAtRef.current = now;
-      } else if (
-        monitorMode === 'both' &&
-        track === 'customer' &&
-        Date.now() - lastAiPlayAtRef.current < AI_DUCK_MS
-      ) {
+      } else if (track === 'customer' && Date.now() - lastAiPlayAtRef.current < AI_DUCK_MS) {
         customerLaneRef.current?.setGain(CUSTOMER_GAIN * 0.25);
         setTimeout(() => customerLaneRef.current?.setGain(CUSTOMER_GAIN), AI_DUCK_MS);
       }
@@ -192,6 +205,7 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       const samples = decodeMulawBase64ToFloat32(b64);
       if (!samples.length) return;
       lane.push(samples);
+      lastPacketAtRef.current = Date.now();
 
       let peak = 0;
       for (let i = 0; i < samples.length; i += 1) {
@@ -200,11 +214,27 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       const levelLane = track === 'ai' ? 'ai' : 'customer';
       setLevels((p) => ({ ...p, [levelLane]: Math.min(1, peak * 3.5) }));
     },
-    [ensureCtx, monitorMode]
+    [ensureCtx]
   );
 
   useEffect(() => {
+    const id = setInterval(() => {
+      setLevels((p) => ({
+        customer: Math.max(0, p.customer * 0.82),
+        ai: Math.max(0, p.ai * 0.82)
+      }));
+      if (live && Date.now() - lastPacketAtRef.current > 4000) {
+        setLive(false);
+      } else if (lastPacketAtRef.current > 0) {
+        setLive(true);
+      }
+    }, 120);
+    return () => clearInterval(id);
+  }, [live]);
+
+  useEffect(() => {
     return () => {
+      audioReadyRef.current = false;
       customerLaneRef.current?.destroy();
       aiLaneRef.current?.destroy();
       customerLaneRef.current = null;
@@ -221,6 +251,7 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       setLive(false);
       return undefined;
     }
+    joinCallRoom?.(callSid);
     const onAudio = (d) => {
       if (d?.callSid !== callSid) return;
       if (d.track === 'customer' || d.track === 'ai') playChunk(d.track, d.payload);
@@ -231,17 +262,17 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
         setLive(false);
         customerLaneRef.current?.reset();
         aiLaneRef.current?.reset();
+        lastPacketAtRef.current = 0;
       }
       if (d.state === 'connected' || d.state === 'active') setLive(true);
     };
     socket.on('ai_monitor_audio', onAudio);
     socket.on('ai_monitor_state', onState);
-    setLive(true);
     return () => {
       socket.off('ai_monitor_audio', onAudio);
       socket.off('ai_monitor_state', onState);
     };
-  }, [socket, isConnected, callSid, enabled, playChunk]);
+  }, [socket, isConnected, callSid, enabled, playChunk, joinCallRoom]);
 
   if (!callSid || !enabled) return null;
 
@@ -258,8 +289,13 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
         </span>
       </div>
       <p className="text-xs text-amber-800 mb-2">
-        Use headphones. Customer-only mode is clearest — Rebecca speaks on the customer&apos;s phone, not your speakers.
+        Use headphones to hear the customer and Rebecca on separate lanes.
       </p>
+      {audioBlocked && (
+        <p className="text-xs text-red-700 mb-2 font-medium">
+          Browser paused audio — click Enable audio below.
+        </p>
+      )}
       <button
         type="button"
         onClick={() => ensureCtx()}
@@ -267,26 +303,6 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       >
         Enable audio
       </button>
-      <div className="flex flex-wrap gap-2 mb-2 text-xs">
-        <label className="inline-flex items-center gap-1 text-amber-900 cursor-pointer">
-          <input
-            type="radio"
-            name={`monitor-mode-${callSid}`}
-            checked={monitorMode === 'customer'}
-            onChange={() => setMonitorMode('customer')}
-          />
-          Customer only (recommended)
-        </label>
-        <label className="inline-flex items-center gap-1 text-amber-900 cursor-pointer">
-          <input
-            type="radio"
-            name={`monitor-mode-${callSid}`}
-            checked={monitorMode === 'both'}
-            onChange={() => setMonitorMode('both')}
-          />
-          Customer + Rebecca
-        </label>
-      </div>
       <div className="flex gap-4 text-xs text-amber-900">
         <span>
           Customer
@@ -297,17 +313,15 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
             />
           </span>
         </span>
-        {monitorMode === 'both' && (
-          <span>
-            Rebecca
-            <span className="inline-block w-14 h-1 ml-1 bg-amber-200 rounded align-middle">
-              <span
-                className="block h-full bg-indigo-600 rounded"
-                style={{ width: `${Math.round(levels.ai * 100)}%` }}
-              />
-            </span>
+        <span>
+          Rebecca
+          <span className="inline-block w-14 h-1 ml-1 bg-amber-200 rounded align-middle">
+            <span
+              className="block h-full bg-indigo-600 rounded"
+              style={{ width: `${Math.round(levels.ai * 100)}%` }}
+            />
           </span>
-        )}
+        </span>
       </div>
     </div>
   );
