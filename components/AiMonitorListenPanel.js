@@ -5,11 +5,11 @@ import { useSocket } from '../contexts/SocketContext';
 import { decodeMulawBase64ToFloat32 } from '../lib/mulawDecode';
 
 const TWILIO_SAMPLE_RATE = 8000;
-const AI_DEDUPE_MS = 60;
 const AI_DUCK_MS = 400;
 const JITTER_MS = 80;
 const MAX_LATENCY_MS = 280;
 const CUSTOMER_GAIN = 1.35;
+const LEVEL_UI_MS = 100;
 
 function createTelephonyLane(ctx, masterGain, { gain, jitterMs, maxLatencyMs }) {
   const jitterSamples = Math.round((jitterMs / 1000) * TWILIO_SAMPLE_RATE);
@@ -120,14 +120,18 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
   const [live, setLive] = useState(false);
   const [levels, setLevels] = useState({ customer: 0, ai: 0 });
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const [packetCount, setPacketCount] = useState(0);
   const ctxRef = useRef(null);
   const masterGainRef = useRef(null);
   const customerLaneRef = useRef(null);
   const aiLaneRef = useRef(null);
-  const lastAiChunkRef = useRef(new Map());
   const lastAiPlayAtRef = useRef(0);
   const audioReadyRef = useRef(false);
+  const [audioReady, setAudioReady] = useState(false);
   const lastPacketAtRef = useRef(0);
+  const levelsRef = useRef({ customer: 0, ai: 0 });
+  const lastLevelUiAtRef = useRef(0);
+  const packetCountRef = useRef(0);
 
   useEffect(() => {
     if (!callSid || !enabled) return undefined;
@@ -163,8 +167,19 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       await ctxRef.current.resume();
     }
     audioReadyRef.current = true;
+    setAudioReady(true);
     setAudioBlocked(ctxRef.current.state === 'suspended');
     return ctxRef.current;
+  }, []);
+
+  const updateLevels = useCallback((track, peak) => {
+    const levelLane = track === 'ai' ? 'ai' : 'customer';
+    levelsRef.current[levelLane] = Math.min(1, peak * 3.5);
+    const now = Date.now();
+    if (now - lastLevelUiAtRef.current >= LEVEL_UI_MS) {
+      lastLevelUiAtRef.current = now;
+      setLevels({ ...levelsRef.current });
+    }
   }, []);
 
   const playChunk = useCallback(
@@ -188,15 +203,7 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       if (!lane) return;
 
       if (track === 'ai') {
-        const dedupeKey = `${b64.length}:${b64.slice(0, 24)}`;
-        const now = Date.now();
-        const lastAt = lastAiChunkRef.current.get(dedupeKey);
-        if (lastAt != null && now - lastAt < AI_DEDUPE_MS) return;
-        lastAiChunkRef.current.set(dedupeKey, now);
-        if (lastAiChunkRef.current.size > 200) {
-          lastAiChunkRef.current.clear();
-        }
-        lastAiPlayAtRef.current = now;
+        lastAiPlayAtRef.current = Date.now();
       } else if (track === 'customer' && Date.now() - lastAiPlayAtRef.current < AI_DUCK_MS) {
         customerLaneRef.current?.setGain(CUSTOMER_GAIN * 0.25);
         setTimeout(() => customerLaneRef.current?.setGain(CUSTOMER_GAIN), AI_DUCK_MS);
@@ -206,15 +213,18 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       if (!samples.length) return;
       lane.push(samples);
       lastPacketAtRef.current = Date.now();
+      packetCountRef.current += 1;
+      if (packetCountRef.current % 25 === 0) {
+        setPacketCount(packetCountRef.current);
+      }
 
       let peak = 0;
       for (let i = 0; i < samples.length; i += 1) {
         peak = Math.max(peak, Math.abs(samples[i]));
       }
-      const levelLane = track === 'ai' ? 'ai' : 'customer';
-      setLevels((p) => ({ ...p, [levelLane]: Math.min(1, peak * 3.5) }));
+      updateLevels(track, peak);
     },
-    [ensureCtx]
+    [ensureCtx, updateLevels]
   );
 
   useEffect(() => {
@@ -223,10 +233,14 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
         customer: Math.max(0, p.customer * 0.82),
         ai: Math.max(0, p.ai * 0.82)
       }));
-      if (live && Date.now() - lastPacketAtRef.current > 4000) {
-        setLive(false);
-      } else if (lastPacketAtRef.current > 0) {
+      levelsRef.current = {
+        customer: Math.max(0, levelsRef.current.customer * 0.82),
+        ai: Math.max(0, levelsRef.current.ai * 0.82)
+      };
+      if (lastPacketAtRef.current > 0 && Date.now() - lastPacketAtRef.current < 4000) {
         setLive(true);
+      } else if (live) {
+        setLive(false);
       }
     }, 120);
     return () => clearInterval(id);
@@ -235,6 +249,7 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
   useEffect(() => {
     return () => {
       audioReadyRef.current = false;
+      setAudioReady(false);
       customerLaneRef.current?.destroy();
       aiLaneRef.current?.destroy();
       customerLaneRef.current = null;
@@ -253,16 +268,21 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
     }
     joinCallRoom?.(callSid);
     const onAudio = (d) => {
-      if (d?.callSid !== callSid) return;
-      if (d.track === 'customer' || d.track === 'ai') playChunk(d.track, d.payload);
+      if (!d || String(d.callSid) !== String(callSid)) return;
+      if (d.track === 'customer' || d.track === 'ai') {
+        if (!audioReadyRef.current) void ensureCtx();
+        playChunk(d.track, d.payload);
+      }
     };
     const onState = (d) => {
-      if (d?.callSid !== callSid) return;
+      if (!d || String(d.callSid) !== String(callSid)) return;
       if (d.state === 'ended') {
         setLive(false);
         customerLaneRef.current?.reset();
         aiLaneRef.current?.reset();
         lastPacketAtRef.current = 0;
+        packetCountRef.current = 0;
+        setPacketCount(0);
       }
       if (d.state === 'connected' || d.state === 'active') setLive(true);
     };
@@ -272,7 +292,7 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       socket.off('ai_monitor_audio', onAudio);
       socket.off('ai_monitor_state', onState);
     };
-  }, [socket, isConnected, callSid, enabled, playChunk, joinCallRoom]);
+  }, [socket, isConnected, callSid, enabled, playChunk, joinCallRoom, ensureCtx]);
 
   if (!callSid || !enabled) return null;
 
@@ -294,6 +314,11 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       {audioBlocked && (
         <p className="text-xs text-red-700 mb-2 font-medium">
           Browser paused audio — click Enable audio below.
+        </p>
+      )}
+      {!audioReady && live && (
+        <p className="text-xs text-amber-900 mb-2 font-medium">
+          Click Enable audio to start listening.
         </p>
       )}
       <button
@@ -323,6 +348,9 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
           </span>
         </span>
       </div>
+      {process.env.NODE_ENV === 'development' && packetCount > 0 && (
+        <p className="text-xs text-amber-700 mt-1">Packets: {packetCount}</p>
+      )}
     </div>
   );
 }
