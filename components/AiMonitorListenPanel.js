@@ -2,16 +2,37 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useSocket } from '../contexts/SocketContext';
+import { useAuth } from '../contexts/AuthContext';
 import {
-  decodeMulawBase64ManyToFloat32,
+  decodeMulawBytesToFloat32,
   resample8kToRate
 } from '../lib/mulawDecode';
 
 const ECHO_MS = 700;
-const SCHEDULE_LEAD_SEC = 0.06;
-const MAX_LATENCY_SEC = 4;
+const SCHEDULE_LEAD_SEC = 0.05;
 
-/** Schedule buffers on the audio clock — no sample dropping. */
+function buildMonitorWsUrl(callSid, token) {
+  const isProduction = process.env.NODE_ENV === 'production';
+  let origin;
+  if (isProduction) {
+    origin = (process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin).replace(/\/$/, '');
+  } else {
+    const port = window.location.port || '3000';
+    origin = `${window.location.protocol}//${window.location.hostname}:${port}`;
+  }
+  const wsOrigin = origin.startsWith('https://')
+    ? `wss://${origin.slice(8)}`
+    : origin.startsWith('http://')
+      ? `ws://${origin.slice(7)}`
+      : origin;
+  const params = new URLSearchParams({
+    callSid: String(callSid),
+    token: String(token)
+  });
+  return `${wsOrigin}/ws/ai-monitor?${params.toString()}`;
+}
+
+/** Chain audio buffers on the Web Audio clock — same idea as a media stream. */
 function makeScheduledLane(ctx, destination, gainValue) {
   let nextTime = 0;
   const active = new Set();
@@ -33,8 +54,6 @@ function makeScheduledLane(ctx, destination, gainValue) {
 
     const now = ctx.currentTime;
     if (nextTime < now + SCHEDULE_LEAD_SEC) nextTime = now + SCHEDULE_LEAD_SEC;
-    if (nextTime > now + MAX_LATENCY_SEC) nextTime = now + SCHEDULE_LEAD_SEC;
-
     source.start(nextTime);
     nextTime += buffer.duration;
   }
@@ -68,16 +87,16 @@ function peakLevel(samples) {
 }
 
 export default function AiMonitorListenPanel({ callSid, enabled = true }) {
-  const { socket, isConnected, joinCallRoom, leaveCallRoom } = useSocket();
+  const { socket, isConnected } = useSocket();
+  const { accessToken } = useAuth();
   const [live, setLive] = useState(false);
+  const [streamOn, setStreamOn] = useState(false);
   const [levels, setLevels] = useState({ customer: 0, ai: 0 });
 
   const engineRef = useRef(null);
   const lastAiRef = useRef(0);
   const levelsRef = useRef({ customer: 0, ai: 0 });
   const liveRef = useRef(false);
-  const socketInboxRef = useRef([]);
-  const socketDrainScheduledRef = useRef(false);
 
   async function ensureAudio() {
     if (!engineRef.current) {
@@ -96,12 +115,16 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
     return engineRef.current.ctx.state === 'running';
   }
 
-  function playMerged(track, payloads) {
-    if (!payloads.length) return;
+  function playFrame(track, mulawBytes) {
+    if (!mulawBytes?.length) return;
+    const now = Date.now();
+    if (track === 'ai') {
+      lastAiRef.current = now;
+    } else if (now - lastAiRef.current < ECHO_MS) {
+      return;
+    }
 
-    const telephony = decodeMulawBase64ManyToFloat32(payloads);
-    if (!telephony.length) return;
-
+    const telephony = decodeMulawBytesToFloat32(mulawBytes);
     const playRate = engineRef.current?.playRate;
     const samples = playRate ? resample8kToRate(telephony, playRate) : telephony;
     if (!samples.length) return;
@@ -122,62 +145,33 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
     });
   }
 
-  function playRefFn(track, payloads) {
-    if (!payloads.length) return;
-    const now = Date.now();
-    if (track === 'ai') {
-      lastAiRef.current = now;
-    } else if (now - lastAiRef.current < ECHO_MS) {
-      return;
-    }
-    playMerged(track, payloads);
-  }
-
-  const playRef = useRef(playRefFn);
-  playRef.current = playRefFn;
-
-  function drainSocketInbox() {
-    socketDrainScheduledRef.current = false;
-    const items = socketInboxRef.current.splice(0);
-    if (!items.length) return;
-
-    const customerPayloads = [];
-    const aiPayloads = [];
-    for (const item of items) {
-      if (item.track === 'ai') aiPayloads.push(item.payload);
-      else customerPayloads.push(item.payload);
-    }
-
-    if (aiPayloads.length) playRef.current('ai', aiPayloads);
-    if (customerPayloads.length) playRef.current('customer', customerPayloads);
-
-    if (socketInboxRef.current.length) scheduleSocketDrain();
-  }
-
-  function scheduleSocketDrain() {
-    if (socketDrainScheduledRef.current) return;
-    socketDrainScheduledRef.current = true;
-    queueMicrotask(drainSocketInbox);
-  }
-
   useEffect(() => {
-    const id = window.setInterval(() => {
-      if (socketInboxRef.current.length) drainSocketInbox();
-    }, 25);
-    return () => window.clearInterval(id);
-  }, []);
+    if (!callSid || !enabled || !accessToken) return undefined;
 
-  useEffect(() => {
-    if (!callSid || !enabled || !isConnected) return undefined;
-    joinCallRoom?.(callSid);
     void ensureAudio();
     const unlock = () => void ensureAudio();
     window.addEventListener('pointerdown', unlock, { once: true });
-    return () => {
-      leaveCallRoom?.(callSid);
-      window.removeEventListener('pointerdown', unlock);
+
+    const ws = new WebSocket(buildMonitorWsUrl(callSid, accessToken));
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => setStreamOn(true);
+    ws.onclose = () => setStreamOn(false);
+    ws.onerror = () => setStreamOn(false);
+
+    ws.onmessage = (event) => {
+      const data = new Uint8Array(event.data);
+      if (data.length < 2) return;
+      const track = data[0] === 1 ? 'ai' : 'customer';
+      playFrame(track, data.subarray(1));
     };
-  }, [callSid, enabled, isConnected, joinCallRoom, leaveCallRoom]);
+
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      ws.close();
+      setStreamOn(false);
+    };
+  }, [callSid, enabled, accessToken]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -196,20 +190,11 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
   useEffect(() => {
     if (!socket || !isConnected || !callSid || !enabled) return undefined;
 
-    const onAudio = (d) => {
-      if (!d || String(d.callSid) !== String(callSid) || !d.payload) return;
-      if (d.track !== 'customer' && d.track !== 'ai') return;
-      socketInboxRef.current.push({ track: d.track, payload: d.payload });
-      scheduleSocketDrain();
-    };
-
     const onState = (d) => {
       if (!d || String(d.callSid) !== String(callSid)) return;
       if (d.state === 'ended') {
         liveRef.current = false;
         setLive(false);
-        socketInboxRef.current = [];
-        socketDrainScheduledRef.current = false;
         engineRef.current?.customer.reset();
         engineRef.current?.ai.reset();
         levelsRef.current = { customer: 0, ai: 0 };
@@ -220,12 +205,8 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
       }
     };
 
-    socket.on('ai_monitor_audio', onAudio);
     socket.on('ai_monitor_state', onState);
-    return () => {
-      socket.off('ai_monitor_audio', onAudio);
-      socket.off('ai_monitor_state', onState);
-    };
+    return () => socket.off('ai_monitor_state', onState);
   }, [socket, isConnected, callSid, enabled]);
 
   useEffect(() => () => {
@@ -237,19 +218,21 @@ export default function AiMonitorListenPanel({ callSid, enabled = true }) {
 
   if (!callSid || !enabled) return null;
 
+  const monitorReady = streamOn && isConnected;
+
   return (
     <div className="mt-3 p-3 rounded-lg border border-amber-300 bg-amber-50">
       <div className="flex justify-between items-center mb-2">
         <span className="text-sm font-medium text-amber-900">Live monitor</span>
         <span
           className={`text-xs px-2 py-0.5 rounded-full ${
-            live && isConnected ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+            monitorReady ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
           }`}
         >
-          {live && isConnected ? 'On' : 'Waiting'}
+          {monitorReady ? 'Streaming' : 'Connecting…'}
         </span>
       </div>
-      <p className="text-xs text-amber-800 mb-2">Use headphones for clearest audio.</p>
+      <p className="text-xs text-amber-800 mb-2">Direct media stream · use headphones.</p>
       <div className="flex gap-4 text-xs text-amber-900">
         <span>
           Customer

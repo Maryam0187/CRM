@@ -3,6 +3,7 @@ const { parse } = require('url');
 const next = require('next');
 const socketManager = require('./lib/socket');
 const { initializeAiMediaBridge } = require('./lib/aiMediaBridge');
+const { initializeAiMonitorStream } = require('./lib/aiMonitorStream');
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
@@ -32,6 +33,7 @@ app.prepare().then(() => {
   // Initialize Socket.IO
   const io = socketManager.initialize(server);
   initializeAiMediaBridge(server);
+  initializeAiMonitorStream(server);
 
   // Start server
   server.listen(port, (err) => {
