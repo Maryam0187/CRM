@@ -95,6 +95,7 @@ export default function CallLogsPage() {
   const [aiStreamConnected, setAiStreamConnected] = useState(false);
   const [aiPipeReady, setAiPipeReady] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
+  const [aiSessionMode, setAiSessionMode] = useState('');
 
   const hangupActiveWebCall = useCallback(() => {
     try {
@@ -114,6 +115,7 @@ export default function CallLogsPage() {
     setAiStreamConnected(false);
     setAiPipeReady(false);
     setAiSpeaking(false);
+    setAiSessionMode('');
     setAiControlMessage('');
     if (message) setAiDialMessage(message);
     endCall();
@@ -135,6 +137,8 @@ export default function CallLogsPage() {
   const hasActiveRegularCall = hasActiveCall && !isCallStatusCompleted(callStatus);
   const hasActiveAiCall =
     Boolean(aiActiveCallSid) && !isCallStatusCompleted(aiCallStatus);
+  const canStartAiStream =
+    !aiSessionMode || aiSessionMode === 'standby' || aiSessionMode === 'connecting';
   const showEndCallBar = hasActiveRegularCall || hasActiveAiCall;
   const isTwilioEnabled = user?.twilio_enabled !== undefined ? user.twilio_enabled : true;
   const userIsAdmin = isAdmin(user);
@@ -423,7 +427,7 @@ export default function CallLogsPage() {
     if (!userIsAdmin) return;
     const v = validatePhone(quickDialNumber);
     setQuickDialValidation(v);
-    if (!v.isValid || !user?.id || !isTwilioEnabled || hasActiveCall || isAiDialing) return;
+    if (!v.isValid || !user?.id || !isTwilioEnabled || hasActiveCall || hasActiveAiCall || isAiDialing) return;
 
     try {
       setIsAiDialing(true);
@@ -571,6 +575,7 @@ export default function CallLogsPage() {
         } else if (action === 'end_ai') {
           setAiControlMessage('AI agent ended. Human agent can continue conversation.');
         } else if (action === 'start_stream' || action === 'start_ai') {
+          setAiSessionMode('active');
           setAiCallStatus('in-progress');
           setAiControlMessage(
             data?.message ||
@@ -611,6 +616,7 @@ export default function CallLogsPage() {
           setAiStreamConnected(Boolean(data?.data?.streamConnected));
           setAiPipeReady(Boolean(data?.data?.aiPipeReady));
           setAiSpeaking(Boolean(data?.data?.aiSpeaking));
+          setAiSessionMode(String(data?.data?.mode || ''));
         } else {
           setAiCanControl(false);
           setAiCanMonitor(false);
@@ -656,6 +662,7 @@ export default function CallLogsPage() {
         setAiStreamConnected(true);
         setAiPipeReady(false);
         setAiSpeaking(false);
+        setAiSessionMode(state);
         return;
       }
       if (state === 'connected') {
@@ -668,6 +675,7 @@ export default function CallLogsPage() {
         setAiStreamConnected(true);
         setAiPipeReady(true);
         setAiSpeaking(true);
+        setAiSessionMode('active');
       }
     };
 
@@ -1228,7 +1236,14 @@ export default function CallLogsPage() {
                 </div>
                 <button
                   onClick={handleLeadAiCall}
-                  disabled={!quickDialNumber.trim() || !quickDialValidation.isValid || !isTwilioEnabled || isAiDialing}
+                  disabled={
+                    !quickDialNumber.trim() ||
+                    !quickDialValidation.isValid ||
+                    !isTwilioEnabled ||
+                    isAiDialing ||
+                    hasActiveAiCall ||
+                    hasActiveRegularCall
+                  }
                   className="w-full sm:w-auto sm:mt-6 px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-lg rounded-lg flex items-center justify-center gap-2 shadow-sm"
                 >
                   {isAiDialing ? 'Dialing...' : 'Start Outbound AI Call'}
@@ -1308,7 +1323,9 @@ export default function CallLogsPage() {
                       <button
                         type="button"
                         onClick={() => handleAiControl('start_stream')}
-                        disabled={!!aiControlLoadingAction || aiEndingCall}
+                        disabled={
+                          !!aiControlLoadingAction || aiEndingCall || !canStartAiStream
+                        }
                         className="w-full sm:w-auto px-4 py-2.5 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-60 shadow-sm"
                       >
                         {aiControlLoadingAction === 'start_stream'
